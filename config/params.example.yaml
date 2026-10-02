@@ -1,0 +1,61 @@
+# meme_trader parameters.
+# Copy to config/params.yaml and edit. Values marked TBD are placeholders
+# waiting on the owner's starting parameters (see docs/BUILD_LOG.md).
+
+mode: paper            # paper | live   (live also requires env MEME_TRADER_CONFIRM_LIVE=yes)
+
+wallet:
+  # Public key only. The private key is NEVER stored in this file:
+  # live mode reads a keypair JSON file from env SOLANA_KEYPAIR_PATH.
+  pubkey: ""           # TBD
+
+capital:
+  starting_sol: 1.0              # TBD - total SOL the bot may use
+  per_trade_sol: 0.05            # TBD - SOL spent per entry
+  max_open_positions: 3          # TBD
+  daily_loss_limit_sol: 0.15     # TBD - halt new entries for the UTC day after this loss
+  max_drawdown_pct: 30           # TBD - kill switch: stop everything below this drawdown from start
+  min_sol_reserve: 0.02          # always keep this much SOL for fees/rent
+
+safety:                          # Safety agent: hard gates, any failure = reject
+  require_mint_authority_revoked: true
+  require_freeze_authority_revoked: true
+  max_rugcheck_score: 1000       # TBD - RugCheck normalised risk score (lower is safer)
+  reject_danger_risks: true      # reject if RugCheck lists any "danger" level risk
+  min_liquidity_usd: 15000       # TBD
+  max_top10_holder_pct: 35       # TBD
+  max_single_holder_pct: 10      # TBD
+  min_holders: 150               # TBD
+  min_token_age_minutes: 10      # TBD - skip the first minutes after launch
+  max_token_age_hours: 72        # TBD
+  min_lp_locked_pct: 80          # TBD - share of LP burned/locked
+  max_roundtrip_loss_pct: 8      # honeypot test: buy->sell quote must not lose more than this
+
+analyst:                         # Analyst agent: soft scoring, 0-100
+  min_volume_5m_usd: 5000        # TBD
+  min_buy_sell_ratio_5m: 1.2     # TBD
+  min_price_change_5m_pct: 2     # TBD
+  max_price_change_1h_pct: 300   # TBD - don't chase vertical candles
+  min_score: 60                  # TBD - minimum score to pass to Risk
+
+execution:
+  slippage_bps: 300              # TBD - 3%
+  max_price_impact_pct: 3        # TBD
+  priority_fee_lamports: 100000  # TBD
+  paper_fee_pct: 1.0             # simulated round-trip fees+slippage for paper fills
+
+exits:                           # Monitor agent
+  stop_loss_pct: 20              # TBD
+  take_profit_ladder:            # TBD - sell fraction of the ORIGINAL size at each gain level
+    - {gain_pct: 50,  sell_fraction: 0.5}
+    - {gain_pct: 150, sell_fraction: 0.25}
+  trailing_stop_pct: 25          # TBD - from peak, after first TP hit
+  max_hold_minutes: 240          # TBD
+
+scout:
+  sources: [dexscreener_profiles, dexscreener_boosts]
+  max_candidates_per_cycle: 30
+
+loop:
+  poll_seconds: 20
+  cooldown_minutes_after_exit: 120   # don't re-enter the same mint right away
