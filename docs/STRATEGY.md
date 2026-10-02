@@ -1,0 +1,85 @@
+# Pump.fun Early-Entry Strategy — "Confirm, Then Ride"
+
+Research notes and the reasoning behind `meme_trader/sniper/`. All parameters are in `config/params.example.yaml` under `sniper:`.
+
+## 1. What the research says (why most people get screwed)
+
+| Fact | Source | What it means for us |
+|---|---|---|
+| Only **~1% or less** of pump.fun tokens graduate. Some 2026 months were as low as **0.26%**. | [DEXTools](https://www.dextools.io/tutorials/what-is-pump-fun-solana-memecoin-launchpad-2026), [CoinLaw](https://coinlaw.io/memecoin-statistics/) | Base rate is brutal. Picking which tokens to buy matters more than anything else. |
+| **>50% of tokens are sniped in their creation block.** In one month, 4,600 "sniper" wallets funded by 10,400 deployers took >15,000 SOL with an **87% hit rate**. | [Bitget / BlockBeats](https://www.bitget.com/news/detail/12560604803448), [ChainCatcher](https://www.chaincatcher.com/en/article/2185070) | Block-0 sniping is mostly **insiders sniping their own launches**. Retail block-0 snipers are their exit liquidity. **We can't win a race against the dev's own Jito bundle, so we don't enter it.** |
+| Insiders in Telegram call channels bought **~100 s before the call** (median). One wallet front-ran 146 calls and sold after 72.6% of them. | [Money Leaves Clues](https://moneyleavesclues.substack.com/p/inside-the-economics-of-pumpfun-call) | Buying blindly when a call is posted makes you exit liquidity. Calls are a weak signal, and each caller's weight has to be learned from their results. |
+| Median time to graduate ~2 min (75th pct 13 min). Price often falls **30–50% in the first 5 min after graduation**. | [J Tools](https://j.tools/en/blog/pump-fun-bonding-curve-mechanics-explained), [Altrady](https://www.altrady.com/blog/crypto-trading-strategies/pump-fun-solana-memecoin-trading) | Pump.fun moves in **minutes**, not hours. Exits must react in seconds. Default: sell *before* migration. |
+| Only ~10% of sniper bots are consistently profitable, despite >70% chasing sub-50 ms latency. | [RPC Fast](https://rpcfast.com/blog/how-to-launches-snipe-pump) | Speed alone isn't an edge. The winners combine selection, discipline and infrastructure. |
+| Tokens graduate at ~85 SOL in the curve (800M tokens sold). There is a 1.25% curve fee. LP is burned on migration to PumpSwap. | [Bitquery](https://docs.bitquery.io/docs/blockchain/Solana/Pumpfun/pump-fun-to-pump-swap/), [pump.fun fees](https://pump.fun/docs/fees) | We can compute exact fill prices from the curve reserves, which gives realistic paper trading and backtests. |
+
+## 2. The strategy
+
+### Entry: confirm, don't race
+For every new launch (PumpPortal websocket, about 100s of ms behind the chain):
+
+1. **Watch 15–240 s.** This lets bundlers and the dev show their hand. Being 15 s late costs some upside, and in exchange we avoid most rugs.
+2. **Hard gates.** Any one of these rejects the token permanently:
+   - the dev sold anything
+   - the dev's initial buy is over 6% of supply
+   - non-dev wallets bought over 15% of supply within 2 s of creation (a bundle)
+   - early buyers have already sold over 35% of their bags
+   - the creator launched more than 2 tokens in 24 h (serial deployer)
+   - the same ticker was launched more than 3 times in 1 h (copycat)
+   - the curve is already more than 40% sold
+3. **Must hold at the moment of entry:**
+   - curve progress of at least 4%
+   - at least 15 unique buyers
+   - top-10 holders at or under 35% of supply
+   - net SOL inflow of at least 1 SOL over the last 20 s
+4. **Score 0–100**, buying at 55 or above:
+   - buyer velocity 25%
+   - net inflow 25%
+   - buy/sell balance 15%
+   - distribution 15%
+   - price near its high 10%
+   - socials present 5%
+   - learned caller weight 5%
+
+### Exit: the classic, automated
+1. **Initials out.** At **+100%**, sell exactly enough to get the cost back (fees included). The rest is a free ride.
+2. **Trail the rest.** The trailing stop tightens as the run grows: 30% under +150%, 25% to +400%, 20% to +1000%, then 15%.
+3. **Leave on red flags before the chart shows it:**
+   - the dev sells
+   - momentum decays (more than 1.5 SOL net outflow in 15 s while price is over 12% off the peak)
+   - the move stalls (no new high for 90 s while in profit)
+   - no follow-through (never reached +10% within 60 s)
+   - the curve passes 92% (sell before the migration dump)
+4. **Backstops:** −30% hard stop, 30 min maximum hold, and the kill switch.
+
+### Risk
+- Fixed **0.05 SOL** per entry and at most 4 open positions.
+- Daily loss limit 0.2 SOL.
+- A **30% drawdown** triggers the kill switch, which sells everything and halts.
+- Paper by default. Live needs `--live`, `MEME_TRADER_CONFIRM_LIVE=yes`, and a dedicated hot wallet.
+
+## 3. How we'd know it actually wins (no hype)
+
+1. **Record.** `run` saves every live launch, trade and migration to `data/feed-*.jsonl`.
+2. **Backtest on recorded data.** Replay it with `backtest --file`. Fills use exact curve math, our own price impact, 1.75% fees and a 3% latency haircut.
+3. **Sweep parameters on one period, validate on another (walk-forward).** Tune only when results hold on data the tuning never saw.
+4. **Paper trade live** for at least 1–2 weeks. Compare paper fills with what the curve did.
+5. **Go live small.** Compare live fills with paper fills. The gap is our real slippage, and it feeds back into `paper_latency_slippage_pct`.
+
+**The synthetic market is not evidence.** `SyntheticFeed` is a toy market I wrote to exercise the logic and the UI. In it, the strategy shows profit factors of 10–18 across seeds. That only proves the gates and exits do what they're designed to do: they rejected about 98% of synthetic bundle-rugs and made money on runners. Real markets have competing bots, adversarial devs who fake "organic" flow, and worse fills. Expect real numbers to be much lower and possibly negative until tuned on recorded data.
+
+## 4. Roadmap (where a real edge can come from)
+
+| Upgrade | Why |
+|---|---|
+| **Wallet-graph bundle detection.** Look up the funding source of early buyers through RPC/Helius. | Insiders fund snipers from the dev wallet. This is the strongest anti-rug signal in the research, and it beats our time-window proxy. |
+| **Dev history.** Track each creator's past launches and outcomes. | Serial ruggers reuse wallets and funding paths. |
+| **Smart-wallet follow.** Learn wallets with a consistently positive record of early buys (`subscribeAccountTrade`), and weight their buys. | "Who is buying" beats "how many are buying". |
+| **Learned scorer.** Logistic regression / GBM on recorded launches (features at T+15–60 s → peak return). | The research shows graduation can be predicted from early-launch features. Replace hand weights once we have data. |
+| **Faster rails.** Helius LaserStream/Yellowstone gRPC (50–120 ms detection) plus Helius Sender/Jito for landing. | Matters for exits during dumps more than for entries. |
+| **LLM narrative check** with Claude: read name/ticker/metadata and the linked X account, and score narrative fit and bot-farm signs. | Cheap and fast enough at our 15 s+ timescale. It's also the AI angle worth showing off. |
+| **Telegram/X ingestion** with per-caller learned weights (built, needs credentials). | CAs often appear socially at or before launch. |
+
+## 5. Ground rules
+- Read-only signals and our own trading only. No running call channels, shilling, bundling our own launches, or wash trading. Those are the behaviours this bot is built to avoid, and they carry legal risk.
+- Every trade is journaled. Taxes apply to realised gains.
