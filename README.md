@@ -4,7 +4,21 @@ First build 10/2/2026
 Multi-agent Solana meme-token trading bot: Scout → Safety → Analyst → Risk → Executor, with a Monitor agent that handles exits.
 It starts in **paper mode** by default. Design, research notes, status and the parameter checklist are in [docs/BUILD_LOG.md](docs/BUILD_LOG.md).
 
-## Quick start (paper trading)
+## Pump.fun sniper + dashboard (main strategy)
+```bash
+pip install -r requirements.txt
+python -m meme_trader.sniper run --synthetic --speed 5   # demo market -> open http://127.0.0.1:8787
+python -m meme_trader.sniper run                         # live pump.fun feed, PAPER trades, records feed to data/
+python -m meme_trader.sniper backtest --file data/feed-*.jsonl --set exit.stop_loss_pct=25
+```
+Strategy and research: [docs/STRATEGY.md](docs/STRATEGY.md). Optional env vars:
+- `PUMPPORTAL_API_KEY`: token-trade stream
+- `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`: Telegram call ingestion
+- `X_BEARER_TOKEN`: X call ingestion
+
+![dashboard](docs/dashboard.png)
+
+## DexScreener momentum bot (original scaffold, paper trading)
 ```bash
 pip install -r requirements.txt
 cp config/params.example.yaml config/params.yaml   # edit values

@@ -1,4 +1,7 @@
 httpx>=0.27
 pyyaml>=6
+aiohttp>=3.9    # pump.fun websocket feed + dashboard
 solders>=0.21   # live mode only (transaction signing)
 pytest>=8       # tests
+# optional:
+# telethon>=1.36  # Telegram call ingestion

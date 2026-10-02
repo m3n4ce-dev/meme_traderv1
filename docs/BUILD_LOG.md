@@ -4,6 +4,72 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-02 — Entry #2: Pump.fun early-entry sniper + dashboard
+
+### Owner input
+- Wants **early snipes on pump.fun**. Has traded pump.fun manually and "got screwed". Needs earlier entry.
+- Wants the classic exit: get initials out after the rise, ride the continuation, sell everything before it rolls over.
+- CAs often appear on X/Telegram at or before launch, so those should be signal sources.
+- Wants a cool UI. Long-term, wants verifiable results worth showing off.
+
+### Key research conclusions (details + sources in docs/STRATEGY.md)
+- Over half of launches are sniped in the creation block, mostly by **dev-funded insider wallets** (87% hit rate). Racing them at block 0 is how retail becomes exit liquidity. **Decision: confirm-then-ride.** Watch 15–240 s, reject insider patterns, buy organic acceleration while the curve is still early.
+- Call-channel insiders buy ~100 s before posting. **Decision:** social calls are a learned, weak signal (per-caller track record). No blind buy-on-call by default.
+- Price often drops 30–50% after graduation. **Decision:** exit at 92% curve progress by default.
+- Tools chosen:
+  - Feed: PumpPortal websocket. New-token and migration streams are free. Token-trade data costs 0.01 SOL per 10k trades.
+  - Execution: PumpPortal local-transaction API (0.5% fee, signed locally).
+  - Later upgrades: Helius LaserStream/Yellowstone gRPC and Helius Sender/Jito.
+  - X API pay-per-use: filtered stream, 1,000 rules.
+  - Telegram: Telethon user session.
+
+### Built
+- `meme_trader/sniper/`:
+  - `curve.py` — exact bonding-curve math
+  - `tracker.py` — per-token holders, bundle %, dev activity, flow
+  - `strategy.py` — entry gates/score and exit logic
+  - `engine.py` — event loop, risk, book, kill switch
+  - `feeds.py` — PumpPortal live, file replay, synthetic market
+  - `signals.py` — CA extraction, Telegram/X adapters, caller book
+  - `execution.py` — paper fills on the curve; live via PumpPortal plus local signing
+- `meme_trader/ui/`: local dashboard (aiohttp + websocket) at http://127.0.0.1:8787. It shows:
+  - KPIs: equity, P&L, win rate, profit factor, funnel
+  - live position cards with gain charts, initials badge, curve bar and a sell button
+  - launch radar with score/curve/sparkline per token, and a "why we passed" rejection breakdown
+  - equity curve, closed trades, activity log, caller leaderboard
+  - pause and KILL controls
+  - light/dark themes and a mobile layout
+- CLI: `python -m meme_trader.sniper run [--synthetic] [--live]` and `backtest [--file …|--synthetic N] [--set k=v]`.
+- Live runs record the feed to `data/feed-*.jsonl` for backtesting.
+- Tests: 27 passing (14 new for the sniper: curve math, entry gates, exits, parsing, engine cash conservation).
+
+### Results so far (synthetic only, NOT evidence of real profitability)
+| Seed | Launches | Entries | Win rate | Profit factor | P&L on 1 SOL |
+|---|---|---|---|---|---|
+| 11 | 1500 | 74 | 64% | 9.6 | +1.74 SOL |
+| 12 | 1500 | 53 | 68% | 18.8 | +1.65 SOL |
+| 13 | 1500 | 61 | 56% | 10.7 | +1.62 SOL |
+
+This shows the logic works as designed: about 2% of synthetic bundle-rugs got through, and runners made most of the profit. The synthetic market has no competing bots and no adversarial devs, so these numbers will **not** carry over to the real market.
+
+### Blockers / needs from owner
+- The cloud sandbox blocks pumpportal.fun, so there is no live data yet. **Run locally** (`run` on a laptop/VPS), or allow `pumpportal.fun`, `api.dexscreener.com` and `api.rugcheck.xyz` in the environment's network settings.
+- Optional credentials:
+  - `PUMPPORTAL_API_KEY` (trade-data stream)
+  - `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` + channel list
+  - `X_BEARER_TOKEN` + account list
+  - a paid RPC for live trading
+- Telegram channels and X accounts to watch.
+
+### Next steps
+1. Record 3–7 days of the live feed in paper mode.
+2. Backtest on the recordings and sweep parameters walk-forward.
+3. Add wallet-graph bundle detection and dev history.
+4. Train a learned scorer on recorded launches.
+5. Go live small.
+
+---
+
 ## 2026-10-02 — Entry #1: Research + initial scaffold
 
 ### Goal
@@ -95,4 +161,7 @@ Fill in or tell me these values. Defaults currently in `config/params.example.ya
 | 17 | Priority fee | 100k lamports | |
 | 18 | Discovery sources (DexScreener, Pump.fun, Telegram calls, specific wallets to copy…) | DexScreener profiles + boosts | |
 | 19 | RPC provider (Helius / Triton / QuickNode) | public RPC | |
-| 20 | Strategy style: early snipes (<10 min) vs momentum on established tokens | momentum | |
+| 20 | Strategy style: early snipes (<10 min) vs momentum on established tokens | momentum | **early snipes (pump.fun)** — 2026-10-02 |
+| 21 | Sniper: SOL per entry / max positions / daily loss | 0.05 / 4 / 0.2 SOL | |
+| 22 | Sniper: initials target / trailing tiers / stop loss | 2x / 30→15% / −30% | |
+| 23 | Telegram channels & X accounts to watch | — | |
