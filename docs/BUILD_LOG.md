@@ -4,6 +4,35 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-02 — Entry #4: One-command setup for Mac + Ubuntu, illustrated guides
+
+### Owner input
+- Will run it on a Mac first, then on a home mini PC (WOWE P8) running Ubuntu. Wants it as easy as possible, with docs and screenshots.
+
+### Built
+- `scripts/setup_mac.sh`: checks Command Line Tools (git) and finds Python ≥3.10 (or installs it via Homebrew, or points to python.org). Then it creates `.venv`, installs packages, creates `.env` and runs the doctor. Written to work with macOS's bash 3.2.
+- `scripts/setup_ubuntu.sh [--service]`: apt-installs anything missing, creates `.venv`, installs packages, creates `.env` and runs the doctor. `--service` installs a systemd unit (`deploy/meme-sniper.service`) that starts at boot, restarts on failure, and paper trades by default.
+- `scripts/start.sh demo|paper|live|doctor|backtest|leaders|review`: one launcher that opens the dashboard and keeps a Mac awake (`caffeinate`). Live mode stays locked unless `MEME_TRADER_CONFIRM_LIVE=yes`.
+- Double-clickable Mac launchers in `scripts/mac/`: Start Demo, Start Paper Trading, Check Setup.
+- `docs/MAC_SETUP.md`, `docs/UBUNTU_SETUP.md`, with screenshots in `docs/img/`:
+  - terminal walkthroughs for both systems;
+  - the real setup-script output from a fresh Ubuntu 24.04 run;
+  - where to put the keys in `.env`;
+  - the dashboard.
+
+### Tested
+- `setup_ubuntu.sh` ran end-to-end on a fresh copy of the repo (Ubuntu 24.04, ~19 s) and is idempotent: a re-run leaves `.env` untouched.
+- `start.sh`: demo starts and serves the dashboard; `--port` is honoured; live mode refuses without the confirm flag.
+- `systemd-analyze verify` passes on the service unit. It wasn't started here, because the sandbox doesn't run systemd.
+- **Not run:** `setup_mac.sh` and the `.command` launchers. No Mac is available, so they have only been syntax-checked.
+
+### Fixes found while testing
+- `.env.example` shipped placeholder RPC/keypair values, so a fresh `.env` reported them as "set" and the doctor then failed on a missing keypair file. They are now empty, with the examples in comments.
+- An empty value in `.env` now counts as unset. Before, an empty `SOLANA_RPC_URL` would have replaced the default RPC with "".
+- The doctor's install hints now point at `.venv/bin/pip`, and its closing summary correctly says the PumpPortal key is needed for the real market.
+
+---
+
 ## 2026-10-02 — Entry #3: Copy trading, AI agent desk, setup tooling
 
 ### Owner input
