@@ -48,7 +48,7 @@ def run(params) -> None:
                           ("telethon", "Telegram signals", False)):
         have = importlib.util.find_spec(mod) is not None
         line(OK if have else (FAIL if req else WARN), f"package {mod} ({why})",
-             "" if have else f"pip install {'pyyaml' if mod == 'yaml' else mod}")
+             "" if have else f".venv/bin/pip install {'pyyaml' if mod == 'yaml' else mod}")
 
     pk = params.wallet.pubkey
     line(OK if valid_pubkey(pk) else FAIL, f"wallet.pubkey {pk or '(empty)'}",
@@ -71,7 +71,7 @@ def run(params) -> None:
     except Exception as e:
         line(FAIL, f"PumpPortal websocket unreachable ({type(e).__name__})", "check internet / firewall")
 
-    rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    rpc = os.environ.get("SOLANA_RPC_URL") or "https://api.mainnet-beta.solana.com"
     try:
         import httpx
 
@@ -109,4 +109,5 @@ def run(params) -> None:
     n = len(params.sniper.copy.leaders)
     line(OK if n else WARN, f"copy trading: {n} leader wallet(s) configured",
          "" if n else "add wallets under sniper.copy.leaders (find some with the `leaders` command)")
-    print("\nPaper trading needs only the OK rows above the env-var section. Live trading needs everything.")
+    print("\nDemo (scripts/start.sh demo) needs nothing. Paper trading on the real market needs PUMPPORTAL_API_KEY\n"
+          "and a reachable PumpPortal websocket. Live trading needs every row OK.")

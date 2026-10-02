@@ -15,6 +15,9 @@ Go in this order. Each stage works before the next one is added. **Don't skip pa
 | 7 | Telegram API id/hash, X bearer token | social call signals (optional) | X is pay-per-use | my.telegram.org, developer.x.com |
 
 ## 1. Install
+**Step-by-step guides with screenshots:** [Mac](MAC_SETUP.md) · [Ubuntu mini PC](UBUNTU_SETUP.md). They use the setup scripts, which do all of the below for you.
+
+Manual version:
 ```bash
 git clone https://github.com/m4n3ce/meme_traderv1.git
 cd meme_traderv1

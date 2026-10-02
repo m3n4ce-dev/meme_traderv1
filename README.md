@@ -4,7 +4,14 @@ First build 10/2/2026
 Multi-agent Solana meme-token trading bot: Scout → Safety → Analyst → Risk → Executor, with a Monitor agent that handles exits.
 It starts in **paper mode** by default. Design, research notes, status and the parameter checklist are in [docs/BUILD_LOG.md](docs/BUILD_LOG.md).
 
-**Start here: [docs/SETUP.md](docs/SETUP.md)** (what to connect, how to run, how to go live safely).
+## Start here
+| Your computer | Guide | One-line install |
+|---|---|---|
+| Mac | **[docs/MAC_SETUP.md](docs/MAC_SETUP.md)** | `bash scripts/setup_mac.sh` |
+| Ubuntu (home mini PC, 24/7) | **[docs/UBUNTU_SETUP.md](docs/UBUNTU_SETUP.md)** | `bash scripts/setup_ubuntu.sh --service` |
+
+Then start the bot with `scripts/start.sh demo` (simulated) or `scripts/start.sh paper` (real market, fake money).
+What each key/account is for and how to go live safely: [docs/SETUP.md](docs/SETUP.md).
 
 ## Pump.fun sniper + copy trader + AI desk (main strategy)
 ```bash

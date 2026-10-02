@@ -13,7 +13,7 @@ import time
 
 from .clients.http import post
 
-RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+RPC_URL = os.environ.get("SOLANA_RPC_URL") or "https://api.mainnet-beta.solana.com"
 
 
 def rpc(method: str, params: list) -> dict:
