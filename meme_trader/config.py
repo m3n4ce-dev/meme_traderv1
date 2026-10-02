@@ -13,7 +13,14 @@ LOCAL = ROOT / "config" / "params.yaml"
 
 
 class Params(dict):
-    """dict with attribute access (p.capital.per_trade_sol)."""
+    """dict with attribute access (p.capital.per_trade_sol). Config keys win over dict methods,
+    so a section may be called e.g. `copy`."""
+
+    def __getattribute__(self, key: str) -> Any:
+        if not key.startswith("_") and dict.__contains__(self, key):
+            v = dict.__getitem__(self, key)
+            return Params(v) if isinstance(v, dict) else v
+        return super().__getattribute__(key)
 
     def __getattr__(self, key: str) -> Any:
         try:
@@ -30,7 +37,22 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def load_env(path: Path | None = None) -> None:
+    """Read KEY=VALUE lines from .env into os.environ (existing env vars win). Keeps secrets out of git."""
+    import os
+
+    path = path or ROOT / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
 def load(path: str | Path | None = None) -> Params:
+    load_env()
     data = yaml.safe_load(EXAMPLE.read_text())
     local = Path(path) if path else LOCAL
     if local.exists():

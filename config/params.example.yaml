@@ -124,3 +124,33 @@ sniper:
     telegram_channels: []        # TBD - channel usernames/ids to watch for CAs (needs TG API id/hash)
     x_accounts: []               # TBD - X accounts to watch (needs X API bearer token)
     social_only_watch: true      # start tracking a CA we first saw in a post
+
+  copy:                          # copy trading (needs PUMPPORTAL_API_KEY for wallet streams)
+    enabled: true
+    leaders: []                  # TBD - [{address: ..., label: ..., mode: mirror|signal}]  (find candidates: `leaders` command, kolscan.io, gmgn.ai)
+    buy_sol: 0.05                # TBD - SOL per copied entry
+    min_leader_buy_sol: 0.5      # ignore the leader's small test buys
+    max_chase_pct: 25            # skip if price is already this far above the leader's fill
+    max_curve_progress_pct: 70
+    max_copies_per_leader_per_hour: 6
+    apply_red_flags: true        # still refuse dev-sold / bundled / serial-deployer tokens
+    follow_sells: true           # mirror the leader's sells
+    sell_all_when_leader_sold_pct: 50   # leader dumps >= this share of their bag -> we exit fully
+    use_own_exits: true          # also apply our stop loss / initials / trailing stop
+    pause_after_losses: 5        # auto-pause a leader after N copied losses in a row
+
+  desk:                          # AI trading desk (Claude persona agents vote on entries; needs ANTHROPIC_API_KEY)
+    enabled: false               # TBD - turn on once the key is set
+    model: claude-opus-5-5
+    effort: low                  # low keeps votes to a few seconds
+    personas: [veteran, narrative, skeptic, quant]
+    weights: {veteran: 1.0, narrative: 0.8, skeptic: 1.0, quant: 1.0}
+    quorum: 0.45                 # weighted buy-conviction share needed to approve
+    veto_conviction: 75          # skeptic "pass" at/above this conviction vetoes the trade
+    timeout_s: 12
+    max_price_move_pct: 20       # skip if price ran this much while the desk deliberated
+    price_in_per_mtok: 4.0       # for the cost meter on the dashboard (USD)
+    price_out_per_mtok: 20.0
+
+  record:
+    full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)

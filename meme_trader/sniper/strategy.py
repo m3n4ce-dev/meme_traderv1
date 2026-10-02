@@ -117,6 +117,9 @@ class SniperPosition:
     initials_taken: bool = False
     proceeds_sol: float = 0.0
     exits: list | None = None  # [(ts, reason, tokens, sol)]
+    source: str = "sniper"     # sniper | copy:<leader label>
+    leader: str = ""           # leader wallet for copy positions
+    desk: str = ""             # AI desk verdict summary at entry
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100

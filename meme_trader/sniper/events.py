@@ -36,6 +36,7 @@ class Trade:
     v_tokens: float
     new_balance: float = -1.0   # trader's token balance after the trade, if the source reports it
     signature: str = ""
+    pool: str = "pump"          # pump = bonding curve; pump-amm etc. = graduated
     kind: str = "trade"
 
 
