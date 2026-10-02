@@ -43,6 +43,9 @@ class Feed:
     async def unwatch(self, mints: list[str]) -> None:
         pass
 
+    async def watch_accounts(self, wallets: list[str]) -> None:
+        """Stream every trade these wallets make (copy trading)."""
+
 
 # --------------------------------------------------------------------------- live
 class PumpPortalFeed(Feed):
@@ -53,6 +56,7 @@ class PumpPortalFeed(Feed):
         self.url = f"{self.URL}?api-key={key}" if key else self.URL
         self.ws = None
         self.watched: set[str] = set()
+        self.accounts: set[str] = set()
 
     async def _send(self, payload: dict) -> None:
         if self.ws is not None and not self.ws.closed:
@@ -66,6 +70,10 @@ class PumpPortalFeed(Feed):
         self.watched.difference_update(mints)
         await self._send({"method": "unsubscribeTokenTrade", "keys": mints})
 
+    async def watch_accounts(self, wallets: list[str]) -> None:
+        self.accounts.update(wallets)
+        await self._send({"method": "subscribeAccountTrade", "keys": wallets})
+
     async def events(self) -> AsyncIterator[Event]:
         import aiohttp
 
@@ -78,6 +86,8 @@ class PumpPortalFeed(Feed):
                     await ws.send_json({"method": "subscribeMigration"})
                     if self.watched:
                         await ws.send_json({"method": "subscribeTokenTrade", "keys": list(self.watched)})
+                    if self.accounts:
+                        await ws.send_json({"method": "subscribeAccountTrade", "keys": list(self.accounts)})
                     backoff = 1
                     async for msg in ws:
                         if msg.type != aiohttp.WSMsgType.TEXT:
@@ -103,8 +113,9 @@ class PumpPortalFeed(Feed):
         if tx in ("buy", "sell"):
             return Trade(mint=d["mint"], ts=now, trader=d.get("traderPublicKey", ""), side=tx,
                          sol=float(d.get("solAmount") or 0), tokens=float(d.get("tokenAmount") or 0),
-                         v_sol=float(d["vSolInBondingCurve"]), v_tokens=float(d["vTokensInBondingCurve"]),
-                         new_balance=float(d.get("newTokenBalance", -1)), signature=d.get("signature", ""))
+                         v_sol=float(d.get("vSolInBondingCurve") or 0), v_tokens=float(d.get("vTokensInBondingCurve") or 0),
+                         new_balance=float(d.get("newTokenBalance", -1)), signature=d.get("signature", ""),
+                         pool=d.get("pool") or "pump")
         if tx == "migrate":
             return Migration(mint=d["mint"], ts=now)
         return None
@@ -174,6 +185,10 @@ class SyntheticFeed(Feed):
         self.serial_creators = [_addr(self.rng) for _ in range(5)]
         self.counter = itertools.count()
         self.archetype: dict[str, str] = {}      # ground truth, for evaluating the strategy
+        # simulated wallets to copy: two genuinely skilled ones and one "bait" KOL who dumps on copiers
+        self.smart = [_addr(self.rng) for _ in range(2)]
+        self.bait = _addr(self.rng)
+        self.leader_labels = {self.smart[0]: "sim-smart-1", self.smart[1]: "sim-smart-2", self.bait: "sim-bait-kol"}
 
     def now(self) -> float:
         if self.realtime:
@@ -222,6 +237,26 @@ class SyntheticFeed(Feed):
             out.append(Trade(mint=mint, ts=ts, trader=who, side=side, sol=round(sol, 6), tokens=tok,
                              v_sol=curve.v_sol, v_tokens=curve.v_tokens, new_balance=holders[who]))
 
+        # leader wallets' scheduled actions: (time, wallet, side, sol)
+        sched: list[tuple] = []
+        p_smart = {"runner": .6, "fake_runner": .35, "dev_dump": .15, "dud": .1, "bundle_rug": .05}[kind]
+        smart_in = [w for w in self.smart if rng.random() < p_smart]
+        for w in smart_in:
+            tb = t0 + rng.uniform(4, 25)
+            sched.append((tb, w, "buy", rng.uniform(0.8, 3)))
+            if kind not in ("runner", "fake_runner"):
+                sched.append((tb + rng.uniform(20, 60), w, "sell", 0))
+        if rng.random() < .35:
+            tb = t0 + rng.uniform(3, 10)
+            sched += [(tb, self.bait, "buy", rng.uniform(1, 4)), (tb + rng.uniform(6, 15), self.bait, "sell", 0)]
+        sched.sort()
+        leaders = set(self.leader_labels)
+
+        def run_sched(until: float) -> None:
+            while sched and sched[0][0] <= until:
+                ts, w, side, sol = sched.pop(0)
+                trade(ts, w, side, sol if side == "buy" else holders.get(w, 0))
+
         if kind == "bundle_rug":
             for _ in range(rng.randint(3, 8)):
                 b = _addr(rng)
@@ -238,9 +273,15 @@ class SyntheticFeed(Feed):
             if kind == "dev_dump" and i == 1 and dev_tokens:
                 t += 0.5
                 trade(t, creator, "sell", holders.get(creator, 0))
+            if (kind, i) in (("runner", 3), ("fake_runner", 1)):     # skilled wallets exit as the move tops
+                for w in smart_in:
+                    sched.append((t + rng.uniform(0, 15), w, "sell", 0))
+                sched.sort()
             while t < end and curve.progress < 1:
                 t += rng.expovariate(1 / gap)
-                existing = [h for h, v in holders.items() if v > 0 and h != creator and h not in bundlers]
+                run_sched(t)
+                existing = [h for h, v in holders.items()
+                            if v > 0 and h != creator and h not in bundlers and h not in leaders]
                 if rng.random() < p_buy or not existing:
                     who = rng.choice(existing) if existing and rng.random() < 0.15 else _addr(rng)
                     trade(t, who, "buy", min(rng.lognormvariate(-1.6, 1.0), 8))
@@ -250,6 +291,7 @@ class SyntheticFeed(Feed):
             if curve.progress >= 1:
                 out.append(Migration(mint=mint, ts=t + 1))
                 break
+        run_sched(t + 120)
         out.sort(key=lambda e: e.ts)
         return out
 

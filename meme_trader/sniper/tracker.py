@@ -30,6 +30,7 @@ class TokenState:
     decided: str = ""          # "" while still being evaluated; otherwise "entered" / "rejected: ..."
     score: float = 0.0
     score_notes: list[str] = field(default_factory=list)
+    desk: str = ""             # last AI desk verdict
 
     @property
     def created_ts(self) -> float:
@@ -55,7 +56,8 @@ class TokenState:
             self.buyers.add(e.creator)
 
     def on_trade(self, t: Trade, bundle_window_s: float) -> None:
-        self.curve = Curve(t.v_sol, t.v_tokens)
+        if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:   # graduated-pool trades carry no curve state
+            self.curve = Curve(t.v_sol, t.v_tokens)
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)
         self.last_trade_ts = t.ts

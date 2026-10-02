@@ -4,6 +4,60 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-02 — Entry #3: Copy trading, AI agent desk, setup tooling
+
+### Owner input
+- Wallet (public): `HTG4jCTAVB6H8QThytKtrApjNaQhMuUENFi9Whppag6Z`. It's a valid 32-byte Solana key and is now set as `wallet.pubkey` in `config/params.yaml`. The sandbox can't reach Solana RPC, so its balance is unverified.
+- Wants a fully automatic bot with an agent team: senior dev, senior meme trader, Ansem-style trader, other profitable traders.
+- Wants copy trading of profitable wallets in real time.
+
+### Answers / research
+- **pump.fun trades are fully public in real time, with no callout needed.**
+  - PumpPortal `subscribeAccountTrade` streams any list of wallets (metered, needs an API key).
+  - Kolscan (owned by pump.fun) and GMGN are free leaderboards for finding wallets.
+- **Copy-trading risks:**
+  - latency: we fill after the leader and the other copy bots;
+  - bait wallets that dump on copiers;
+  - rotating wallets.
+
+  The design handles these with chase guards, results-based leader scoring, auto-pause and data-driven discovery. Research shows the edge exists but is thin (≈3% per copied trade in a 2026 multi-agent study).
+- **Correction:** the PumpPortal API key is **required** for live paper trading, not optional. Without it the bot only sees launches, not trades. The doctor now marks it FAIL.
+
+### Built
+- `sniper/copytrade.py`:
+  - LeaderBook tracks each leader's own P&L and **our copied P&L**, with an hourly copy limit and auto-pause on a losing streak.
+  - `discover()` ranks wallets on recorded data and flags insider-like, deployer and bot-speed wallets.
+- Engine copy path:
+  - `mirror` / `signal` modes, plus guards for max chase, minimum leader buy size, curve-progress cap and red flags (dev sold / bundle / serial deployer);
+  - follows leader sells (proportional, or all-out when the leader dumps ≥50%), with our own exits as a backstop.
+- `sniper/desk.py`, the **AI desk**:
+  - four Claude personas (veteran, narrative, skeptic, quant) vote in parallel with structured JSON output;
+  - deterministic weighted aggregation with a skeptic veto, a timeout fallback, prompt-injection-safe framing, and a cost meter;
+  - live: runs off the event loop, and price is re-checked after the vote. Backtest: inline and deterministic.
+- `sniper/review.py`, a **head trader + senior engineer** post-mortem agent. It writes `data/reviews/*.md`; `--validate` backtests its proposed changes against the recorded feed and gives a verdict. Nothing is auto-applied.
+- `sniper/doctor.py` checks packages, keys (presence only), the PumpPortal websocket, RPC, the wallet balance and keypair match, and the Anthropic model.
+- `.env` loader + `.env.example`, `docs/SETUP.md` (connect & run), and `config/params.yaml` with the owner's wallet.
+- Recording now keeps every launch's trades for 10 min, regardless of decisions, so backtests aren't biased.
+- Synthetic market now includes two skilled wallets and one bait KOL, to exercise copy trading.
+- Dashboard: Copy trading panel, AI desk KPI, source tag on positions (sniper / copy:label · AI ✓), P&L split by source.
+- Tests: 33 passing (+6: leader accounting/pause, discovery, desk aggregation/veto, engine with fake Claude client + copy trading, pubkey validation, config `copy` key).
+
+### Synthetic result (seed 11, 1500 launches; logic check only, not evidence)
+| Source | Closed | Win | Profit factor | P&L |
+|---|---|---|---|---|
+| copy | 31 | 58% | 12.0 | +1.17 SOL |
+| sniper | 56 | 48% | 4.7 | +0.65 SOL |
+
+The bait wallet was auto-paused after 5 copied losses. Leader discovery ranked the two skilled wallets first.
+
+### Needs from owner
+1. Run locally per `docs/SETUP.md`: `doctor`, then `run --synthetic`, then `run` (paper, with the PumpPortal key).
+2. PumpPortal API key (required), Anthropic API key (for the desk/review).
+3. Wallets to copy: run `leaders` after a few days of recording, and/or pick some from kolscan/GMGN.
+4. Decide on the bot wallet: create a dedicated one (recommended) rather than using the main wallet's key.
+
+---
+
 ## 2026-10-02 — Entry #2: Pump.fun early-entry sniper + dashboard
 
 ### Owner input
@@ -142,7 +196,7 @@ Fill in or tell me these values. Defaults currently in `config/params.example.ya
 
 | # | Parameter | Default | Owner value |
 |---|---|---|---|
-| 1 | Wallet public key (dedicated hot wallet) | — | |
+| 1 | Wallet public key (dedicated hot wallet) | — | `HTG4jCTA…pag6Z` (2026-10-02). Confirm whether this is the main wallet or a dedicated bot wallet. |
 | 2 | Total budget `starting_sol` | 1.0 SOL | |
 | 3 | Size per trade `per_trade_sol` | 0.05 SOL | |
 | 4 | Max open positions | 3 | |

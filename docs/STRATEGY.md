@@ -80,6 +80,55 @@ For every new launch (PumpPortal websocket, about 100s of ms behind the chain):
 | **LLM narrative check** with Claude: read name/ticker/metadata and the linked X account, and score narrative fit and bot-farm signs. | Cheap and fast enough at our 15 s+ timescale. It's also the AI angle worth showing off. |
 | **Telegram/X ingestion** with per-caller learned weights (built, needs credentials). | CAs often appear socially at or before launch. |
 
-## 5. Ground rules
+## 5. Copy trading (added 2026-10-02, entry #3)
+
+**Can we see other traders' pump.fun trades without a callout?** Yes. Every pump.fun buy and sell is a public Solana transaction, visible the moment it lands:
+- on Solscan, on the wallet's pump.fun profile, and on trackers like [GMGN](https://gmgn.ai/blog/how-to-track-copy-solana-smart-money/) and [Kolscan](https://www.theblock.co/post/362119/pump-fun-makes-first-acquisition-purchases-solana-based-copy-trading-wallet-tracker-kolscan) (Kolscan was bought by pump.fun and is now free);
+- for a bot, through [PumpPortal `subscribeAccountTrade`](https://medium.com/@pumpdevio/pump-fun-api-real-time-websocket-streaming-with-python-token-launches-trades-whale-tracking-2b3979fc26bb). It streams every trade by the wallets we list, costs 0.01 SOL per 10k events, and needs an API key.
+
+**Why copy trading isn't free money:**
+- **We always fill after the leader**, and after every faster copy bot. The `max_chase_pct` guard skips a trade when the price has already run past the leader's fill.
+- **Known KOLs get farmed, and some farm their followers.** Some buy, wait for copiers, then sell into them. [ZachXBT has publicly accused large Solana influencers of exactly this kind of pattern](https://bitquery.io/investigations/ansem-black-bull-370x-investigation). So a wallet's own P&L is not the number that matters. **Our P&L copying it** is, and the bot tracks it per leader and auto-pauses a leader after 5 copied losses in a row. In the synthetic market, a "bait" wallet was profitable on its own trades while copying it lost money. The bot paused it.
+- **Leaders run many wallets and rotate them.** The `leaders` command finds wallets in our own recorded data, ranked by realized + marked P&L. It flags insider-like wallets (buying inside the bundle window), deployers and bot-speed wallets.
+- Research backs a careful approach: a 2026 multi-agent LLM study of meme-coin copy trading built to resist manipulative bots made about **+3% per copied investment** after realistic frictions. That's a real but thin edge, not a money printer ([ACM](https://dl.acm.org/doi/10.1145/3774904.3792635)).
+
+**Modes:**
+- `signal`: a leader's buy boosts the sniper's score.
+- `mirror`: we buy when they buy and mirror their sells, plus our own stop loss, initials and trailing stop.
+
+Start every new wallet on `signal`.
+
+## 6. The agent team
+
+| Agent | Kind | Job |
+|---|---|---|
+| Scout / feed | code | New launches, trades, migrations, leader-wallet trades |
+| Gatekeeper | code | Hard anti-rug gates + 0–100 score |
+| Copy agent | code | Leader buys/sells → chase, red-flag and rate-limit guards |
+| Risk manager | code | Sizing, max positions, daily loss, drawdown kill switch |
+| **AI desk** | Claude (4 personas) | Votes on every candidate entry, in parallel |
+| ↳ Veteran trench trader | Claude | Order flow, holder spread, organic vs painted volume |
+| ↳ Narrative trader | Claude | Culture/attention fit of the name/ticker/socials. This is the "Ansem-style" conviction lens. It's modelled on a public trading *style*, not impersonating anyone. |
+| ↳ Risk officer / skeptic | Claude | Hunts red flags. A high-conviction pass **vetoes** the trade. |
+| ↳ Quant | Claude | Base rates and expected value after fees |
+| Executor | code | Paper fills on the curve / live PumpPortal tx, signed locally |
+| Exit manager | code | Initials, tiered trailing stop, decay/stall, dev sold, leader sold |
+| **Review agent** | Claude | "Head trader + senior engineer" post-mortem. It proposes parameter changes, and these are **backtested before anyone applies them**. |
+
+How the desk is wired:
+- **LLMs are kept off the exit path.** A red flag sells in milliseconds without waiting on an API call.
+- Votes are aggregated deterministically (weighted conviction, quorum, skeptic veto), so every decision can be audited.
+- Token names and metadata are written by the token's creator and could contain prompt injection. They are passed as data, and the model is told never to follow them.
+- Default model: Claude Opus 5.5 at low effort. Server-side refusal fallback is enabled. The dashboard shows a cost meter.
+
+## 7. Improvement roadmap (research, 2026-10-02)
+
+1. **Funding-graph insider detection.** Use the [Helius "funded-by" Wallet API](https://www.helius.dev/docs/wallet-api/funded-by) on early buyers. Wallets that share a first funder with each other or with the dev are a cluster. Example: AVA AI had 40% of supply held by 23 deployer-linked wallets. Multi-hop funding is used to dodge this, so score the depth too.
+2. **Learned scorer** trained on recorded launches (features at T+15–60 s → outcome). Replaces the hand-set weights. Train and validate walk-forward.
+3. **LaserStream / Yellowstone gRPC** feed (50–120 ms) and **Helius Sender / Jito** for landing transactions. These matter most for exits in a dump, and for copy trades, where the chase cost is the whole game.
+4. **Wallet-quality features for every buyer, not just leaders.** Count how many "smart" (historically profitable) wallets are among a token's first 50 buyers.
+5. **A nightly scheduled review.** A routine runs `review --validate` and opens a PR with the changes that won on recorded data, so improvements ship only on evidence.
+
+## 8. Ground rules
 - Read-only signals and our own trading only. No running call channels, shilling, bundling our own launches, or wash trading. Those are the behaviours this bot is built to avoid, and they carry legal risk.
 - Every trade is journaled. Taxes apply to realised gains.

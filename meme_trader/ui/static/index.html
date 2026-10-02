@@ -94,7 +94,8 @@ tr.dim td { color: var(--muted); }
 .log div { padding: 3px 0; border-bottom: 1px solid var(--grid); display: flex; gap: 8px; }
 .log time { color: var(--muted); flex: none; }
 .log .buy b { color: var(--series); } .log .sell b, .log .close b { color: var(--good); }
-.log .error b { color: var(--bad); } .log .signal b { color: var(--accent); }
+.log .error b { color: var(--bad); } .log .signal b, .log .desk b { color: var(--accent); }
+.tag.copy { color: var(--accent); border-color: currentColor; }
 .rej-row { display: grid; grid-template-columns: 150px 1fr 40px; gap: 8px; align-items: center; font-size: 12.5px;
   padding: 3px 0; }
 .rej-row .bar { height: 10px; } .rej-row .bar > i { background: var(--axis); }
@@ -126,6 +127,7 @@ a { color: var(--series); }
     <div class="kpi"><div class="label">Today</div><div class="value num" id="k-day">–</div><div class="sub">UTC day, resets 00:00</div></div>
     <div class="kpi"><div class="label">Win rate</div><div class="value num" id="k-win">–</div><div class="sub num" id="k-win-sub"></div></div>
     <div class="kpi"><div class="label">Profit factor</div><div class="value num" id="k-pf">–</div><div class="sub num" id="k-pf-sub"></div></div>
+    <div class="kpi"><div class="label">AI desk</div><div class="value num" id="k-desk">–</div><div class="sub num" id="k-desk-sub"></div></div>
     <div class="kpi"><div class="label">Funnel</div><div class="value num" id="k-fun">–</div><div class="sub num" id="k-fun-sub"></div></div>
   </section>
 
@@ -142,7 +144,7 @@ a { color: var(--series); }
       <section class="panel">
         <h2>Closed trades <small id="closed-sub"></small></h2>
         <div class="scroll" style="max-height:320px"><table>
-          <thead><tr><th>Token</th><th class="r">Held</th><th class="r">Cost</th><th class="r">P&amp;L</th>
+          <thead><tr><th>Token</th><th>Source</th><th class="r">Held</th><th class="r">Cost</th><th class="r">P&amp;L</th>
             <th class="r">Peak</th><th>Initials</th><th>Exit</th></tr></thead>
           <tbody id="closed"></tbody></table></div>
       </section>
@@ -164,9 +166,14 @@ a { color: var(--series); }
         <div id="log" class="log"></div>
       </section>
       <section class="panel">
+        <h2>Copy trading <small>leader wallets · our copied results</small></h2>
+        <div style="overflow-x:auto"><table><thead><tr><th>Leader</th><th>Mode</th><th class="r">Copied</th><th class="r">Win</th><th class="r">Copy P&amp;L</th><th>Status</th></tr></thead>
+          <tbody id="leaders"></tbody></table></div>
+      </section>
+      <section class="panel">
         <h2>Callers <small>Telegram / X track record</small></h2>
-        <table><thead><tr><th>Caller</th><th class="r">Calls</th><th class="r">Avg 5m move</th><th class="r">Weight</th></tr></thead>
-          <tbody id="callers"></tbody></table>
+        <div style="overflow-x:auto"><table><thead><tr><th>Caller</th><th class="r">Calls</th><th class="r">Avg 5m move</th><th class="r">Weight</th></tr></thead>
+          <tbody id="callers"></tbody></table></div>
       </section>
     </div>
   </div>
@@ -244,7 +251,6 @@ function render(s) {
   $("k-eq").textContent = sol(s.equity) + " SOL";
   $("k-eq-sub").innerHTML = `<span class="${cls(eqd)}">${signed(eqd)} SOL (${pct(eqd / sm.start_sol * 100, 1)})</span> vs start`;
   $("k-pnl").innerHTML = `<span class="${cls(sm.realized_pnl_sol)}">${signed(sm.realized_pnl_sol)}</span>`;
-  $("k-pnl-sub").textContent = `best ${pct(sm.best_pct)} · worst ${pct(sm.worst_pct)}`;
   $("k-day").innerHTML = `<span class="${cls(s.day_pnl)}">${signed(s.day_pnl)}</span>`;
   $("k-win").textContent = sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–";
   $("k-win-sub").textContent = `${sm.closed} closed · avg win ${pct(sm.avg_win_pct)} / loss ${pct(sm.avg_loss_pct)}`;
@@ -252,6 +258,18 @@ function render(s) {
   $("k-pf-sub").textContent = `initials taken on ${sm.initials_hit} trades`;
   $("k-fun").textContent = `${sm.entries} / ${sm.launches}`;
   $("k-fun-sub").textContent = `entries / launches seen (${sm.launches ? (sm.entries / sm.launches * 100).toFixed(1) : 0}%)`;
+
+  const dk = s.desk;
+  $("k-desk").textContent = dk.enabled ? dk.calls + " votes" : "off";
+  $("k-desk-sub").textContent = dk.enabled ? `${dk.personas.join(" · ")} · ~$${dk.cost_usd.toFixed(2)}` : "set ANTHROPIC_API_KEY + --desk";
+  const bs = sm.by_source || {};
+  $("k-pnl-sub").textContent = Object.keys(bs).length
+    ? Object.entries(bs).map(([k, v]) => `${k} ${signed(v.realized_pnl_sol)}`).join(" · ")
+    : `best ${pct(sm.best_pct)} · worst ${pct(sm.worst_pct)}`;
+  $("leaders").innerHTML = s.leaders.map(l => `<tr class="${l.status === "on" ? "" : "dim"}"><td title="${l.address}"><b>${esc(l.label)}</b></td>
+    <td>${esc(l.mode)}</td><td class="r">${l.copied}</td><td class="r">${l.copied ? Math.round(l.copied_win_rate * 100) + "%" : "–"}</td>
+    <td class="r ${cls(l.copied_pnl)}">${l.copied ? signed(l.copied_pnl) : "–"}</td><td class="why" title="${esc(l.status)}">${esc(l.status)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">No leader wallets configured</td></tr>`;
 
   // positions
   $("pos-sub").textContent = `${s.positions.length} open · ${sol(s.sol)} SOL free`;
@@ -272,7 +290,8 @@ function render(s) {
       el.querySelector(".gain").innerHTML = `<span class="${cls(p.gain_pct)}">${pct(p.gain_pct)}</span>`;
       el.querySelector(".meta").innerHTML = `<span>${dur(p.held_s)}</span><span>value ${sol(p.value_sol)} SOL</span>
         <span>peak ${pct(p.peak_gain_pct)}</span><span>score ${p.score.toFixed(0)}</span>
-        ${p.initials ? '<span class="tag ok">✓ initials out</span>' : '<span class="tag">initials pending</span>'}`;
+        ${p.initials ? '<span class="tag ok">✓ initials out</span>' : '<span class="tag">initials pending</span>'}
+        <span class="tag ${p.source.startsWith("copy") ? "copy" : ""}" title="${esc(p.desk)}">${esc(p.source)}${p.desk ? " · AI ✓" : ""}</span>`;
       el.querySelector(".bar > i").style.width = (p.progress * 100).toFixed(1) + "%";
       const g = p.spark.map(x => (x / p.entry - 1) * 100);
       lineChart(el.querySelector("canvas"), g, {axis: true, fmt: v => pct(v), mark: p.entry_idx,
@@ -290,10 +309,11 @@ function render(s) {
   // closed
   $("closed-sub").textContent = `${sm.closed} total`;
   $("closed").innerHTML = s.closed.map(c => `<tr><td title="${c.mint}"><b>${esc(c.symbol)}</b></td>
+    <td><span class="tag ${(c.source || "").startsWith("copy") ? "copy" : ""}">${esc(c.source)}</span></td>
     <td class="r">${dur(c.closed - c.opened)}</td><td class="r">${c.cost.toFixed(3)}</td>
     <td class="r ${cls(c.pnl)}">${signed(c.pnl)} (${pct(c.pnl_pct)})</td><td class="r">${pct(c.peak_gain_pct)}</td>
     <td>${c.initials ? "✓" : ""}</td><td class="why" title="${esc(c.exit)}">${esc(c.exit)}</td></tr>`).join("")
-    || `<tr><td colspan="7" class="empty">No closed trades yet</td></tr>`;
+    || `<tr><td colspan="8" class="empty">No closed trades yet</td></tr>`;
 
   // radar
   const live_ = s.watching.filter(w => w.status === "watching").length;
