@@ -39,6 +39,12 @@ class Trade:
     pool: str = "pump"          # pump = bonding curve; pump-amm etc. = graduated
     mcap_sol: float = 0.0       # market cap in SOL after the trade (prices graduated-pool trades)
     kind: str = "trade"
+    # chain facts (Solana log feed; 0 / -1 in older recordings): ordering, when it happened on chain (the
+    # TradeEvent's Clock timestamp, whole seconds) next to `ts` = when we received it, and the fee rates paid
+    slot: int = 0
+    chain_ts: float = 0.0
+    fee_bps: int = -1           # protocol fee, basis points
+    creator_fee_bps: int = -1
 
 
 @dataclass
@@ -82,14 +88,27 @@ class Metadata:
 
 
 @dataclass
+class Health:
+    """Written into recordings once a minute: what the feed looked like, so research can drop degraded
+    stretches and price results in USD."""
+    ts: float
+    host: str = ""
+    gap_pct: float | None = None   # share of trades missing (reserve-chain check)
+    lag_s: float | None = None     # median receive time minus on-chain time
+    degraded: str = ""             # why entries were blocked by the feed, "" = healthy
+    sol_usd: float = 0.0
+    kind: str = "health"
+
+
+@dataclass
 class Tick:
     ts: float
     kind: str = "tick"
 
 
-Event = Launch | Trade | Migration | Social | Funding | Metadata | Tick
+Event = Launch | Trade | Migration | Social | Funding | Metadata | Health | Tick
 _KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "funding": Funding,
-          "metadata": Metadata, "tick": Tick}
+          "metadata": Metadata, "health": Health, "tick": Tick}
 
 
 def dumps(e: Event) -> str:

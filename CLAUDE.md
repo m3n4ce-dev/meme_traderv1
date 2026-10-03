@@ -11,6 +11,9 @@ DexScreener momentum bot (`meme_trader/agents/`). Read `README.md` for the overv
 - The running bot is a user service: `systemctl --user status|restart meme-sniper`. Don't edit the
   checkout it runs from mid-change; restart it after merging.
 - Never commit `.env`, `config/params.yaml`, `data/`, or anything with a key or wallet secret.
+- Strategy research follows docs/RESEARCH.md: one policy file per idea (`research/policies/`), evaluated with
+  `python -m meme_trader.sniper research eval`. Never edit a frozen policy or tune on its holdout (data after
+  `frozen_at`); a new idea is a new version. Report net results with the baselines and uncertainty, not just P&L.
 
 ## Operating the running bot (MCP tools `mcp__meme-trader__*`)
 The same tools power the dashboard's Chat tab (`meme_trader/ui/chat.py` runs `claude -p` with them; actions

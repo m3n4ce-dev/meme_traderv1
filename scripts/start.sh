@@ -6,6 +6,7 @@
 #   scripts/start.sh live                 REAL money (needs everything in docs/SETUP.md step 5)
 #   scripts/start.sh train | backtest | sweep | compare | leaders    (use your recordings in data/ by default)
 #   scripts/start.sh report | review | doctor | promote              (extra args are passed through)
+#   scripts/start.sh research eval graduation-v1                     (data | eval | freeze | final | log)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -x .venv/bin/python ] || { echo "Run the setup script first (scripts/setup_mac.sh or scripts/setup_ubuntu.sh)"; exit 1; }
@@ -45,6 +46,8 @@ case "$MODE" in
               && [ "$MODE" = train ] && echo "(a model trained on it is saved as a candidate only and can't be promoted)"
             "$PY" -m meme_trader.sniper "$MODE" "$@"
           fi ;;
+  research)
+          "$PY" -m meme_trader.sniper research "$@" ;;
   doctor|review|report|promote)
           "$PY" -m meme_trader.sniper "$MODE" "$@" ;;
   *)      sed -n '2,8p' "$0"; exit 1 ;;

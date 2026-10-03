@@ -215,7 +215,13 @@ sniper:
     commitment: confirmed        # solana only: confirmed = complete; processed is ~0.5 s sooner but can miss trades
     max_gap_pct: 5               # watchdog: more trades missing than this (live reserve-chain check) = switch endpoint
     stall_s: 60                  # watchdog: no pump.fun trade decoded for this long = switch endpoint
+    max_lag_s: 5                 # watchdog: median trade arrives this many seconds after it happened on chain = switch
+                                 # (measured 2026-10-03: PublicNode 12 s behind, public RPC 1-2 s; 0 = off)
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
+
+  market:                        # how trades are read
+    non_organic_wallets:         # their trades move the price, but never count as demand, buyers or holders
+      - BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s   # pump.fun's Mayhem-mode AI agent: ~22% of all trades (2026-10-03)
 
   agent:                         # AI operator tools (Claude Code via MCP: see .mcp.json and CLAUDE.md)
     enabled: true                # local-only API at /api/agent, secret token in data/agent.token
@@ -248,6 +254,9 @@ sniper:
     min_buyers: 12               # unique buyers in flow_window_s
     min_buy_sell_ratio: 1.5
     min_near_high: 0.9           # price within 10% of its high
+    scan_interval_s: 2           # how often candidates are checked (research varies it: results shouldn't hinge on it)
+    entry_mode: rule             # rule = the conditions above | window = research baseline: every token entering the
+                                 # curve window that passes the red-flag checks, no momentum condition
     exit_curve_pct: 94           # sell into the run-up, before migration (post-graduation liquidity drops ~57% in 25 min)
     stop_loss_pct: 15
     stall_s: 45
