@@ -24,7 +24,7 @@ from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
 from .curve import Curve
-from .events import Event, Funding, Launch, Metadata, Migration, Social, Tick, Trade, dumps
+from .events import Event, Funding, Health, Launch, Metadata, Migration, Social, Tick, Trade, dumps
 from .execution import SniperFill
 from .features import extract
 from .funding import FundingResolver, cluster_report, cohort
@@ -99,6 +99,8 @@ class Engine:
     def __init__(self, params, feed, executor, mode: str = "paper", record_path: Path | None = None,
                  log_to_journal: bool = True, desk=None, persist: bool | None = None):
         self.p = params.sniper
+        # one process = one market reading: whose trades are price-only (pump.fun's Mayhem agent by default)
+        TokenState.NON_ORGANIC = frozenset((self.p.get("market") or {}).get("non_organic_wallets") or [])
         self.feed = feed
         self.ex = executor
         self.mode = mode
@@ -176,6 +178,8 @@ class Engine:
         self.last_event = 0.0                              # feed health: time of the last real event
         # per minute: [ts, launches, trades, SOL bought, SOL sold, graduations] (dashboard "market pulse")
         self.pulse: deque = deque(maxlen=90)
+        self._last_health = 0.0
+        self.recorded_degraded = ""                        # replays: the recording says the live feed was bad here
         self._last_flush = 0.0
 
     # ------------------------------------------------------------------ helpers
@@ -226,6 +230,8 @@ class Engine:
         if getattr(self.feed, "degraded", False):
             why = getattr(self.feed, "degraded_reason", "") or f"on backup feed {self.feed.host} (no trade data)"
             return f"{why} - entries paused"
+        if self.recorded_degraded:                     # replay of a stretch the live bot couldn't trust either
+            return f"recorded feed degraded ({self.recorded_degraded}) - entries paused"
         if -self.book.day_pnl >= self.p.capital.daily_loss_limit_sol:
             return "daily loss limit"
         return ""
@@ -445,6 +451,11 @@ class Engine:
                 await self._evaluate(s)
         elif isinstance(e, Social):
             await self._on_social(e)
+        elif isinstance(e, Health):
+            if not self.feed.realtime:                  # replay: act like the live bot did at this moment
+                self.recorded_degraded = e.degraded
+                if e.sol_usd > 0:
+                    self.sol_price.usd = e.sol_usd
         elif isinstance(e, Funding):
             if e.wallet not in self.funders and e.funder:
                 self.fanout[e.funder] += 1
@@ -1127,6 +1138,12 @@ class Engine:
             self.book.day, self.book.day_pnl = day, 0.0
         eq = self.equity()
         self.book.mark(eq)
+        if self.record_file and self.feed.realtime and self.now - self._last_health >= 60:
+            self._last_health = self.now                # feed condition into the recording, once a minute
+            f = self.feed
+            self.record_file.write(dumps(Health(self.now, getattr(f, "host", ""), getattr(f, "gap_pct", None),
+                                                getattr(f, "lag_s", None), getattr(f, "degraded_reason", ""),
+                                                self.sol_price.usd)) + "\n")
         if self.now - self._last_equity >= 5:
             self._last_equity = self.now
             self.book.equity_hist.append((self.now, eq))
@@ -1363,7 +1380,7 @@ class Engine:
     # ------------------------------------------------------------------ graduation plays
     async def _maybe_late(self) -> None:
         L = self.p.late
-        if not L.enabled or self.now - self._last_late_scan < 2 or self.entries_blocked():
+        if not L.enabled or self.now - self._last_late_scan < L.get("scan_interval_s", 2) or self.entries_blocked():
             return
         self._last_late_scan = self.now
         en = self.p.entry
@@ -1423,7 +1440,7 @@ class Engine:
 
         async def publish() -> None:          # the card goes out only once we really hold the bag
             text = compose(s, self.now, usd)
-            call = Callout(s.mint, s.symbol, self.now, s.curve.market_cap_sol, s.curve.price, text, score)
+            call = Callout(s.mint, s.symbol, self.now, s.market_cap_sol, s.curve.price, text, score)
             self.callouts.add(call)
             self.stats["callouts"] += 1
             self.say("callout", text, s.mint)
@@ -1558,7 +1575,7 @@ class Engine:
         return {
             "mint": mint, "symbol": s.symbol, "name": L.name if L else "", "age_s": round(s.age(self.now)),
             "status": "held" if pos else (s.decided or "watching"), "score": s.score, "notes": s.score_notes,
-            "curve_pct": s.curve.progress * 100, "mcap_usd": s.curve.market_cap_sol * self.sol_price.usd,
+            "curve_pct": s.curve.progress * 100, "mcap_usd": s.market_cap_sol * self.sol_price.usd,
             "price": s.curve.price, "price_known": s.price_known,
             "socials": {"twitter": L.twitter if L else "", "telegram": L.telegram if L else "",
                         "website": L.website if L else ""},
@@ -1683,7 +1700,7 @@ class Engine:
             L = s.launch
             watching.append({
                 "mint": s.mint, "symbol": s.symbol, "age": round(s.age(self.now)), "progress": s.curve.progress,
-                "mcap_sol": s.curve.market_cap_sol, "buyers": len(s.buyers), "score": s.score,
+                "mcap_sol": s.market_cap_sol, "buyers": len(s.buyers), "score": s.score,
                 "notes": s.score_notes[:3], "status": status, "socials": len(s.socials),
                 "links": int(bool(L and L.twitter)) + int(bool(L and L.telegram)) + int(bool(L and L.website)),
                 "lk": [int(bool(L and L.twitter)), int(bool(L and L.telegram)), int(bool(L and L.website))],
@@ -1738,7 +1755,7 @@ class Engine:
             "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),
                      "degraded": bool(getattr(self.feed, "degraded", False)),
                      "degraded_reason": getattr(self.feed, "degraded_reason", ""),
-                     "gap_pct": getattr(self.feed, "gap_pct", None),
+                     "gap_pct": getattr(self.feed, "gap_pct", None), "lag_s": getattr(self.feed, "lag_s", None),
                      "connected": getattr(self.feed, "ws", True) is not None,
                      "last_event_age_s": round(self.now - self.last_event, 1) if self.last_event else None},
         }

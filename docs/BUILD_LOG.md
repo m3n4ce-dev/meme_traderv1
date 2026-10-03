@@ -4,6 +4,73 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #16: Research pipeline: one frozen strategy, clean data, an evaluation that can say no
+
+### Why
+An external review ("Astra") made the case that the bot has no demonstrated edge, only a few lucky paper trades. Its prescription: concentrate on one written-down strategy, make the data reflect what the bot actually knew, and evaluate in a way that can reject a favourite idea. The owner said yes to steps 1–3.
+
+### Measured while checking the review's claims
+- **Fees on chain:** the TradeEvent's own fee fields show **0.95% protocol + 0.30% creator = 1.25%**, as assumed. Some trades pay 0.
+- **Feed delay:** receive time vs the chain tip, in slots (clock NTP-synced):
+
+  | Endpoint | Median | p99 |
+  |---|---|---|
+  | PublicNode `logsSubscribe` (confirmed) | **12.3 s** | 13.6 s |
+  | PublicNode (processed) | 12.8 s | 13.7 s |
+  | api.mainnet-beta (confirmed) | 1.0 s | 2.1 s |
+
+  The watchdog only checked for missing trades, and `.env` listed PublicNode first, retried every 30 min. So parts of the paper run and the recordings were ~12 s stale. For a strategy that often holds ~15 s, that's decisive.
+- **Mayhem agent:** wallet `BwWK17…` made **22.2% of all recorded trades** (298k of 1.35M). The tracker counted it as an ordinary buyer and holder; its 1B-token bag made Mayhem tokens look 100% concentrated.
+  - On this data, no Mayhem token passed the other checks anyway (serial deployer 167, red flags 151, momentum 35 of 461 evaluated), so results are identical with or without the fix.
+  - Mayhem tokens are 34% of tokens traded and 26% of those reaching the 55% window.
+- **Data on hand:** one day, 16.3 h, 30.6k launches, 1.36M trades.
+- **Paper journal:** 36 graduation trades, +0.585 SOL. Without the top 3 of each session: +0.02 and −0.34 SOL.
+
+### Built
+- **Recordings:**
+  - each trade now carries its `slot`, on-chain `chain_ts`, `fee_bps` and `creator_fee_bps`, decoded from the TradeEvent (offsets checked on live data);
+  - a `health` record each minute: host, gap %, lag, degraded reason, SOL/USD.
+- **Watchdog:** median delay above `feed.max_lag_s` (5 s) counts as degraded: entries pause and the endpoint is dropped. Lag is shown in the snapshot.
+- **`sniper.market.non_organic_wallets`** (default: the Mayhem agent):
+  - their trades move the price but count as no demand, no buyer and no holder;
+  - a Mayhem token is detected when the agent trades it, and its market cap uses the 2B supply (`TokenState.market_cap_sol`).
+- **Replays:**
+  - honour recorded health: no entries where the live feed was degraded, and the recorded SOL price is used;
+  - `late.entry_mode: window` gives a no-filter baseline;
+  - `late.scan_interval_s` is now a setting.
+- **`research` command** (`sniper/research.py`, `docs/RESEARCH.md`):
+  - policies in `research/policies/`;
+  - `eval` (result, day/4h-block bootstrap, winner dependence, slippage and size curves, timing, no-filter and random baselines, ablations), run in parallel;
+  - `freeze`: its signature covers settings, gates and operating costs;
+  - `final`: shows nothing before the minimum holdout, then judges once and stores the verdict;
+  - `log`: an experiment registry with a variants-tried count.
+- **Prefilter:** a graduation replay only needs tokens whose curve gets near the window, but dropping events moved the engine's 1-second clock and changed results (191 vs 201 trades). Dropped events that would have ticked now become Ticks at the same instant. The full and prefiltered replays now match exactly: 201 trades, +1.5506 SOL.
+- **`graduation-v1`:**
+  - the current graduation rules with organic demand, fixed $20, 6 open, 1 SOL daily loss limit;
+  - gates: ≥ 14 holdout days, ≥ 150 trades, P(mean daily > 0) ≥ 0.9, ≥ 0 without the top 3, break-even slippage ≥ 5%.
+- **Live paper bot:** copy trading and agent buys are switched off for the evaluation window.
+
+### First development report (graduation-v1, 16.3 h, before freezing)
+| | |
+|---|---|
+| Net | **+1.55 SOL** on 201 trades at $20 (+7.8% on cost), win 26%, PF 1.48 |
+| Uncertainty (5 × 4 h blocks) | mean +0.31 SOL/block, 90% [−0.02, +0.64], P(>0) 0.94 |
+| Without best 1 / 3 / 5 / 10 | +1.23 / +0.63 / +0.16 / −0.72 SOL |
+| By exit | graduation exit 22× +3.41; momentum decay 58× +1.03; stop 99× −2.40; dev sold 17× −0.45 |
+| Slippage per side 0 / 1.5 / 3 / 5 / 8% | +2.70 / +2.19 / +1.55 / +0.68 / −1.01 → break-even 6.2% |
+| Size $5 / 10 / 20 / 50 / 100 / 250 | +1.2% / 5.3% / 7.8% / 8.2% / 7.4% / 2.4% on cost; at $250, 68 trades (3%-of-curve cap) |
+| Candidate scan every 1 / 2 / 3 s | +1.55 / +1.55 / **+0.13** |
+| No momentum filter | 294 trades, −0.74 SOL; the rules beat 100% of random picks of 201 |
+| Ablations | removing the buyer-count filter hurts most (+0.44); the other filters cost little either way |
+
+Reading: there's something here worth testing, but two warnings stand out.
+- **Entry speed:** checking 1 s later removes most of the profit, so the result likely depends on entering faster than real orders can.
+- **Stale data:** the development data was partly 12 s stale.
+
+Next after the holdout is collecting: **execution measurement**. That means signal-to-landing delay, and how far price moves in that time by curve stage and size, in place of the flat 3% fill assumption.
+
+---
+
 ## 2026-10-03 — Entry #15: Chat in the dashboard, contract-address lookup, paper deposits, more charts
 
 ### Owner input

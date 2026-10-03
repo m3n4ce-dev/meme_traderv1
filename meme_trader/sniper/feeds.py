@@ -168,17 +168,38 @@ class FeedQuality:
     that doesn't is the share of trades the endpoint dropped or reordered; free endpoints quietly drift
     from ~0% to 30%+ as they throttle, without ever closing the connection."""
 
-    def __init__(self, max_gap_pct: float = 5.0, window: int = 2000, min_checks: int = 400):
+    def __init__(self, max_gap_pct: float = 5.0, window: int = 2000, min_checks: int = 400,
+                 max_lag_s: float = 5.0, min_lags: int = 200):
         self.max_gap_pct = max_gap_pct
         self.min_checks = min_checks
         self.checks: deque[bool] = deque(maxlen=window)
         self.last: dict[str, float] = {}
+        # latency: receive time minus the trade's on-chain Clock time. Complete is not enough - measured
+        # 2026-10-03, PublicNode's log stream ran 12 s behind the chain (p99 13.6 s) with ~0% missing,
+        # while the public RPC was 1-2 s behind. A stale feed makes every decision on old prices.
+        self.max_lag_s = max_lag_s
+        self.min_lags = min_lags
+        self.lags: deque[float] = deque(maxlen=600)
 
     def reset(self) -> None:
         self.checks.clear()
         self.last.clear()
+        self.lags.clear()
+
+    @property
+    def lag_s(self) -> float | None:
+        if not self.lags:
+            return None
+        xs = sorted(self.lags)
+        return round(xs[len(xs) // 2], 1)
+
+    @property
+    def slow(self) -> bool:
+        return len(self.lags) >= self.min_lags and self.max_lag_s > 0 and (self.lag_s or 0) > self.max_lag_s
 
     def observe(self, t: Trade) -> None:
+        if t.chain_ts > 0:
+            self.lags.append(t.ts - t.chain_ts)
         prev = self.last.pop(t.mint, None)
         if prev is not None:
             expected = prev - t.tokens if t.side == "buy" else prev + t.tokens
@@ -215,7 +236,7 @@ class SolanaTradeFeed(Feed):
     RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
 
     def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
-                 max_gap_pct: float = 5.0, stall_s: float = 60.0):
+                 max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0):
         self.ws_urls = ws_urls(ws_url)
         self.ws_idx = 0
         # "confirmed": a fraction of a second later than "processed", but complete. Measured 2026-10-03 on
@@ -224,7 +245,7 @@ class SolanaTradeFeed(Feed):
         # watchdog: pump.fun trades every second, so this long with no decoded trade means the stream is
         # broken even if the connection is up (seen 2026-10-03: a 91-minute silence on an open socket)
         self.stall_s = stall_s
-        self.quality = FeedQuality(max_gap_pct)
+        self.quality = FeedQuality(max_gap_pct, max_lag_s=max_lag_s)
         self.last_trade = 0.0
         self.launches = PumpPortalFeed(fallback_urls, use_key=False)
         self.watched: set[str] = set()
@@ -281,6 +302,10 @@ class SolanaTradeFeed(Feed):
         return round(self.quality.gap_pct, 2)
 
     @property
+    def lag_s(self) -> float | None:
+        return self.quality.lag_s
+
+    @property
     def degraded_reason(self) -> str:
         if self.launches.degraded:
             return f"launch feed on backup {self.launches.host}"
@@ -290,6 +315,8 @@ class SolanaTradeFeed(Feed):
             return f"checking trade data from {self.host}"
         if self.quality.bad:
             return f"trade data from {self.host} incomplete ({self.quality.gap_pct:.0f}% missing)"
+        if self.quality.slow:
+            return f"trade data from {self.host} is {self.quality.lag_s:.0f}s behind the chain"
         return ""
 
     @property
@@ -297,8 +324,8 @@ class SolanaTradeFeed(Feed):
         return bool(self.degraded_reason)
 
     @staticmethod
-    def parse_logs(value: dict, now: float) -> list[Trade]:
-        """Trades from one logsSubscribe notification value ({signature, err, logs}).
+    def parse_logs(value: dict, now: float, slot: int = 0) -> list[Trade]:
+        """Trades from one logsSubscribe notification value ({signature, err, logs}); slot from its context.
 
         `mentions` matches whole transactions, so any program in one can log bytes that look like a
         TradeEvent. An event only counts while pump.fun itself is the executing program, tracked through
@@ -337,12 +364,18 @@ class SolanaTradeFeed(Feed):
                 continue
             if raw[:8] != TRADE_EVENT or len(raw) < 129:
                 continue
+            # TradeEvent: mint 8, sol 40, tokens 48, is_buy 56, user 57, timestamp 89, virtual reserves 97/105,
+            # real reserves 113/121, fee recipient 129, fee bps 161, fee 169, creator 177, creator fee bps 209
             sol, tokens = struct.unpack_from("<QQ", raw, 40)
+            chain_ts, = struct.unpack_from("<q", raw, 89)
             v_sol, v_tokens = struct.unpack_from("<QQ", raw, 97)
+            fee_bps, creator_bps = (struct.unpack_from("<Q", raw, 161)[0], struct.unpack_from("<Q", raw, 209)[0]) \
+                if len(raw) >= 217 else (-1, -1)
             out.append(Trade(mint=str(Pubkey.from_bytes(raw[8:40])), ts=now,
                              trader=str(Pubkey.from_bytes(raw[57:89])), side="buy" if raw[56] else "sell",
                              sol=sol / 1e9, tokens=tokens / 1e6, v_sol=v_sol / 1e9, v_tokens=v_tokens / 1e6,
-                             signature=value.get("signature", "")))
+                             signature=value.get("signature", ""), slot=int(slot), chain_ts=float(chain_ts),
+                             fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps)))
         return out
 
     def _check_stream(self, now: float, connected: float) -> str:
@@ -351,6 +384,8 @@ class SolanaTradeFeed(Feed):
             return f"no pump.fun trades for {now - self.last_trade:.0f}s"
         if self.quality.bad:
             return f"{self.quality.gap_pct:.1f}% of trades missing"
+        if self.quality.slow:
+            return f"{self.quality.lag_s:.0f}s behind the chain"
         if self.ws_idx != 0 and now - connected > self.RETRY_PRIMARY_S:
             return "retry"
         return ""
@@ -375,12 +410,14 @@ class SolanaTradeFeed(Feed):
                             break
                         now = time.time()
                         try:
-                            value = json.loads(msg.data)["params"]["result"]["value"]
-                        except (ValueError, KeyError, TypeError):
+                            result = json.loads(msg.data)["params"]["result"]
+                            value = result["value"]
+                            slot = (result.get("context") or {}).get("slot", 0)
+                        except (ValueError, KeyError, TypeError, AttributeError):
                             why = self._check_stream(now, connected)
                             continue                    # subscription reply etc.
                         self.trades_up = True
-                        for t in self.parse_logs(value, now):
+                        for t in self.parse_logs(value, now, slot):
                             self.last_trade = now
                             backoff = 1
                             self.quality.observe(t)

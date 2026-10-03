@@ -79,7 +79,7 @@ async def _run(args, params) -> None:
     elif f.trades == "pumpportal":
         feed = PumpPortalFeed(f.fallback_ws_urls)
     else:
-        feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls, f.commitment, f.max_gap_pct, f.stall_s)
+        feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls, f.commitment, f.max_gap_pct, f.stall_s, f.max_lag_s)
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"
@@ -516,10 +516,21 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    from .research import add_parser as research_parser
+
+    research_parser(sub)
     for p in (r, b, lead, sw, tr, rp, cp, rv, pm, sub.choices["doctor"]):
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
+    if args.cmd == "research":                     # policies carry their own settings (not params.yaml)
+        from .research import main as research
+
+        try:
+            research(args)
+        except config.ConfigError as e:
+            sys.exit(f"research: {e}")
+        return
     try:
         params = apply_overrides(config.load(args.config), args.set)
     except config.ConfigError as e:

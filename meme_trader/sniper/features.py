@@ -42,6 +42,8 @@ def extract(s, now: float, ctx: dict | None = None) -> dict[str, float]:
         if ts < now - 60:
             break
         prices.append(price)
+        if trader in s.NON_ORGANIC:          # moves the price, isn't demand
+            continue
         recent = ts >= now - 20
         if side == "buy":
             buys60 += 1
@@ -70,7 +72,7 @@ def extract(s, now: float, ctx: dict | None = None) -> dict[str, float]:
         "age_min": s.age(now) / 60,
         "curve_pct": s.curve.progress * 100,
         "real_sol": s.curve.real_sol,
-        "log_mcap_sol": _log1p(s.curve.market_cap_sol),
+        "log_mcap_sol": _log1p(s.market_cap_sol),
         "log_buyers": _log1p(len(s.buyers)),
         "log_holders": _log1p(len(s.holders)),
         "buyers_20s": float(len(buyers20)),

@@ -196,6 +196,11 @@ def validate_sniper(sn: dict) -> None:
         if (sn["chat"].get("model") or "") not in ("", "opus", "sonnet", "haiku"):
             raise ConfigError("sniper.chat.model must be one of: \"\", opus, sonnet, haiku")
     _num(sn, "feed.stall_s", 0, lo_open=True)
+    _num(sn, "feed.max_lag_s", 0)
+    _require(sn["late"].get("entry_mode", "rule") in ("rule", "window"),
+             "sniper.late.entry_mode must be rule or window")
+    _require(isinstance((sn.get("market") or {}).get("non_organic_wallets", []), list),
+             "sniper.market.non_organic_wallets must be a list of wallet addresses")
 
 
 def validate(p: dict) -> None:
