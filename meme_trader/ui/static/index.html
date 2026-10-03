@@ -134,7 +134,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); 
 .log div { padding: 3px 0; border-bottom: 1px solid var(--grid); display: flex; gap: 8px; }
 .log time { color: var(--muted); flex: none; }
 .log .buy b { color: var(--series); } .log .sell b, .log .close b { color: var(--good); }
-.log .error b { color: var(--bad); } .log .signal b, .log .desk b { color: var(--accent); }
+.log .error b { color: var(--bad); } .log .signal b, .log .desk b, .log .agent b { color: var(--accent); }
 .log .callout b { color: var(--good); }
 .log [data-open] { cursor: pointer; } .log [data-open]:hover { background: var(--surface-2); }
 .co { padding: 8px 0; border-bottom: 1px solid var(--grid); display: block !important; }
@@ -576,7 +576,7 @@ function logToasts(s) {
   }
   S.first = false;
   if (S.seen.size > 3000) S.seen = new Set([...S.seen].slice(-1500));
-  fresh.reverse().filter(l => ["buy", "sell", "close", "error", "callout"].includes(l.level)).slice(-3)
+  fresh.reverse().filter(l => ["buy", "sell", "close", "error", "callout", "agent"].includes(l.level)).slice(-3)
     .forEach(l => toast(`<b>${l.level.toUpperCase()}</b> ${esc(l.text)}`, l.level, l.mint || null));
 }
 

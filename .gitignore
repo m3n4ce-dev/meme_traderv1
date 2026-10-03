@@ -10,3 +10,6 @@ __pycache__/
 
 # your local settings (merged over config/params.example.yaml)
 config/params.yaml
+
+# Claude Code: personal, per-machine settings
+.claude/settings.local.json

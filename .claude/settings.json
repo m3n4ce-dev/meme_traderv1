@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__meme-trader__get_status",
+      "mcp__meme-trader__get_positions",
+      "mcp__meme-trader__get_radar",
+      "mcp__meme-trader__get_token",
+      "mcp__meme-trader__get_analytics",
+      "mcp__meme-trader__get_recent_trades",
+      "mcp__meme-trader__get_log",
+      "mcp__meme-trader__get_settings"
+    ],
+    "ask": [
+      "mcp__meme-trader__set_setting",
+      "mcp__meme-trader__pause_entries",
+      "mcp__meme-trader__resume_entries",
+      "mcp__meme-trader__sell_position",
+      "mcp__meme-trader__buy_token",
+      "mcp__meme-trader__watch_token",
+      "mcp__meme-trader__add_note"
+    ]
+  }
+}
