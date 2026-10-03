@@ -4,6 +4,51 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #15: Chat in the dashboard, contract-address lookup, paper deposits, more charts
+
+### Owner input
+- "I want to not have to go to my terminal to start and talk to it. I want a chat section and more visual pleasers and graphs etc."
+- "Want the bot to be able to raise paper trading balance if I ask it to and also I want to be able to type a CA to it and it pull metrics."
+
+### Built
+- **Chat tab** (`ui/chat.py`): each message runs Claude Code headless (`claude -p`, stream-json) in the repo, on the owner's Claude plan, with no API key.
+  - **Isolation:**
+    - `--tools ""` removes the shell and file tools;
+    - `--strict-mcp-config` loads only the meme-trader server;
+    - the environment is an allowlist, so no `.env` secrets, RPC URLs or `ANTHROPIC_API_KEY` reach it (with that key set, Claude Code would bill the API).
+  - **Streaming:** replies stream token by token to every open tab over the existing origin-checked websocket. The conversation continues with `--resume`, and **New chat** resets it.
+  - **Approvals:** Claude Code's `--permission-prompt-tool` is `approve_action` on the MCP server. It exists only when the chat starts it. Through `POST /api/agent` (`_approval`) it shows an Approve / Decline card and waits up to 10 min; no answer means declined. Read tools are pre-allowed.
+  - **Usage meter:** the stream's `rate_limit_event` feeds a 5-hour / weekly usage meter.
+  - **Model:** chosen per chat (Default / Opus / Sonnet / Haiku).
+- **Contract-address lookup** (`sniper/lookup.py`): metrics for any Solana token, tracked or not, from five sources in parallel. Each source is optional, and results are cached 15 s.
+  - **On-chain:** the bonding-curve account is decoded directly (reserves, graduated flag, creator, Mayhem flag), plus mint/freeze authority and supply.
+  - **DexScreener:** price, liquidity, volume, buys/sells, change, socials.
+  - **RugCheck:** risk list, top holders with insider flags, holder count.
+  - **GeckoTerminal:** candles.
+  - **The bot's own view,** when it tracks the token.
+  - **Output:** flags summarise what stands out. Pasting a CA in Chat shows the card at once, with no Claude usage. The metrics then go into the prompt, so Claude's read needs no tool call. The token drawer also falls back to this card for untracked tokens.
+  - **Holder lists:** PublicNode rejects `getTokenLargestAccounts` without a personal token, and the public RPC rate-limits it. So holders come from RugCheck, then the owner's own `SOLANA_RPC_URL`, then the bot's tape.
+- **Paper deposits:** `Engine.deposit_paper` adds pretend SOL as capital, not profit (start, peak and equity history shift with it). Three ways in: the agent tool `add_paper_funds` (capped by `agent.max_deposit_sol`, refused live, optionally saved as `capital.starting_sol`), Controls → Paper balance, and Chat.
+- **Charts:**
+  - Live KPIs gained an equity sparkline, a win-rate ring, a daily-loss-limit meter and a drawdown-vs-kill-switch meter.
+  - New Live panels: a recent-trades strip, the per-minute **market pulse** (launches, trades on tracked tokens, graduations; `Engine.pulse`) and a strategy-mix donut.
+  - Analytics gained cumulative P&L by strategy (`timeline`) and P&L by exit reason.
+  - A Chat sidebar shows account, positions, market pulse and agent actions.
+
+### Found
+- **Mayhem mode** tokens (pump.fun, newer curves) mint **2B** tokens; half goes to pump.fun's trading agent. They have a flag byte after the creator in the curve account. The engine's `market_cap_sol` assumes 1B supply, so it shows **half** the real market cap for these tokens. The lookup uses the real supply. Follow-up: carry supply into `TokenState` and check market-cap-based gates.
+- On a Mayhem token the virtual SOL reserve moved far more than the real SOL (k not constant). Treat curve math for Mayhem tokens with care.
+
+### Verified
+- **Tests:** 173 pass. The 15 new ones drive the chat with a fake `claude` and cover streaming, resume, lost-session recovery, the env allowlist, approvals (approve, decline, auto, no run), the CA card, restart recovery, routes, MCP tool sets, lookup decode and flags, deposits and the pulse.
+- **Real Claude Code against the demo bot (Haiku):**
+  - pause with approval: done in 4.6 s;
+  - declined resume: not done, and Claude said so;
+  - pasted BONK CA: card plus read in one turn.
+- **Screenshots** checked in headless Chromium, dark and light, at 1440 px and 400 px. No page errors.
+
+---
+
 ## 2026-10-03 — Entry #14: AI operator tools (MCP) for Claude Code
 
 ### Owner input

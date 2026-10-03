@@ -7,7 +7,9 @@ this port to the internet without putting auth in front of it.
   GET /api/analytics     KPIs, breakdowns, Monte Carlo projection, highlights
   GET /api/token/{mint}  token detail: gate checklist, model drivers, holders, tape
   GET /api/controls      live-adjustable settings
-  WS  /ws                1 s snapshots; actions: pause resume kill sell posted set save
+  GET /api/chat          chat history and status (chat.py)
+  WS  /ws                1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
+                         lookup chat chat_stop chat_new chat_decide chat_opts
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
@@ -42,7 +44,7 @@ def _json(obj, status: int = 200) -> web.Response:
                         headers={"Cache-Control": "no-store"})
 
 
-def make_app(engine, agent_token: str | None = None) -> web.Application:
+def make_app(engine, agent_token: str | None = None, chat=None) -> web.Application:
     @web.middleware
     async def local_only(request, handler):
         if not _local(request.headers.get("Host", "")):
@@ -71,6 +73,9 @@ def make_app(engine, agent_token: str | None = None) -> web.Application:
     async def controls(_):
         return _json(engine.controls())
 
+    async def chat_state(_):
+        return _json(chat.public() if chat else {"messages": [], "available": False, "disabled": True})
+
     async def ws(request):
         # Browsers let any website open a websocket to 127.0.0.1, so a page you visit could send KILL/SELL.
         # Only accept the dashboard's own origin (which is also what you get through an SSH tunnel).
@@ -97,6 +102,13 @@ def make_app(engine, agent_token: str | None = None) -> web.Application:
                 await asyncio.sleep(1)
 
         task = asyncio.create_task(pump())
+        chat_q = chat.subscribe() if chat else None
+
+        async def chat_pump():
+            while not sock.closed:
+                await send(jsonsafe.dumps(await chat_q.get()))
+
+        chat_task = asyncio.create_task(chat_pump()) if chat else None
         try:
             async for msg in sock:
                 if msg.type == WSMsgType.TEXT:
@@ -113,6 +125,9 @@ def make_app(engine, agent_token: str | None = None) -> web.Application:
                             await send(jsonsafe.dumps({"type": "ack", "action": cmd.get("action"), **reply}))
         finally:
             task.cancel()
+            if chat_task:
+                chat_task.cancel()
+                chat.unsubscribe(chat_q)
         return sock
 
     async def control(cmd: dict) -> dict | None:
@@ -141,10 +156,47 @@ def make_app(engine, agent_token: str | None = None) -> web.Application:
         if action == "save":
             err = engine.save_controls()
             return {"ok": not err, "text": err or "Settings written to config/params.yaml"}
+        if action == "deposit":
+            try:
+                out = engine.deposit_paper(float(cmd.get("sol") or 0))
+            except (TypeError, ValueError) as e:
+                return {"ok": False, "text": str(e)}
+            if cmd.get("keep"):
+                base = float(engine.p.capital.starting_sol) + float(cmd["sol"])
+                engine.p.capital["starting_sol"] = base
+                engine.save_setting("capital.starting_sol", round(base, 6))
+            return {"ok": True, "text": f"Added {float(cmd['sol']):g} paper SOL · cash {out['cash_sol']:.3f} SOL"
+                    + (" · saved as the starting balance" if cmd.get("keep") else "")}
+        if action == "lookup":
+            from ..sniper.lookup import lookup
+
+            try:
+                return {"ok": True, "mint": cmd.get("mint"), "lookup": await lookup(str(cmd.get("mint") or ""), engine,
+                                                                                  watch=bool(cmd.get("watch")))}
+            except ValueError as e:
+                return {"ok": False, "text": str(e)}
+        if action.startswith("chat") and chat is None:
+            return {"ok": False, "text": "Chat is off (sniper.chat.enabled, and the agent API must be on)"}
+        if action == "chat":
+            err = await chat.send(str(cmd.get("text") or ""))
+            return {"ok": False, "text": err} if err else None
+        if action == "chat_stop":
+            await chat.stop()
+            return None
+        if action == "chat_new":
+            await chat.new_chat()
+            return None
+        if action == "chat_decide":
+            err = chat.decide(str(cmd.get("aid") or ""), bool(cmd.get("allow")))
+            return {"ok": False, "text": err} if err else None
+        if action == "chat_opts":
+            err = chat.set_options(cmd.get("model"), cmd.get("ask_first"), cmd.get("auto_read"))
+            return {"ok": False, "text": err} if err else None
         return None
 
     app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics),
-                    web.get("/api/token/{mint}", token), web.get("/api/controls", controls)])
+                    web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
+                    web.get("/api/chat", chat_state)])
     if agent_token:
         from ..sniper.agent_api import AgentAPI, AgentError
 
@@ -157,6 +209,13 @@ def make_app(engine, agent_token: str | None = None) -> web.Application:
                 return _json({"error": "missing or wrong X-Agent-Token"}, 403)
             try:
                 body = await request.json()
+                if body.get("tool") == "_approval":      # the dashboard chat's permission prompt (chat.py)
+                    a = body.get("args") or {}
+                    if chat is None:
+                        return _json({"result": {"behavior": "deny", "message": "the dashboard chat is off"}})
+                    res = await chat.request_approval(str(a.get("tool_name", "")), a.get("input") or {},
+                                                      str(a.get("tool_use_id") or ""))
+                    return _json({"result": res})
                 result = await api.call(str(body.get("tool", "")), body.get("args") or {})
             except AgentError as e:
                 return _json({"error": str(e)}, 400)
@@ -182,11 +241,18 @@ def write_agent_token(path: Path) -> str:
 
 async def start(engine, host: str = "127.0.0.1", port: int = 8787) -> web.AppRunner:
     """Bind the dashboard now (raises OSError if the port is taken) and return its runner. With the agent
-    API on (sniper.agent.enabled), a new token is written to data/agent.token for the MCP server."""
+    API on (sniper.agent.enabled), a new token is written to data/agent.token for the MCP server, and the
+    dashboard chat (sniper.chat.enabled) can run Claude Code against it."""
     from ..journal import DATA
 
     token = write_agent_token(DATA / "agent.token") if (engine.p.get("agent") or {}).get("enabled") else None
-    runner = web.AppRunner(make_app(engine, token))
+    chat = None
+    cc = engine.p.get("chat") or {}
+    if token and cc.get("enabled", True):
+        from .chat import ChatManager
+
+        chat = ChatManager(engine, port, cc)
+    runner = web.AppRunner(make_app(engine, token, chat))
     await runner.setup()
     try:
         await web.TCPSite(runner, host, port).start()
