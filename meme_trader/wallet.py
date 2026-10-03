@@ -73,6 +73,18 @@ class Wallet:
     def sol_balance(self) -> float:
         return rpc("getBalance", [self.pubkey, {"commitment": "confirmed"}])["value"] / 1e9
 
+    def all_token_balances(self) -> dict[str, int]:
+        """mint -> raw balance for every non-empty token account (SPL Token + Token-2022)."""
+        out: dict[str, int] = {}
+        for program in ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"):
+            res = rpc("getTokenAccountsByOwner", [self.pubkey, {"programId": program}, {"encoding": "jsonParsed"}])
+            for a in res["value"]:
+                info = a["account"]["data"]["parsed"]["info"]
+                amt = int(info["tokenAmount"]["amount"])
+                if amt:
+                    out[info["mint"]] = out.get(info["mint"], 0) + amt
+        return out
+
     def token_balance(self, mint: str) -> int:
         res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint}, {"encoding": "jsonParsed"}])
         return sum(int(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"]) for a in res["value"])
