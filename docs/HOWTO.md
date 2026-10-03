@@ -137,15 +137,15 @@ scripts/start.sh leaders
 This ranks wallets in your recordings by profit, and flags insider-like and bot-speed ones. Paste a candidate under `copy.leaders` in `config/params.yaml` with `mode: signal`. In signal mode it boosts a token's score instead of copying blindly. Watch its results in the **Copy trading** panel. A leader that keeps losing is paused automatically.
 
 ## 12. Run 24/7 on the mini PC and check from the Mac
-On the P8:
+On the mini PC:
 ```bash
 bash scripts/setup_ubuntu.sh --service
 ```
 On the Mac:
 ```bash
-ssh -L 8787:127.0.0.1:8787 you@wowe-p8.local
+ssh -L 8787:127.0.0.1:8787 you@botbox.local
 ```
-Then open http://127.0.0.1:8787 on the Mac. Details are in [UBUNTU_SETUP.md](UBUNTU_SETUP.md). The dashboard only answers on the P8 itself, because its buttons can sell, so always use the tunnel.
+Then open http://127.0.0.1:8787 on the Mac. Details are in [UBUNTU_SETUP.md](UBUNTU_SETUP.md). The dashboard only answers on the mini PC itself, because its buttons can sell, so always use the tunnel.
 
 ## 13. Go live
 Only after weeks of paper trading that you're happy with in **Analytics**. Follow [SETUP.md step 5](SETUP.md#5-going-live-real-money):
@@ -165,6 +165,6 @@ Start with the smallest sizes.
 | "running · max positions" | All trading slots are full. Raise **Max open positions** or wait for exits. |
 | No buys for a long time | Look at **Why we passed** and the radar's rejected tokens, then check the gate audit in Analytics. |
 | `no model` badge | Normal until you run `scripts/start.sh train`. |
-| Dashboard says disconnected | The bot stopped. Check the terminal, or `journalctl -u meme-sniper -n 50` on the P8. |
+| Dashboard says disconnected | The bot stopped. Check the terminal, or `journalctl -u meme-sniper -n 50` on the mini PC. |
 
 Nothing here is financial advice. Most pump.fun tokens go to zero.

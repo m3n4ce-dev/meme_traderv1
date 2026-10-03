@@ -101,7 +101,7 @@ def test_engine_with_desk_and_copy_trading():
 
 
 def test_valid_pubkey():
-    assert valid_pubkey("HTG4jCTAVB6H8QThytKtrApjNaQhMuUENFi9Whppag6Z")
+    assert valid_pubkey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")   # pump.fun program id
     assert not valid_pubkey("not-a-key") and not valid_pubkey("")
 
 
