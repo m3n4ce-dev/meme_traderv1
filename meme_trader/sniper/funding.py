@@ -57,6 +57,8 @@ class FundingResolver:
         async with session.get(url, params={"api-key": self.helius_key}) as r:
             if r.status == 404:                      # never funded
                 return Funding(wallet, time.time())
+            if r.status != 200:
+                raise RuntimeError(f"helius funded-by {r.status}")
             d = await r.json(content_type=None)
         return Funding(wallet, time.time(), d.get("funder") or "", (d.get("funderType") or "").lower())
 
@@ -64,7 +66,10 @@ class FundingResolver:
         async def call(method, params):
             async with session.post(self.rpc_url, json={"jsonrpc": "2.0", "id": 1, "method": method,
                                                         "params": params}) as r:
-                return (await r.json(content_type=None)).get("result")
+                d = await r.json(content_type=None)
+            if r.status != 200 or "error" in d:      # rate limit etc.: don't cache this wallet as "unknown"
+                raise RuntimeError(f"{method}: {d.get('error') or r.status}")
+            return d.get("result")
 
         sigs = await call("getSignaturesForAddress", [wallet, {"limit": 1000}]) or []
         if not sigs or len(sigs) >= 1000:            # unknown: no history, or too old to be a fresh insider

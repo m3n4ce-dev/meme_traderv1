@@ -24,8 +24,12 @@ class Orchestrator:
     def prices(self) -> dict[str, float]:
         if not self.pf.positions:
             return {}
-        return {m: float(p.get("priceNative") or 0)
-                for m, p in dexscreener.best_pair_by_mint(list(self.pf.positions)).items()}
+        out = {}
+        for m, p in dexscreener.best_pair_by_mint(list(self.pf.positions)).items():
+            px = float(p.get("priceNative") or 0)
+            if px > 0:                       # a missing price must fall back to entry, never value the bag at 0
+                out[m] = px
+        return out
 
     def manage_positions(self, prices: dict[str, float]) -> None:
         for mint, pos in list(self.pf.positions.items()):

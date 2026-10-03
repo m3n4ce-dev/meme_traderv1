@@ -9,6 +9,7 @@ LiveExecutor   - PumpPortal local-transaction API: it builds the tx, we sign loc
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from .curve import Curve
@@ -49,8 +50,12 @@ class LiveExecutor:
     * Every attempt asks PumpPortal for a FRESH transaction (= a re-quote). Buys are never retried
       blindly; sells step up slippage (execution.sell_slippage_steps) because being stuck in a
       dumping token costs more than a worse fill.
-    * Late landings: if confirmation times out we still re-read balances, so a fill that landed
-      late is booked instead of becoming an untracked position.
+    * Fills are measured from the confirmed transaction's own pre/post balances, so trades running
+      at the same time can't pollute each other, and the ~0.002 SOL token-account rent (returned when
+      the account is closed) is kept out of the cost basis.
+    * Late landings: if confirmation times out we still look the transaction up, so a fill that
+      landed late is booked instead of becoming an untracked position.
+    * Nothing here raises: any error comes back as a failed fill.
     """
     URL = "https://pumpportal.fun/api/trade-local"
 
@@ -58,7 +63,8 @@ class LiveExecutor:
         self.ex = ex
         self.wallet = wallet
 
-    def _attempt(self, mint: str, action: str, amount, in_sol: bool, slippage: float) -> SniperFill:
+    def _attempt(self, mint: str, action: str, amount, in_sol: bool, slippage: float,
+                 estimate_sol: float = 0.0) -> SniperFill:
         import base64
 
         import httpx
@@ -66,23 +72,51 @@ class LiveExecutor:
         from ..wallet import confirm
 
         w = self.wallet
-        sol0, tok0 = w.sol_balance(), w.token_balance(mint)
-        r = httpx.post(self.URL, timeout=10, data={
-            "publicKey": w.pubkey, "action": action, "mint": mint, "amount": amount,
-            "denominatedInSol": "true" if in_sol else "false", "slippage": slippage,
-            "priorityFee": self.ex.priority_fee_sol, "pool": "auto",
-        })
-        if r.status_code != 200:
-            return SniperFill(False, error=f"pumpportal {r.status_code}: {r.text[:200]}")
-        sig = w.sign_and_send(base64.b64encode(r.content).decode())
-        landed = confirm(sig, timeout_s=30)
-        # Measure what actually happened (fees, slippage) from balances. Token amounts in UI units.
-        dsol = w.sol_balance() - sol0
-        dtok = (w.token_balance(mint) - tok0) / 1e6   # pump.fun tokens have 6 decimals
-        moved = dtok > 0 if action == "buy" else dtok < 0
-        if not landed and not moved:
+        try:
+            r = httpx.post(self.URL, timeout=10, data={
+                "publicKey": w.pubkey, "action": action, "mint": mint, "amount": amount,
+                "denominatedInSol": "true" if in_sol else "false", "slippage": slippage,
+                "priorityFee": self.ex.priority_fee_sol, "pool": "auto",
+            })
+            if r.status_code != 200:
+                return SniperFill(False, error=f"pumpportal {r.status_code}: {r.text[:200]}")
+            sig = w.sign_and_send(base64.b64encode(r.content).decode())
+        except Exception as e:                       # incl. preflight/simulation failures from sendTransaction
+            return SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        try:
+            landed = confirm(sig, timeout_s=30)
+        except Exception:
+            landed = False
+        d = None
+        for _ in range(4):                           # the tx can take a moment to be queryable
+            try:
+                d = w.tx_deltas(sig, mint)
+            except Exception:
+                d = None
+            if d is not None or not landed:
+                break
+            time.sleep(1.5)
+        if d is not None:
+            if d["failed"]:
+                return SniperFill(False, signature=sig, error="transaction failed on-chain")
+            tokens = abs(d["dtok"]) / 1e6           # pump.fun tokens have 6 decimals
+            moved = d["dtok"] > 0 if action == "buy" else d["dtok"] < 0
+            if not moved or tokens <= 0:
+                return SniperFill(False, signature=sig, error="landed but no token change for this wallet")
+            sol = abs(d["dsol"]) - d["rent"] if action == "buy" else max(d["dsol"], 0.0)
+            return SniperFill(True, sol=max(sol, 0.0), tokens=tokens, signature=sig)
+        if not landed:
             return SniperFill(False, signature=sig, error="not confirmed / failed on-chain")
-        return SniperFill(True, sol=abs(dsol), tokens=abs(dtok), signature=sig)
+        # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
+        if action == "buy":
+            try:
+                tokens = w.token_balance(mint) / 1e6         # we never buy a mint we already hold
+            except Exception:
+                tokens = 0.0
+            if tokens <= 0:
+                return SniperFill(False, signature=sig, error="confirmed but token balance not visible yet")
+            return SniperFill(True, sol=float(amount), tokens=tokens, signature=sig, error="estimated")
+        return SniperFill(True, sol=estimate_sol, tokens=float(amount), signature=sig, error="estimated")
 
     def _close_if_empty(self, mint: str) -> None:
         if getattr(self.ex, "close_empty_accounts", True):
@@ -95,13 +129,19 @@ class LiveExecutor:
         return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct)
 
     async def sell(self, mint: str, curve: Curve, tokens: float) -> SniperFill:
+        fee = self.ex.curve_fee_pct + self.ex.platform_fee_pct
+        estimate = curve.quote_sell(tokens, fee) if curve is not None else 0.0
+
         def run() -> SniperFill:
             fill = SniperFill(False, error="no attempt")
             for slip in self.ex.sell_slippage_steps:
-                fill = self._attempt(mint, "sell", round(tokens, 6), False, slip)
+                fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate)
                 if fill.ok:
-                    if self.wallet.token_balance(mint) == 0:
-                        self._close_if_empty(mint)
+                    try:
+                        if self.wallet.token_balance(mint) == 0:
+                            self._close_if_empty(mint)
+                    except Exception:
+                        pass
                     return fill
             return fill
         return await asyncio.to_thread(run)

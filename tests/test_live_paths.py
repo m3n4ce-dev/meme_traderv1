@@ -20,25 +20,24 @@ MINT = "M" * 40 + "pump"
 
 
 class FakeWallet:
+    """attempts: per attempt, the tx_deltas result (None = transaction not visible) and whether it confirmed."""
     pubkey = "W" * 44
 
-    def __init__(self, tokens_raw: int, plan: list):
-        self.sol, self.tok = 1.0, tokens_raw
-        self.plan = plan            # per attempt: (landed, moves_tokens)
+    def __init__(self, attempts: list, balance_after: int = 0):
+        self.attempts = attempts
+        self.balance_after = balance_after
         self.closed = 0
-
-    def sol_balance(self):
-        return self.sol
-
-    def token_balance(self, mint):
-        return self.tok
+        self.current = None
 
     def sign_and_send(self, tx_b64):
-        landed, moves = self.plan.pop(0)
-        if moves:
-            self.tok, self.sol = 0, self.sol + 0.2
-        self._landed = landed
+        self.current = self.attempts.pop(0)
         return "sig"
+
+    def tx_deltas(self, sig, mint):
+        return self.current[0]
+
+    def token_balance(self, mint):
+        return self.balance_after
 
     def close_empty_token_accounts(self, mint):
         self.closed += 1
@@ -55,29 +54,46 @@ def fake_net(monkeypatch):
     return sent
 
 
+def _confirm_from(w):
+    return lambda sig, timeout_s=30: w.current[1]
+
+
 def test_sell_requotes_with_rising_slippage_and_reclaims_rent(fake_net, monkeypatch):
-    w = FakeWallet(5_000_000, plan=[(False, False), (True, True)])
-    monkeypatch.setattr("meme_trader.wallet.confirm", lambda sig, timeout_s=30: w._landed)
+    sold = {"dsol": 0.2, "dtok": -5_000_000, "rent": 0.0, "failed": False}
+    w = FakeWallet([(None, False), (sold, True)], balance_after=0)
+    monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w).sell(MINT, None, 5.0))
-    assert fill.ok and fill.tokens == pytest.approx(5.0)
+    assert fill.ok and fill.tokens == pytest.approx(5.0) and fill.sol == pytest.approx(0.2)
     assert [d["slippage"] for d in fake_net] == [15, 25]          # re-quoted, not blindly retried
     assert all(d["pool"] == "auto" for d in fake_net)             # routes to PumpSwap after graduation
     assert w.closed == 1
 
 
-def test_buy_is_not_retried_but_late_landing_is_booked(fake_net, monkeypatch):
-    w = FakeWallet(0, plan=[(False, False)])
-    monkeypatch.setattr("meme_trader.wallet.confirm", lambda sig, timeout_s=30: False)
+def test_buy_not_retried_late_landing_booked_and_rent_kept_out_of_cost(fake_net, monkeypatch):
+    w = FakeWallet([(None, False)])
+    monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w).buy(MINT, None, 0.1))
     assert not fill.ok and len(fake_net) == 1                    # one attempt only
 
-    class Late(FakeWallet):
-        def sign_and_send(self, tx_b64):
-            self.tok, self.sol = 7_000_000, self.sol - 0.1       # landed after the confirm timeout
-            return "sig"
-    w2 = Late(0, plan=[])
+    bought = {"dsol": -0.10204, "dtok": 7_000_000, "rent": 0.00204, "failed": False}
+    w2 = FakeWallet([(bought, False)])                            # confirm timed out, but it landed
+    monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w2))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w2).buy(MINT, None, 0.1))
-    assert fill.ok and fill.tokens == pytest.approx(7.0)
+    assert fill.ok and fill.tokens == pytest.approx(7.0) and fill.sol == pytest.approx(0.1)
+
+
+def test_live_errors_become_failed_fills_not_crashes(fake_net, monkeypatch):
+    class Boom(FakeWallet):
+        def sign_and_send(self, tx_b64):
+            raise RuntimeError("RPC sendTransaction: slippage exceeded (preflight)")
+    w = Boom([])
+    fill = asyncio.run(LiveExecutor(P.sniper.execution, w).sell(MINT, None, 5.0))
+    assert not fill.ok and "slippage" in fill.error
+    assert len(fake_net) == 3                                     # every slippage step was still tried
+    failed = {"dsol": -0.000005, "dtok": 0, "rent": 0.0, "failed": True}
+    w2 = FakeWallet([(failed, True)])
+    monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w2))
+    assert not asyncio.run(LiveExecutor(P.sniper.execution, w2).buy(MINT, None, 0.1)).ok
 
 
 def test_close_empty_token_accounts_builds_close_instruction(monkeypatch):

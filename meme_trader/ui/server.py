@@ -21,6 +21,13 @@ def make_app(engine) -> web.Application:
         return web.FileResponse(STATIC / "index.html")
 
     async def ws(request):
+        # Browsers let any website open a websocket to 127.0.0.1, so a page you visit could send KILL/SELL.
+        # Only accept the dashboard's own origin (which is also what you get through an SSH tunnel).
+        origin = request.headers.get("Origin", "")
+        host = request.headers.get("Host", "")
+        allowed = {f"http://{host}", f"https://{host}"} if host.split(":")[0] in ("127.0.0.1", "localhost") else set()
+        if origin not in allowed:
+            return web.Response(status=403, text="forbidden origin")
         sock = web.WebSocketResponse(heartbeat=20)
         await sock.prepare(request)
 

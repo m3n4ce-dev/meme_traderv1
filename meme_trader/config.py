@@ -19,7 +19,10 @@ class Params(dict):
     def __getattribute__(self, key: str) -> Any:
         if not key.startswith("_") and dict.__contains__(self, key):
             v = dict.__getitem__(self, key)
-            return Params(v) if isinstance(v, dict) else v
+            if isinstance(v, dict) and not isinstance(v, Params):
+                v = Params(v)
+                dict.__setitem__(self, key, v)     # convert once and cache: hot paths read sections per trade
+            return v
         return super().__getattribute__(key)
 
     def __getattr__(self, key: str) -> Any:
