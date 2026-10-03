@@ -107,6 +107,23 @@ Step-by-step guides with screenshots: [Mac](docs/MAC_SETUP.md) · [Ubuntu, inclu
 
 Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 
+## AI operator (Claude Code)
+
+The engine makes split-second decisions on its own. An AI operator works one level up, through tools exposed by the running bot over MCP: it reads status, positions, the radar, token detail and analytics, and can pause or resume entries, lower risk, turn strategies off, and buy or sell with a stated reason.
+
+```bash
+cd ~/meme_traderv1 && claude      # the meme-trader tools load from .mcp.json
+> /desk-check                     # full review: feed, P&L, positions, radar, analytics -> act or not
+> is the market hot enough for graduation plays right now?
+```
+
+The limits live in the bot, not in the prompt:
+- the agent can lower any risk setting, but never raise sizing, positions, the loss limit or the stop loss above your config;
+- it can't re-enable a strategy you turned off, switch to live, save settings or press the kill switch;
+- its buys pass the bot's normal risk checks and are rate-limited (`sniper.agent` in the config);
+- every action carries a reason, journaled and shown on the dashboard;
+- read-only tools run freely; each action asks you first (`.claude/settings.json`).
+
 ## Screenshots
 
 | Token detail: every gate, live | Analytics: what's working and what isn't |
@@ -127,6 +144,8 @@ Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `X_BEARER_TOKEN` | Call signals from Telegram channels / X accounts |
 | `JUPITER_API_KEY` | DexScreener bot: realistic paper quotes + sell-back check; required for its live mode |
 | `PUMPPORTAL_API_KEY` | Only for the metered PumpPortal trade stream (`sniper.feed.trades: pumpportal`) |
+
+`data/agent.token` is created fresh at every start for the AI operator tools. It isn't a setting, and it's readable only by your user.
 
 ## Going live
 

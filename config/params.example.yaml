@@ -217,6 +217,16 @@ sniper:
     stall_s: 60                  # watchdog: no pump.fun trade decoded for this long = switch endpoint
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
+  agent:                         # AI operator tools (Claude Code via MCP: see .mcp.json and CLAUDE.md)
+    enabled: true                # local-only API at /api/agent, secret token in data/agent.token
+    can_buy: true                # may the agent open positions itself (always within the limits below)
+    max_buy_usd: 0               # per agent buy; 0 = same as sizing.max_usd
+    max_buys_per_hour: 6
+    max_actions_per_min: 20
+    # The agent may LOWER any risk setting and pause, but never raise sizing, positions, loss limit or
+    # stop loss above what's configured here, re-enable a strategy that's off here, switch to live,
+    # save settings, or press the kill switch. Its actions are journaled with its reasons.
+
   late:                          # "graduation play": strong late-curve momentum, out before migration
     enabled: true                # on in paper to gather evidence; check its row in Analytics > By strategy before live
     buy_usd_mult: 1.0            # size relative to the sizing agent's normal answer

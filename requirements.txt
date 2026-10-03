@@ -3,6 +3,7 @@ pyyaml>=6
 aiohttp>=3.9      # pump.fun websocket feed + dashboard
 solders>=0.21     # live mode only (transaction signing)
 anthropic>=1.0    # AI trading desk + review agent (optional)
+mcp>=2.3          # AI operator tools for Claude Code (MCP server, optional)
 pytest>=8         # tests
 # optional:
 # telethon>=1.36  # Telegram call ingestion
