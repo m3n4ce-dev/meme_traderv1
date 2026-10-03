@@ -8,7 +8,9 @@ Guardrails live HERE, in code, so no prompt can talk past them:
 * every risk limit the owner configured at start is a ceiling: the agent may lower risk freely
   (smaller sizes, fewer positions, a tighter loss limit, strategies off, pause) but never raise it
   beyond the configured value, and never re-enable a strategy the config had off;
-* it can't switch to live trading, touch the wallet, save settings to disk, or press the kill switch;
+* it can't switch to live trading, touch the wallet, save risk settings to disk, or press the kill switch;
+* paper mode only: it can add pretend SOL to the paper balance (capped per deposit), optionally as the new
+  starting balance in the config;
 * agent buys go through the engine's normal authorization (daily loss, feed health, cash reserve,
   max positions, $ hard cap) and are rate-limited; every action needs a reason and is journaled.
 """
@@ -27,8 +29,8 @@ FLOOR_KEYS = ("entry.min_score", "predict.min_p")
 STRATEGY_KEYS = ("entry.enabled", "copy.enabled", "callouts.enabled", "late.enabled")
 SAFETY_KEYS = ("risk_adapt.enabled",)              # protective: may be turned on, off only if config had it off
 
-READ_TOOLS = ("status", "positions", "radar", "token", "analytics", "trades", "log", "settings")
-ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note")
+READ_TOOLS = ("status", "positions", "radar", "token", "lookup", "analytics", "trades", "log", "settings")
+ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit")
 
 
 def _get(p, key: str):
@@ -50,6 +52,7 @@ class AgentAPI:
         self.max_buy_usd = float(a.get("max_buy_usd") or engine.p.sizing.max_usd)   # 0/unset = sizing cap
         self.max_buys_per_hour = int(a.get("max_buys_per_hour", 6))
         self.max_actions_per_min = int(a.get("max_actions_per_min", 20))
+        self.max_deposit_sol = float(a.get("max_deposit_sol", 100))
         self.start = {k: _get(engine.p, k) for k in CEILING_KEYS + FLOOR_KEYS + STRATEGY_KEYS + SAFETY_KEYS}
         self.actions: deque[float] = deque()
         self.buys: deque[float] = deque()
@@ -133,6 +136,14 @@ class AgentAPI:
         d["price_points"] = chart[:: max(1, len(chart) // 30)]
         d.pop("features", None)
         return d
+
+    async def read_lookup(self, mint: str) -> dict:
+        from .lookup import brief, lookup
+
+        try:
+            return brief(await lookup(str(mint), self.e))
+        except ValueError as e:
+            raise AgentError(str(e)) from None
 
     async def read_analytics(self) -> dict:
         a = await self.e.analytics_async()
@@ -259,6 +270,28 @@ class AgentAPI:
             self._say(f"watching {mint[:6]}… | {reason}", mint)
             return {"watching": True, "note": "price appears with its next trade on the bonding curve"}
         return {"watching": True, "note": "already tracked"}
+
+    async def act_deposit(self, sol: float, reason: str, keep: bool = False) -> dict:
+        reason = self._reason(reason)
+        if self.e.mode.startswith("live"):
+            raise AgentError("deposits are paper only - live money is whatever the wallet holds")
+        try:
+            sol = float(sol)
+        except (TypeError, ValueError):
+            raise AgentError("sol must be a number") from None
+        if not 0 < sol <= self.max_deposit_sol:
+            raise AgentError(f"deposit must be more than 0 and at most {self.max_deposit_sol:g} SOL "
+                             "(agent.max_deposit_sol)")
+        out = self.e.deposit_paper(sol)
+        if keep:
+            base = float(self.e.p.capital.starting_sol) + sol
+            self.e.p.capital["starting_sol"] = base
+            self.e.save_setting("capital.starting_sol", round(base, 6))
+            out["config_starting_sol"] = round(base, 6)
+        self._say(f"paper deposit +{sol:g} SOL{' (kept as the new starting balance)' if keep else ''} | {reason}")
+        out["note"] = ("saved: restarts begin with this balance" if keep else
+                       "this run only - a restart starts from capital.starting_sol again")
+        return out
 
     async def act_note(self, text: str) -> dict:
         text = str(text or "").strip()[:500]

@@ -107,27 +107,39 @@ Step-by-step guides with screenshots: [Mac](docs/MAC_SETUP.md) · [Ubuntu, inclu
 
 Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 
-## AI operator (Claude Code)
+## AI operator: chat with Claude in the dashboard
 
-The engine makes split-second decisions on its own. An AI operator works one level up, through tools exposed by the running bot over MCP: it reads status, positions, the radar, token detail and analytics, and can pause or resume entries, lower risk, turn strategies off, and buy or sell with a stated reason.
+The engine makes split-second decisions on its own. An AI operator works one level up, through tools exposed by the running bot: it reads status, positions, the radar, token detail and analytics, and can pause or resume entries, lower risk, turn strategies off, buy or sell, and top up the paper balance, always with a stated reason.
+
+**In the dashboard:** open the **✦ Chat** tab (or press `c`) and type.
+- Ask it anything: "how are we doing?", "anything to sell?". It reads the bot's data before it answers.
+- Paste a token's **contract address** for an instant metrics card. It covers any Solana token, tracked or not: price, market cap, liquidity, candles, buys vs sells, top holders, mint/freeze authority, RugCheck flags, and Mayhem mode. Claude adds its read underneath.
+- **Every action shows up as a card with Approve / Decline.** Reads run without asking.
+- It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
+- Claude gets only the bot's tools here: no shell, no files, no other connectors.
+
+**In a terminal:** the same tools load in Claude Code from `.mcp.json`.
 
 ```bash
-cd ~/meme_traderv1 && claude      # the meme-trader tools load from .mcp.json
+cd ~/meme_traderv1 && claude
 > /desk-check                     # full review: feed, P&L, positions, radar, analytics -> act or not
 > is the market hot enough for graduation plays right now?
 ```
 
 The limits live in the bot, not in the prompt:
 - the agent can lower any risk setting, but never raise sizing, positions, the loss limit or the stop loss above your config;
-- it can't re-enable a strategy you turned off, switch to live, save settings or press the kill switch;
+- it can't re-enable a strategy you turned off, switch to live, save risk settings or press the kill switch;
+- paper deposits only, capped per deposit (`sniper.agent.max_deposit_sol`); they count as capital, not profit;
 - its buys pass the bot's normal risk checks and are rate-limited (`sniper.agent` in the config);
 - every action carries a reason, journaled and shown on the dashboard;
-- read-only tools run freely; each action asks you first (`.claude/settings.json`).
+- read-only tools run freely; each action asks you first (Approve in the dashboard, or `.claude/settings.json` in a terminal).
 
 ## Screenshots
 
-| Token detail: every gate, live | Analytics: what's working and what isn't |
+| Live: money, positions, market pulse | Chat: ask, approve actions, paste a contract address |
 |---|---|
+| ![Live view](docs/img/live.png) | ![Chat with Claude](docs/img/chat.png) |
+| **Token detail: every gate, live** | **Analytics: what's working and what isn't** |
 | ![Token detail with gate checklist](docs/img/token-detail.png) | ![Analytics view](docs/img/analytics.png) |
 
 ## Configuration

@@ -5,6 +5,7 @@
       "mcp__meme-trader__get_positions",
       "mcp__meme-trader__get_radar",
       "mcp__meme-trader__get_token",
+      "mcp__meme-trader__lookup_token",
       "mcp__meme-trader__get_analytics",
       "mcp__meme-trader__get_recent_trades",
       "mcp__meme-trader__get_log",
@@ -17,6 +18,7 @@
       "mcp__meme-trader__sell_position",
       "mcp__meme-trader__buy_token",
       "mcp__meme-trader__watch_token",
+      "mcp__meme-trader__add_paper_funds",
       "mcp__meme-trader__add_note"
     ]
   }
