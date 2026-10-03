@@ -4,6 +4,29 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #12: Trade feed moved to PublicNode, at "confirmed"
+
+- After restarting onto the review fixes, the free public RPC (`api.mainnet-beta.solana.com`) refused the
+  trade stream: HTTP 413, "You have used your data allowance". It caps data per IP, and this stream is
+  ~10-20 GB/day. The previous process had kept its old connection open; the restart needed a new one.
+  The engine reported the feed as degraded and paused entries, as designed.
+- `wss://solana-rpc.publicnode.com` (free, no key) serves the same `logsSubscribe` stream. dRPC's free plan
+  doesn't allow the method. Set as `SOLANA_WS_URL` in `.env`, and documented in `.env.example`.
+- Reserve-chain completeness check on PublicNode, 40 s each:
+
+| commitment | messages | chain gaps |
+|---|---|---|
+| processed | 2,749 | **25.3%** of trades missing |
+| confirmed | 3,886 | 0.4% |
+
+- New `sniper.feed.commitment`, default **confirmed** (validated). It costs a fraction of a second, which neither the
+  confirm-then-ride sniper nor graduation plays depend on. `doctor` checks at confirmed too. Feed-down log
+  lines are now one short line instead of a full handshake dump.
+
+Tests: 145 passing.
+
+---
+
 ## 2026-10-03 — Entry #11: Second full code review (29 findings), all fixed
 
 ### Owner input

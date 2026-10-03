@@ -48,7 +48,7 @@ async def _trade_logs(ws_url: str) -> str:
 
     async with aiohttp.ClientSession() as s, s.ws_connect(ws_url, timeout=10, max_msg_size=0) as ws:
         await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
-                            "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": "processed"}]})
+                            "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": "confirmed"}]})
         n, end = 0, time.time() + 15
         while time.time() < end and n < 20:
             d = json.loads((await asyncio.wait_for(ws.receive(), 15)).data)

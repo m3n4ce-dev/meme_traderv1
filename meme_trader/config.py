@@ -183,6 +183,7 @@ def validate_sniper(sn: dict) -> None:
     _num(sn, "risk_adapt.size_mult", 0, 1, lo_open=True)
     _num(sn, "desk.quorum", 0, 1, lo_open=True)
     _require(sn["feed"].get("trades") in ("solana", "pumpportal"), "sniper.feed.trades must be solana or pumpportal")
+    _require(sn["feed"].get("commitment") in ("processed", "confirmed"), "sniper.feed.commitment must be processed or confirmed")
 
 
 def validate(p: dict) -> None:

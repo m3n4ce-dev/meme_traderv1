@@ -161,8 +161,11 @@ class SolanaTradeFeed(Feed):
     EARLY_S = 15            # hold unwatched trades this long: a launch's first buys (often its insider
                             # bundle) can land before PumpPortal announces it; replay them on watch()
 
-    def __init__(self, ws_url: str = "", fallback_urls: list[str] | None = None):
+    def __init__(self, ws_url: str = "", fallback_urls: list[str] | None = None, commitment: str = "confirmed"):
         self.ws_url = ws_url or os.environ.get("SOLANA_WS_URL") or PUBLIC_WS
+        # "confirmed": a fraction of a second later than "processed", but complete. Measured 2026-10-03 on
+        # PublicNode: processed missed ~25% of trades (reserve-chain gaps), confirmed 0.4%.
+        self.commitment = commitment
         self.launches = PumpPortalFeed(fallback_urls, use_key=False)
         self.watched: set[str] = set()
         self.accounts: set[str] = set()
@@ -267,7 +270,7 @@ class SolanaTradeFeed(Feed):
                 async with aiohttp.ClientSession() as session, \
                         session.ws_connect(self.ws_url, heartbeat=20, max_msg_size=0) as ws:
                     await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
-                                        "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": "processed"}]})
+                                        "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": self.commitment}]})
                     while True:
                         msg = await ws.receive(timeout=self.STALL_S)
                         if msg.type != aiohttp.WSMsgType.TEXT:
@@ -284,7 +287,8 @@ class SolanaTradeFeed(Feed):
                             else:
                                 self._hold(t)
             except Exception as err:                    # anything: never leave a dead stream marked up
-                print(f"[feed] trade logs {self.host} down: {err!r}; retrying in {backoff}s")
+                why = f"HTTP {err.status} {err.message}" if hasattr(err, "status") else f"{type(err).__name__}: {err}"
+                print(f"[feed] trade logs {self.host} down: {why[:200]}; retrying in {backoff}s")
             self.trades_up = False
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
