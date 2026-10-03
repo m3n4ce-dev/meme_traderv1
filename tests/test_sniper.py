@@ -7,7 +7,7 @@ from meme_trader.sniper.curve import CURVE_TOKENS, Curve
 from meme_trader.sniper.engine import Engine, reason_key
 from meme_trader.sniper.events import Launch, Trade, dumps, loads
 from meme_trader.sniper.execution import PaperExecutor
-from meme_trader.sniper.feeds import PumpPortalFeed, SyntheticFeed
+from meme_trader.sniper.feeds import TRADE_EVENT, PumpPortalFeed, SolanaTradeFeed, SyntheticFeed
 from meme_trader.sniper.signals import extract_mints
 from meme_trader.sniper.strategy import SniperPosition, evaluate_entry, evaluate_exit
 from meme_trader.sniper.tracker import TokenState
@@ -145,6 +145,70 @@ def test_pumpportal_parse_and_event_roundtrip():
     assert loads(dumps(t)) == t
     assert PumpPortalFeed.parse({"message": "subscribed"}, 0) is None
 
+
+# one real pump.fun TradeEvent log line (mainnet tx 5YNTY9nP..., captured 2026-10-03)
+REAL_TRADE_LOG = (
+    "Program data: vdt/007mYe4gLmFMZa4UdjssR7Bu/uz3qrxDY3NiSvHZox0uJNL9j6cvwAAAAAAAUOSK0lEAAAABootf0mq0eaapzGy/awsj"
+    "62GIWjceASCsqRO+7z0TinhukcBqAAAAAMCwbWgKAAAAUgQylRvNAwCvPEUFAAAAAFJsH0mKzgIA6JMUH7GOnxV02BDheOGeMGBOMXWqLkoy"
+    "38hgByfRBwkAAAAAAAAAAAAAAAAAAAAAkuUuwp329ugiNSKrQGN+N08f9TL/fPIO+zm+kQTAZRwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAGJ1eQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAKcvwAAAAAAAwLBtaAoAAACvPEUFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
+
+
+def _trade_log(mint: bytes, sol: int, tokens: int, buy: bool, user: bytes, v_sol: int, v_tokens: int) -> str:
+    import base64
+    import struct
+    raw = (TRADE_EVENT + mint + struct.pack("<QQ?", sol, tokens, buy) + user
+           + struct.pack("<qQQQQ", 0, v_sol, v_tokens, 0, 0))
+    return "Program data: " + base64.b64encode(raw + bytes(250)).decode()
+
+
+def test_solana_logs_parse_real_trade():
+    t, = SolanaTradeFeed.parse_logs({"signature": "sig", "err": None,
+                                     "logs": ["Program log: Instruction: Buy", REAL_TRADE_LOG]}, 5.0)
+    assert t.mint == "3Ad4mzd7W1qSZ9pdevHudtyGKuLMJucwSciz1LbVpump"
+    assert t.trader == "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
+    assert (t.side, t.sol, t.tokens) == ("buy", 0.012595111, 351424.668752)
+    assert (t.v_sol, t.v_tokens, t.pool, t.new_balance, t.ts) == (44.701692096, 1069943281.02613, "pump", -1.0, 5.0)
+
+
+def test_solana_logs_parse_skips_noise_and_failed_tx():
+    from solders.pubkey import Pubkey
+    mint, user = bytes(Pubkey.from_string(MINT[:32] + "1" * 12)), bytes(range(32))
+    sell = _trade_log(mint, 250_000_000, 7_000_000_000_000, False, user, 31_000_000_000, 1_030_000_000_000_000)
+    logs = ["Program data: !!not base64!", "Program data: " + "QUJD" * 30, sell]   # junk, other program's event
+    t, = SolanaTradeFeed.parse_logs({"err": None, "logs": logs}, 1.0)
+    assert (t.side, t.sol, t.tokens, t.v_sol, t.v_tokens) == ("sell", 0.25, 7_000_000.0, 31.0, 1_030_000_000.0)
+    assert t.trader == str(Pubkey.from_bytes(user))
+    assert SolanaTradeFeed.parse_logs({"err": {"InstructionError": [2, "Custom"]}, "logs": logs}, 1.0) == []
+
+
+def test_solana_feed_watch_sets_and_degraded():
+    f = SolanaTradeFeed("wss://example.org/?api-key=secret")
+    asyncio.run(f.watch([MINT]))
+    asyncio.run(f.watch_accounts(["w"]))
+    asyncio.run(f.unwatch([MINT]))
+    assert f.watched == set() and f.accounts == {"w"}
+    assert f.degraded                       # no trade notification yet: entries stay paused
+    f.trades_up = True
+    assert not f.degraded and f.host == "example.org"
+
+
+def test_solana_feed_replays_early_trades_without_the_dev_buy():
+    f = SolanaTradeFeed()
+    f._q = asyncio.Queue()
+    f.dev_buys[MINT] = (DEV, 5e7)
+    dev = Trade(MINT, 1.0, DEV, "buy", 1.5, 5e7, 31.5, 1.02e9)
+    sniper = Trade(MINT, 1.2, "s", "buy", 0.5, 1e7, 32.0, 1.01e9)
+    other = Trade("x" * 44, 1.3, "s", "buy", 0.1, 1e6, 30.1, 1.07e9)
+    for t in (dev, sniper, other):
+        f._hold(t)
+    asyncio.run(f.watch([MINT]))
+    got = f._q.get_nowait()
+    assert f._q.empty() and got.trader == "s" and got.ts > sniper.ts      # dev buy dropped, restamped to now
+    assert MINT not in f.early and "x" * 44 in f.early
+    f._hold(Trade("y" * 44, 1.3 + f.EARLY_S + 1, "s", "buy", 0.1, 1e6, 30.1, 1.07e9))
+    assert "x" * 44 not in f.early                                         # expired
 
 def test_reason_key():
     assert reason_key("dev bought 7.1% > 6%") == "dev bought"
