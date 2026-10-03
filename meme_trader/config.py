@@ -185,6 +185,10 @@ def validate_sniper(sn: dict) -> None:
     _require(sn["feed"].get("trades") in ("solana", "pumpportal"), "sniper.feed.trades must be solana or pumpportal")
     _require(sn["feed"].get("commitment") in ("processed", "confirmed"), "sniper.feed.commitment must be processed or confirmed")
     _num(sn, "feed.max_gap_pct", 0, 100, lo_open=True)
+    if "agent" in sn:
+        _num(sn, "agent.max_buy_usd", 0)
+        _num(sn, "agent.max_buys_per_hour", 0)
+        _num(sn, "agent.max_actions_per_min", 1)
     _num(sn, "feed.stall_s", 0, lo_open=True)
 
 

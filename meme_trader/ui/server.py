@@ -8,6 +8,7 @@ this port to the internet without putting auth in front of it.
   GET /api/token/{mint}  token detail: gate checklist, model drivers, holders, tape
   GET /api/controls      live-adjustable settings
   WS  /ws                1 s snapshots; actions: pause resume kill sell posted set save
+  POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
 endpoints are read-only. Every request must name 127.0.0.1/localhost as its Host, which stops DNS
@@ -16,7 +17,10 @@ rebinding (a hostile site pointing its own domain at 127.0.0.1 to read these pag
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
+import secrets
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -38,7 +42,7 @@ def _json(obj, status: int = 200) -> web.Response:
                         headers={"Cache-Control": "no-store"})
 
 
-def make_app(engine) -> web.Application:
+def make_app(engine, agent_token: str | None = None) -> web.Application:
     @web.middleware
     async def local_only(request, handler):
         if not _local(request.headers.get("Host", "")):
@@ -141,12 +145,48 @@ def make_app(engine) -> web.Application:
 
     app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics),
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls)])
+    if agent_token:
+        from ..sniper.agent_api import AgentAPI, AgentError
+
+        api = AgentAPI(engine)
+
+        async def agent(request):
+            # a secret header, not a cookie: a web page can't send it (custom headers need a CORS
+            # preflight this server never grants), and only processes that can read data/agent.token can
+            if not hmac.compare_digest(request.headers.get("X-Agent-Token", ""), agent_token):
+                return _json({"error": "missing or wrong X-Agent-Token"}, 403)
+            try:
+                body = await request.json()
+                result = await api.call(str(body.get("tool", "")), body.get("args") or {})
+            except AgentError as e:
+                return _json({"error": str(e)}, 400)
+            except (ValueError, TypeError) as e:
+                return _json({"error": f"bad request: {e}"}, 400)
+            return _json({"result": result})
+
+        app.add_routes([web.post("/api/agent", agent)])
     return app
 
 
+def write_agent_token(path: Path) -> str:
+    """A fresh secret for this run, readable only by this user (the MCP server reads it from here)."""
+    token = secrets.token_hex(24)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token)
+    tmp.replace(path)
+    return token
+
+
 async def start(engine, host: str = "127.0.0.1", port: int = 8787) -> web.AppRunner:
-    """Bind the dashboard now (raises OSError if the port is taken) and return its runner."""
-    runner = web.AppRunner(make_app(engine))
+    """Bind the dashboard now (raises OSError if the port is taken) and return its runner. With the agent
+    API on (sniper.agent.enabled), a new token is written to data/agent.token for the MCP server."""
+    from ..journal import DATA
+
+    token = write_agent_token(DATA / "agent.token") if (engine.p.get("agent") or {}).get("enabled") else None
+    runner = web.AppRunner(make_app(engine, token))
     await runner.setup()
     try:
         await web.TCPSite(runner, host, port).start()

@@ -4,6 +4,33 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #14: AI operator tools (MCP) for Claude Code
+
+### Owner input
+- "What would be the best way to get an agent inside the terminal to decide on trades farther than just parameters?" Then: "Yes please" to step one (MCP tools + interactive Claude Code), with an autonomous loop as step two.
+
+### Design
+- Speed stays deterministic: graduation plays often exit ~15 s after entry, and an LLM call takes seconds.
+- The agent works one level up: regime, strategy selection, risk dial, token investigation, discretionary entries and exits, and explanations.
+
+### Built
+- `sniper/agent_api.py`: the tools and their guardrails, enforced in the bot.
+  - **Reads:** status, positions, radar, token, analytics, trades, log, settings.
+  - **Actions:** set_setting, pause, resume, sell, buy, watch, note.
+  - The configured risk values are ceilings: sizing, max positions, daily loss limit, stop loss. Entry gates are floors.
+  - Strategies the config has off stay off; defense mode can't be switched off if configured on.
+  - No live switch, no settings save, no kill switch.
+  - Every action needs a reason and is journaled (level `agent`, shown on the dashboard). Actions are rate-limited (20/min); agent buys are capped at 6/hour, at most `sizing.max_usd` each, and pass the engine's `_authorize` (daily loss, feed health, cash, max positions).
+  - Buys are refused when the creator has sold or the token is near or past graduation.
+- `POST /api/agent` on the dashboard server, guarded by a per-run secret in `data/agent.token` (mode 600) sent as `X-Agent-Token`. That's a custom header, so a web page can't send it without a CORS preflight, which the server never grants.
+- `sniper/mcp_server.py`: an MCP 2.x `MCPServer` (stdio) with 15 tools and read-only/destructive annotations. It forwards each call to the bot.
+- `.mcp.json` registers the server. `.claude/settings.json` auto-allows the 8 read tools and keeps the 7 action tools on "ask". `CLAUDE.md` holds operating notes, and `/desk-check` (`.claude/commands/desk-check.md`) runs a full review.
+- Config: new `sniper.agent` section (enabled, can_buy, max_buy_usd, max_buys_per_hour, max_actions_per_min), validated.
+
+Tests: 158 passing (+9 in `tests/test_agent_api.py`, including an MCP-to-engine round trip).
+
+---
+
 ## 2026-10-03 — Entry #13: Feed watchdog with endpoint failover
 
 ### Why
