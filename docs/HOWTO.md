@@ -20,6 +20,7 @@ Setup is in [MAC_SETUP.md](MAC_SETUP.md) and [UBUNTU_SETUP.md](UBUNTU_SETUP.md).
 | Go live with real money | [13](#13-go-live) |
 | Chat with Claude, look up any token | [14](#14-let-claude-operate-the-bot) |
 | Fix something that looks wrong | [15](#15-when-something-looks-wrong) |
+| Find out if a strategy really works | [16](#16-research-a-strategy-properly) |
 
 ---
 
@@ -197,3 +198,13 @@ To stop agent buys entirely: `sniper.agent.can_buy: false`. To turn the tools of
 | Dashboard says disconnected | The bot stopped. Check the terminal, or `journalctl -u meme-sniper -n 50` on the mini PC. |
 
 Nothing here is financial advice. Most pump.fun tokens go to zero.
+
+## 16. Research a strategy properly
+A strategy only counts once it passes on data it was never tuned on. The full process is in [RESEARCH.md](RESEARCH.md); in short:
+```bash
+scripts/start.sh research data                   # what's recorded and how clean it is
+scripts/start.sh research eval graduation-v1     # development report: costs, uncertainty, baselines, ablations
+scripts/start.sh research final graduation-v1    # the frozen verdict (shows nothing until 14 days of holdout)
+```
+To try a different idea, copy `research/policies/graduation-v1.yaml` to a new name, change it, evaluate it, and `research freeze` it before judging. Don't edit a frozen policy; the tool refuses, because a result after changing the rules means nothing.
+

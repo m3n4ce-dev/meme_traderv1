@@ -73,7 +73,7 @@ def eligible(s, now: float, c, red_flag_ctx: dict) -> tuple[bool, float, str]:
 def compose(s, now: float, sol_usd: float) -> str:
     """Factual card. Every number is measured; nothing is a prediction."""
     smart = len({x.author for x in s.socials if x.source == "wallet"})
-    mcap_usd = s.curve.market_cap_sol * sol_usd
+    mcap_usd = s.market_cap_sol * sol_usd
     parts = [
         f"{s.symbol}: {len(s.holders)} holders, +{s.buyers_in(now, 60)} new buyers in the last minute",
         f"curve {s.curve.progress:.0%} filled ({s.curve.real_sol:.1f} SOL in), MC ${mcap_usd / 1000:.1f}K",

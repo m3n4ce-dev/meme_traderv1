@@ -17,7 +17,15 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 ## Results so far
 
-These are paper trades on the **real market**, starting from 1 SOL of pretend money each session. The samples are tiny, so read them as a direction, not a verdict. The full numbers and analysis are in [docs/BUILD_LOG.md](docs/BUILD_LOG.md).
+**No trading edge has been demonstrated yet.** Paper profits so far come from small samples and depend on a few big winners. The bot now has a research process built to confirm or reject one strategy at a time ([docs/RESEARCH.md](docs/RESEARCH.md)):
+- the strategy is written down and frozen first;
+- it's judged only on data recorded after freezing;
+- the costs are net and measured;
+- there are baselines and day-level uncertainty.
+
+The first candidate, `graduation-v1`, is collecting its holdout. On 16 h of development data it made +1.55 SOL at $20 a trade (+7.8% on cost). But it was −0.72 SOL without its 10 best trades, and checking for candidates one second later removed most of the profit (BUILD_LOG #16).
+
+Earlier paper sessions are below for history. They used tiny samples, and partly a feed later measured to run 12 s behind the chain.
 
 | Session | Data feed | Launches screened | Trades | Win rate | P&L |
 |---|---|---|---|---|---|
@@ -33,9 +41,9 @@ By strategy, 2026-10-03:
 | $1 callouts | 2 | 50% | −0.001 SOL |
 
 What's known so far:
-- **Graduation plays have made the profit in both sessions.** The early sniper hasn't shown an edge yet.
+- **Graduation plays made the paper profit in both sessions,** but that profit depends on a few winners and on entering fast; the frozen research run will decide. The early sniper lost (off).
 - **About 8% of launches double within minutes.** The hard part is telling them apart from the ~92% that don't. The safety gates reject far more losers than winners: of 574 "serial deployer" rejects, 7% doubled before falling 30%, while 27% fell 30% first.
-- **The free on-chain feed is more complete than the paid one.** It had 0 gaps in 10,828 trades, against 20.6% of trades missing or out of order on PumpPortal's stream.
+- **Completeness isn't enough: a feed must also be on time.** The free on-chain feed was complete, but PublicNode delivered it ~12 s behind the chain; the public RPC is 1–2 s behind. The watchdog now checks both.
 
 ## What it does
 
@@ -183,6 +191,7 @@ These have been tested against simulated failures, not yet with real money.
 | [MAC_SETUP.md](docs/MAC_SETUP.md) · [UBUNTU_SETUP.md](docs/UBUNTU_SETUP.md) | Illustrated install guides |
 | [HOWTO.md](docs/HOWTO.md) | Task recipes and troubleshooting |
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
+| [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 
