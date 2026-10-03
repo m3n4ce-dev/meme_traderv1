@@ -1,0 +1,278 @@
+{
+ "frozen_at": "2026-10-03T20:21:03Z",
+ "policy": "graduation-v1",
+ "signature": "0f0fb20e990b",
+ "sniper": {
+  "agent": {
+   "can_buy": true,
+   "enabled": true,
+   "max_actions_per_min": 20,
+   "max_buy_usd": 0,
+   "max_buys_per_hour": 6,
+   "max_deposit_sol": 100
+  },
+  "audit": {
+   "window_s": 600
+  },
+  "callouts": {
+   "auto_post": "none",
+   "enabled": false,
+   "hold_s": 3600,
+   "interval_s": 120,
+   "max_age_s": 1800,
+   "max_curve_pct": 85,
+   "max_open_bags": 40,
+   "max_per_day": 200,
+   "max_top10_pct": 35,
+   "min_age_s": 60,
+   "min_curve_pct": 20,
+   "min_hold_usd": 1.0,
+   "min_holders": 30,
+   "min_new_buyers_per_min": 10,
+   "min_score": 45,
+   "position_usd": 1.1,
+   "priority_fee_sol": 5e-05
+  },
+  "capital": {
+   "buy_sol": 0.05,
+   "daily_loss_limit_sol": 1.0,
+   "max_drawdown_pct": 100,
+   "max_open_positions": 6,
+   "min_sol_reserve": 0.03,
+   "starting_sol": 5.0
+  },
+  "chat": {
+   "approval_timeout_s": 600,
+   "ask_first": true,
+   "auto_read_ca": true,
+   "claude_bin": "",
+   "enabled": true,
+   "model": "",
+   "timeout_s": 600
+  },
+  "copy": {
+   "apply_red_flags": true,
+   "buy_sol": 0.05,
+   "enabled": false,
+   "follow_sells": true,
+   "leaders": [],
+   "max_chase_pct": 25,
+   "max_copies_per_leader_per_hour": 6,
+   "max_curve_progress_pct": 70,
+   "min_leader_buy_sol": 0.5,
+   "pause_after_losses": 5,
+   "sell_all_when_leader_sold_pct": 50,
+   "use_own_exits": true
+  },
+  "desk": {
+   "effort": "low",
+   "enabled": false,
+   "max_price_move_pct": 20,
+   "model": "claude-opus-5-5",
+   "personas": [
+    "veteran",
+    "narrative",
+    "skeptic",
+    "quant"
+   ],
+   "price_in_per_mtok": 4.0,
+   "price_out_per_mtok": 20.0,
+   "quorum": 0.45,
+   "timeout_s": 12,
+   "veto_conviction": 75,
+   "weights": {
+    "narrative": 0.8,
+    "quant": 1.0,
+    "skeptic": 1.0,
+    "veteran": 1.0
+   }
+  },
+  "entry": {
+   "allow_unknown_launch": false,
+   "bundle_window_s": 2,
+   "enabled": false,
+   "flow_window_s": 20,
+   "full_marks_buyers": 20,
+   "full_marks_flow_sol": 5,
+   "funding": {
+    "backend": "rpc",
+    "cohort_size": 20,
+    "enabled": true,
+    "exchange_fanout": 50,
+    "max_cluster_pct": 15,
+    "max_cluster_pct_hold": 20,
+    "max_lookups_per_min": 240,
+    "max_wait_s": 6
+   },
+   "max_age_s": 240,
+   "max_bundle_pct": 15,
+   "max_creator_launches_24h": 2,
+   "max_curve_progress_pct": 40,
+   "max_dev_buy_pct": 6,
+   "max_early_sold_ratio": 0.35,
+   "max_insider_pct": 30,
+   "max_sniper_pct": 20,
+   "max_symbol_dupes_1h": 3,
+   "max_top10_pct": 35,
+   "min_age_s": 15,
+   "min_curve_progress_pct": 4,
+   "min_fees_paid_sol": 0.1,
+   "min_net_flow_sol": 1.0,
+   "min_score": 55,
+   "min_unique_buyers": 15,
+   "require_socials": false,
+   "sniper_window_s": 10
+  },
+  "execution": {
+   "close_empty_accounts": true,
+   "curve_fee_pct": 1.25,
+   "paper_latency_slippage_pct": 3,
+   "platform_fee_pct": 0.5,
+   "priority_fee_sol": 0.001,
+   "sell_priority_fee_steps": [
+    0.001,
+    0.003,
+    0.008
+   ],
+   "sell_slippage_steps": [
+    15,
+    25,
+    40
+   ],
+   "slippage_pct": 15,
+   "verify_tx": true
+  },
+  "exit": {
+   "decay_min_drop_pct": 12,
+   "decay_net_outflow_sol": 1.5,
+   "decay_window_s": 15,
+   "exit_at_curve_progress_pct": 92,
+   "exit_on_dev_sell": true,
+   "initials_at_pct": 100,
+   "initials_multiple": 1.0,
+   "ladder": {
+    "steps": [
+     {
+      "at_x": 2,
+      "sell_frac": 0.5
+     },
+     {
+      "at_x": 5,
+      "sell_frac": 1.0
+     }
+    ],
+    "stop_x": 0.3,
+    "trail_after_x": 3,
+    "trail_pct": 30
+   },
+   "max_hold_s": 1800,
+   "no_progress_min_gain_pct": 10,
+   "no_progress_s": 60,
+   "profile": "trail",
+   "stall_s": 90,
+   "stop_loss_pct": 30,
+   "trail_tiers": [
+    {
+     "above_gain_pct": 30,
+     "trail_pct": 30
+    },
+    {
+     "above_gain_pct": 150,
+     "trail_pct": 25
+    },
+    {
+     "above_gain_pct": 400,
+     "trail_pct": 20
+    },
+    {
+     "above_gain_pct": 1000,
+     "trail_pct": 15
+    }
+   ]
+  },
+  "feed": {
+   "commitment": "confirmed",
+   "fallback_ws_urls": [
+    "wss://pumpdev.io/ws"
+   ],
+   "max_gap_pct": 5,
+   "max_lag_s": 5,
+   "stall_s": 60,
+   "trades": "solana",
+   "ws_url": ""
+  },
+  "late": {
+   "buy_usd_mult": 1.0,
+   "enabled": true,
+   "entry_mode": "rule",
+   "exit_curve_pct": 94,
+   "flow_window_s": 30,
+   "max_age_s": 900,
+   "max_curve_pct": 85,
+   "max_hold_s": 600,
+   "min_buy_sell_ratio": 1.5,
+   "min_buyers": 12,
+   "min_curve_pct": 55,
+   "min_near_high": 0.9,
+   "min_net_flow_sol": 3.0,
+   "scan_interval_s": 2,
+   "stall_s": 45,
+   "stop_loss_pct": 15
+  },
+  "market": {
+   "non_organic_wallets": [
+    "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
+   ]
+  },
+  "notify": {
+   "levels": [
+    "buy",
+    "close",
+    "error"
+   ]
+  },
+  "predict": {
+   "checkpoints_s": [
+    15,
+    30,
+    60,
+    120,
+    180
+   ],
+   "display_only": true,
+   "down_pct": 30,
+   "enabled": true,
+   "horizon_s": 600,
+   "kelly_fraction": 0.25,
+   "min_p": 0.0,
+   "model_path": "data/model.json",
+   "require_positive_ev": false,
+   "up_pct": 100
+  },
+  "record": {
+   "full_window_s": 600
+  },
+  "risk_adapt": {
+   "enabled": true,
+   "lookback_trades": 10,
+   "loss_streak": 5,
+   "min_score_add": 10,
+   "minutes": 30,
+   "size_mult": 0.5,
+   "window_loss_sol": 0.15
+  },
+  "signals": {
+   "social_only_watch": true,
+   "telegram_channels": [],
+   "x_accounts": []
+  },
+  "sizing": {
+   "base_usd": 20,
+   "copy_multiplier": 0.6,
+   "enabled": true,
+   "max_pct_of_curve_sol": 3,
+   "max_usd": 20,
+   "sol_usd_fallback": 150
+  }
+ }
+}
