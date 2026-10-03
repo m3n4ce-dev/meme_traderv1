@@ -140,3 +140,26 @@ def test_graduation_play_entry_and_exit_before_migration():
         c.apply(2.0, -tok)
     frac, why = evaluate_late_exit(pos, s, now + 2, L, X)
     assert frac == 1.0 and why.startswith("graduation exit")
+
+
+def test_running_engine_hot_reloads_a_retrained_model(tmp_path, monkeypatch):
+    import copy as _copy
+    import os
+
+    from meme_trader.sniper.engine import Engine
+    from meme_trader.sniper.execution import PaperExecutor
+    from tests.test_review_fixes import Quiet
+
+    monkeypatch.setattr("meme_trader.sniper.engine.DATA", tmp_path)
+    p = _copy.deepcopy(P)
+    p.sniper.predict.model_path = str(tmp_path / "model.json")
+    eng = Engine(p, Quiet(realtime=True), PaperExecutor(p.sniper.execution), mode="paper", log_to_journal=False)
+    assert eng.model is None
+    X, y = _separable(200)
+    m = LogisticModel.fit(X, y)
+    m.info = {"test": {"auc": 0.71}}
+    m.save(tmp_path / "model.json")
+    os.utime(tmp_path / "model.json", (1, 1_900_000_000))
+    eng.now = 1_000.0
+    eng._maybe_reload_model()
+    assert eng.model is not None and "0.710" in eng.log[-1]["text"]

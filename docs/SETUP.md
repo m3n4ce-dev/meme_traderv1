@@ -44,9 +44,9 @@ python -m meme_trader.sniper run
 - Every event is saved to `data/feed-YYYY-MM-DD.jsonl`, so the bot can be backtested on real data.
 - **Leave it running for 3–7 days.** Then:
 ```bash
-python -m meme_trader.sniper backtest --file data/feed-*.jsonl                # replay with current params
-python -m meme_trader.sniper backtest --file data/feed-*.jsonl --set exit.stop_loss_pct=25   # try a change
-python -m meme_trader.sniper leaders  --file data/feed-*.jsonl                # wallets worth copying
+python -m meme_trader.sniper backtest --file data/feed-*                # replay with current params
+python -m meme_trader.sniper backtest --file data/feed-* --set exit.stop_loss_pct=25   # try a change
+python -m meme_trader.sniper leaders  --file data/feed-*                # wallets worth copying
 python -m meme_trader.sniper review --validate                                # AI post-mortem (needs Anthropic key)
 ```
 

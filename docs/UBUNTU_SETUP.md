@@ -104,7 +104,7 @@ Why the tunnel: the dashboard only listens on the P8 itself, because its buttons
 ## 7. Bring your Mac's recorded data across (optional)
 Run this on the **Mac**:
 ```bash
-scp ~/meme_traderv1/data/feed-*.jsonl you@wowe-p8.local:~/meme_traderv1/data/
+scp ~/meme_traderv1/data/feed-* you@wowe-p8.local:~/meme_traderv1/data/
 ```
 Backtests and the `leaders` command on the P8 then cover both machines' recordings.
 

@@ -209,7 +209,7 @@ sniper:
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
   late:                          # "graduation play": strong late-curve momentum, out before migration
-    enabled: false               # off until it proves itself on YOUR recorded data (sweep late.enabled=true,false)
+    enabled: true                # on in paper to gather evidence; check its row in Analytics > By strategy before live
     buy_usd_mult: 1.0            # size relative to the sizing agent's normal answer
     min_curve_pct: 55
     max_curve_pct: 85
@@ -245,7 +245,7 @@ sniper:
     minutes: 30
 
   audit:
-    window_s: 600                # after a rejection, keep watching 10 min: did the gate dodge a dump or miss a runner?
+    window_s: 600                # follow every decision 10 min: had we bought, would it double before -30%? (vs our buys)
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)
