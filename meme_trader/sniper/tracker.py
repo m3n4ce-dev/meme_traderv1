@@ -36,6 +36,9 @@ class TokenState:
     cluster: dict | None = None   # funding-graph insider report (see funding.py)
     last_cluster_check: float = 0.0
     unpriced_calls: list = field(default_factory=list)   # (caller, ts) for calls seen before any price
+    p: float | None = None        # model probability of 2x-before-stop (when a model is loaded)
+    p_ts: float = -1e12
+    late_tried: bool = False      # graduation play already attempted
     price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
 
     @property

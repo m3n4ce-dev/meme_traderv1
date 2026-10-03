@@ -82,6 +82,7 @@ sniper:
     sol_usd_fallback: 150        # TBD - used until/if the live SOL price can't be fetched
 
   entry:
+    enabled: true                # sniper entries on/off (copy, callouts and late plays have their own switches)
     bundle_window_s: 2           # buys this soon after create count as bundled/insider snipes
     min_age_s: 15                # TBD - wait at least this long before buying (let insiders show their hand)
     max_age_s: 240               # TBD - stop watching a launch after this
@@ -206,6 +207,45 @@ sniper:
 
   feed:
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
+
+  late:                          # "graduation play": strong late-curve momentum, out before migration
+    enabled: false               # off until it proves itself on YOUR recorded data (sweep late.enabled=true,false)
+    buy_usd_mult: 1.0            # size relative to the sizing agent's normal answer
+    min_curve_pct: 55
+    max_curve_pct: 85
+    max_age_s: 900
+    flow_window_s: 30
+    min_net_flow_sol: 3.0        # net SOL into the curve in flow_window_s
+    min_buyers: 12               # unique buyers in flow_window_s
+    min_buy_sell_ratio: 1.5
+    min_near_high: 0.9           # price within 10% of its high
+    exit_curve_pct: 94           # sell into the run-up, before migration (post-graduation liquidity drops ~57% in 25 min)
+    stop_loss_pct: 15
+    stall_s: 45
+    max_hold_s: 600
+
+  predict:                       # learned probability model (python -m meme_trader.sniper train ...)
+    enabled: true                # used only once a model file exists
+    model_path: data/model.json
+    up_pct: 100                  # label: did price reach +100% (2x) ...
+    down_pct: 30                 # ... before -30% ...
+    horizon_s: 600               # ... within 10 minutes of the snapshot
+    checkpoints_s: [15, 30, 60, 120, 180]
+    min_p: 0.0                   # entry gate on P(2x first); 0 = show only. Set after checking `train` metrics
+    kelly_fraction: 0.25         # quarter-Kelly: feeds the sizing agent's strength (never beyond the $ hard cap)
+    require_positive_ev: false   # skip entries the model says lose money after costs
+
+  risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
+    enabled: true
+    lookback_trades: 10
+    loss_streak: 5               # N losses in a row ...
+    window_loss_sol: 0.15        # ... or the last lookback_trades lost more than this
+    size_mult: 0.5               # while defensive: half size ...
+    min_score_add: 10            # ... and a higher bar
+    minutes: 30
+
+  audit:
+    window_s: 600                # after a rejection, keep watching 10 min: did the gate dodge a dump or miss a runner?
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)

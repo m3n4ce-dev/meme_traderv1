@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from ..journal import DATA
+from . import jsonsafe
 
 SYSTEM = (
     "You are the head of trading and the senior engineer for an automated Solana pump.fun trading bot. "
@@ -45,13 +46,27 @@ SCHEMA = {
 }
 
 
+def recorded_feeds() -> list[str]:
+    """Recorded feed files, oldest first: plain .jsonl (today) and .jsonl.gz (finished days)."""
+    from .feeds import dedupe_feed_paths
+
+    paths = sorted(glob.glob(str(DATA / "feed-*.jsonl")) + glob.glob(str(DATA / "feed-*.jsonl.gz")))
+    return [str(p) for p in dedupe_feed_paths(paths)]
+
+
 def gather(days: int, sniper_params: dict) -> dict:
+    from .analytics import compute
+
     trades = []
     for path in sorted(glob.glob(str(DATA / "trades-*.jsonl")))[-days:]:
         trades += [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
     summary = json.loads((DATA / "sniper_summary.json").read_text()) if (DATA / "sniper_summary.json").exists() else {}
+    cap = sniper_params.get("capital", {})
+    a = compute(trades, [], cap.get("starting_sol", 1.0), cap.get("max_drawdown_pct", 40), sims=300) if trades else {}
+    keep = ("kpis", "by_source", "by_exit", "by_score", "by_p", "by_hour", "live_calibration", "edge", "insights")
     return {"closed_trades": trades[-400:], "trade_count": len(trades), "latest_summary": summary,
-            "params": sniper_params, "recorded_feed_files": sorted(glob.glob(str(DATA / "feed-*.jsonl")))[-days:]}
+            "analytics": {k: a[k] for k in keep if k in a},
+            "params": sniper_params, "recorded_feed_files": recorded_feeds()[-days:]}
 
 
 def ask_claude(data: dict, model: str) -> dict:
@@ -63,7 +78,7 @@ def ask_claude(data: dict, model: str) -> dict:
         betas=["server-side-fallback-2026-07-01"], fallbacks="default",
         system=SYSTEM,
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCHEMA}},
-        messages=[{"role": "user", "content": "Bot data for review:\n" + json.dumps(data, default=str)}],
+        messages=[{"role": "user", "content": "Bot data for review:\n" + jsonsafe.dumps(data)}],
     )
     if r.stop_reason == "refusal":
         raise RuntimeError("review request was declined")
@@ -80,7 +95,7 @@ def render(rv: dict, validation: dict | None) -> str:
         lines += ["## Proposed parameter changes", "", "| key | value | why |", "|---|---|---|"]
         lines += [f"| `{c['key']}` | `{c['value']}` | {c['rationale']} |" for c in rv["param_changes"]]
         sets = " ".join(f"--set {c['key']}={c['value']}" for c in rv["param_changes"])
-        lines += ["", f"Try it: `python -m meme_trader.sniper backtest --file data/feed-*.jsonl {sets}`", ""]
+        lines += ["", f"Try it: `python -m meme_trader.sniper backtest --file data/feed-* {sets}`", ""]
     if validation:
         b, p = validation["baseline"], validation["proposed"]
         lines += ["## Backtest on recorded feed (baseline → proposed)", "", "| metric | baseline | proposed |",
