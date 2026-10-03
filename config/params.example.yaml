@@ -145,6 +145,10 @@ sniper:
     curve_fee_pct: 1.25          # pump.fun bonding-curve fee (protocol + creator)
     platform_fee_pct: 0.5        # PumpPortal local-trade API fee
     paper_latency_slippage_pct: 3   # paper: extra adverse price move between signal and landing
+    paper_delay_s: 0             # paper: seconds from deciding to landing; orders fill at the curve price THEN, and buys
+                                 # fail (fee paid) past slippage_pct, sells retry through sell_slippage_steps, like live.
+                                 # Realistic: feed lag behind the chain (dashboard) + ~1 s to land. With it, set
+                                 # paper_latency_slippage_pct to 0 - the delay itself is the slippage.
     slippage_pct: 15             # live: max buy slippage sent to PumpPortal (buys are never blindly retried)
     sell_slippage_steps: [15, 25, 40]   # live sells: re-quote with these slippages until one lands
     close_empty_accounts: true   # live: close emptied token accounts after a full exit (reclaims rent)

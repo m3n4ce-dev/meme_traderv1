@@ -133,6 +133,14 @@ class SniperPosition:
     p: float | None = None     # model P(2x first) at entry, for live calibration in analytics
     trough_price: float = 0.0  # lowest price while held (max adverse excursion)
     rent_sol: float = 0.0      # live: refundable token-account rent paid at entry (not part of cost)
+    # execution, measured per trade: price when we decided vs what we got, decision-to-fill time, fees burned
+    # by attempts that failed. Paper with execution.paper_delay_s models them; live measures them.
+    entry_quote: float = 0.0
+    entry_delay_s: float = 0.0
+    exit_quote: float = 0.0
+    exit_fill: float = 0.0
+    exit_delay_s: float = 0.0
+    failed_fees_sol: float = 0.0
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100

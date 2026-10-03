@@ -133,7 +133,8 @@ class Wallet:
         pre, post = amounts(meta.get("preTokenBalances")), amounts(meta.get("postTokenBalances"))
         dtok = sum(post.values()) - sum(pre.values())
         rent = sum(meta["postBalances"][i] - meta["preBalances"][i] for i in post if i not in pre) / 1e9
-        return {"dsol": dsol, "dtok": dtok, "rent": max(rent, 0.0), "failed": meta.get("err") is not None}
+        return {"dsol": dsol, "dtok": dtok, "rent": max(rent, 0.0), "failed": meta.get("err") is not None,
+                "slot": tx.get("slot"), "block_time": tx.get("blockTime")}
 
     def token_balance(self, mint: str) -> int:
         res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint},

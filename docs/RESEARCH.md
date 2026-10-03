@@ -69,6 +69,8 @@ On the 16 hours of development data before it (laggy in places, see BUILD_LOG #1
 - **Filters:** they beat the no-filter baseline (−0.74 SOL) and 100% of random picks.
 - **Timing:** checking every 3 s instead of 2 s cut the profit to +0.13 SOL.
 
-So the edge, if there is one, depends heavily on entering quickly. Real fills are slower than this model assumes, which makes measured execution delay the deciding next step.
+Execution measurement (BUILD_LOG #18) answered that: with orders landing 1 s after the decision, at the price they find, the same 16 hours go from +2.70 SOL to **−0.40 SOL**. At 2–3 s, today's realistic delay, the strategy loses about 1 SOL. It misses 7 of its 15 best winners, because they run past the slippage limit before a delayed buy can land.
+
+`scripts/start.sh research latency` shows how fast prices move in the window; `eval` reports the delay curve for any policy.
 
 These development numbers are a starting point, not evidence. The holdout decides.

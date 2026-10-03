@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import heapq
 import json
 import re
 import time
@@ -192,6 +193,9 @@ class Engine:
         self.pulse: deque = deque(maxlen=90)
         self._last_health = 0.0
         self.recorded_degraded = ""                        # replays: the recording says the live feed was bad here
+        self.deferred: list = []                           # paper orders still "in flight" (execution.paper_delay_s)
+        self._order_seq = 0
+        self.last_slot = 0                                 # newest chain slot seen on the feed
         self._last_flush = 0.0
 
     # ------------------------------------------------------------------ helpers
@@ -437,6 +441,8 @@ class Engine:
             if self.p.predict.enabled and self.model is None:     # (an injected model is the caller's choice)
                 self.model = self._load_model(for_live=False, replay_start=e.ts)
         self.now = max(self.now, e.ts)
+        if self.deferred:                                  # paper orders whose landing time has come
+            await self._settle_deferred()
         if not isinstance(e, Tick):
             self.last_event = self.now
             if self.record_file:
@@ -455,6 +461,8 @@ class Engine:
             if s is not None and s.launch is not None:
                 s.launch.twitter, s.launch.telegram, s.launch.website = e.twitter, e.telegram, e.website
         elif isinstance(e, Trade):
+            if e.slot > self.last_slot:
+                self.last_slot = e.slot
             await self._on_trade(e)
         elif isinstance(e, Migration):
             s = self.tokens.get(e.mint)
@@ -903,7 +911,12 @@ class Engine:
         self.book.reserved[s.mint] = sol + self._order_overhead(source)
         self.pending.add(s.mint)
         s.decided = "entered"
-        await self._dispatch(self._run_buy(s, score, sol, notes, source, leader, then))
+        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot}
+        if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
+            self._defer({"side": "buy", "mint": s.mint, "score": score, "sol": sol, "notes": list(notes),
+                         "source": source, "leader": leader, "then": then, **meta})
+            return
+        await self._dispatch(self._run_buy(s, score, sol, notes, source, leader, then, meta))
 
     async def _dispatch(self, coro) -> None:
         if self.feed.realtime:
@@ -921,7 +934,7 @@ class Engine:
             self.say("error", f"internal error in an order task: {task.exception()!r}")
             traceback.print_exception(task.exception())
 
-    async def _run_buy(self, s: TokenState, score, sol, notes, source, leader, then) -> None:
+    async def _run_buy(self, s: TokenState, score, sol, notes, source, leader, then, meta=None) -> None:
         try:
             fill = await self.ex.buy(s.mint, s.curve, sol,
                                      self.p.callouts.priority_fee_sol if source == "callout" else None)
@@ -936,12 +949,92 @@ class Engine:
             return
         self.book.reserved.pop(s.mint, None)
         self.pending.discard(s.mint)
-        self._apply_buy(s, fill, score, notes, source, leader)
+        self._apply_buy(s, fill, score, notes, source, leader, meta)
         if fill.ok and then is not None:
             try:
                 await then()
             except Exception as e:                        # e.g. posting a callout card - the buy itself stands
                 self.say("error", f"after-buy step for {s.symbol} failed: {e!r}", s.mint)
+
+    # ------------------------------------------------------------------ paper orders in flight
+    def _paper_delay(self) -> float:
+        """execution.paper_delay_s: seconds from deciding to landing, in paper and replays (live really waits).
+        It should be the feed's lag behind the chain plus the time a transaction takes to land."""
+        return 0.0 if self.mode.startswith("live") else float(self.p.execution.get("paper_delay_s", 0) or 0)
+
+    def _defer(self, order: dict) -> None:
+        self._order_seq += 1
+        heapq.heappush(self.deferred, (self.now + self._paper_delay(), self._order_seq, order))
+
+    async def _settle_deferred(self) -> None:
+        while self.deferred and self.deferred[0][0] <= self.now:
+            _, _, o = heapq.heappop(self.deferred)
+            if o["side"] == "buy":
+                await self._land_buy(o)
+            else:
+                await self._land_sell(o)
+
+    async def _land_buy(self, o: dict) -> None:
+        """A paper buy reaches the chain: at the price it finds there, or not at all if that price ran past
+        execution.slippage_pct (the transaction fails and still costs its fee), as a live buy would."""
+        s = self.tokens.get(o["mint"])
+        prio = self.p.callouts.priority_fee_sol if o["source"] == "callout" else None
+        tx = (prio if prio is not None else self.p.execution.priority_fee_sol) + 0.000005
+        tol = float(self.p.execution.slippage_pct)
+        if s is None or not s.price_known or s.migrated:
+            fill = SniperFill(False, error="token gone before the order landed", fees_lost=tx)
+        elif s.curve.price > o["quote"] * (1 + tol / 100):
+            fill = SniperFill(False, fees_lost=tx, error=f"price up {(s.curve.price / o['quote'] - 1) * 100:.0f}% "
+                                                         f"before it landed (slippage limit {tol:g}%)")
+        else:
+            try:
+                fill = await self.ex.buy(o["mint"], s.curve, o["sol"], prio)
+            except Exception as e:
+                fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        self.book.reserved.pop(o["mint"], None)
+        self.pending.discard(o["mint"])
+        if s is None:
+            self.book.sol -= fill.fees_lost
+            self.book.day_pnl -= fill.fees_lost
+            return
+        self._apply_buy(s, fill, o["score"], o["notes"], o["source"], o["leader"], o)
+        if fill.ok and o.get("then") is not None:
+            try:
+                await o["then"]()
+            except Exception as e:
+                self.say("error", f"after-buy step for {s.symbol} failed: {e!r}", s.mint)
+
+    async def _land_sell(self, o: dict) -> None:
+        """A paper sell reaches the chain. Below its slippage floor it fails (fee paid) and is re-sent with the
+        next step of execution.sell_slippage_steps / sell_priority_fee_steps, like the live executor."""
+        s, pos = self.tokens.get(o["mint"]), self.positions.get(o["mint"])
+        if s is None or pos is not o["pos"]:
+            self.pending.discard(o["mint"])
+            return
+        x = self.p.execution
+        steps = list(x.sell_slippage_steps)
+        prios = [self.p.callouts.priority_fee_sol] * len(steps) if pos.source == "callout" else \
+            list(x.sell_priority_fee_steps) + [x.sell_priority_fee_steps[-1]] * len(steps)
+        k = o["attempt"]
+        if s.curve.price < o["quote"] * (1 - steps[k] / 100):
+            lost = prios[k] + 0.000005
+            self._book_fees_lost(SniperFill(False, fees_lost=lost), s)
+            pos.failed_fees_sol += lost
+            self.stats["failed_sell_attempts"] += 1
+            if k + 1 < len(steps):
+                self._defer({**o, "attempt": k + 1, "quote": s.curve.price})
+                return
+            self.pending.discard(o["mint"])
+            self.say("error", f"sell {s.symbol}: all {len(steps)} attempts failed - the price fell faster than "
+                              f"the slippage steps", s.mint)
+            return
+        try:
+            fill = await self.ex.sell(o["mint"], s.curve, o["tokens"], prios[k])
+        except Exception as e:
+            fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        self.pending.discard(o["mint"])
+        self._apply_sell(s, pos, fill, o["reason"], {"quote": o["first_quote"], "decided": o["decided"],
+                                                     "slot": o.get("slot")})
 
     def _book_fees_lost(self, fill: SniperFill, s: TokenState) -> None:
         """Failed transactions that landed still burned fees: real cash, and a real loss for today."""
@@ -950,10 +1043,11 @@ class Engine:
             self.book.day_pnl -= fill.fees_lost
             self.say("error", f"{s.symbol}: failed transaction(s) still cost {fill.fees_lost:.6f} SOL in fees", s.mint)
 
-    def _apply_buy(self, s: TokenState, fill: SniperFill, score, notes, source, leader) -> None:
+    def _apply_buy(self, s: TokenState, fill: SniperFill, score, notes, source, leader, meta=None) -> None:
         self._book_fees_lost(fill, s)
         if not fill.ok:
-            self.say("error", f"buy {s.symbol} failed: {fill.error}", s.mint)
+            self.stats["failed_buys"] += 1
+            self.say("error", f"buy {s.symbol} failed: {fill.error}", s.mint, timing=fill.timing)
             self.save_state()
             return
         self.book.sol -= fill.sol + fill.rent             # rent is cash locked in the token account until reclaimed
@@ -961,14 +1055,18 @@ class Engine:
             mint=s.mint, symbol=s.symbol, opened_at=self.now, entry_price=fill.price, tokens=fill.tokens,
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
             peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""),
-            p=s.p, trough_price=fill.price, rent_sol=fill.rent)
+            p=s.p, trough_price=fill.price, rent_sol=fill.rent,
+            entry_quote=(meta or {}).get("quote", 0.0),
+            entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
+            failed_fees_sol=fill.fees_lost)
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         self.stats["entries"] += 1
         self.save_state()
         self.stats["entries_" + source.split(":")[0]] += 1
         self.say("buy", f"{s.symbol} {fill.sol:.3f} SOL @ curve {s.curve.progress:.0%} [{source}] | score {score:.0f} | "
-                        + ", ".join(notes), s.mint, signature=fill.signature)
+                        + ", ".join(notes), s.mint, signature=fill.signature, timing=fill.timing,
+                 decided_slot=(meta or {}).get("slot"))
 
     async def _check_exit(self, s: TokenState) -> None:
         pos = self.positions[s.mint]
@@ -1003,9 +1101,14 @@ class Engine:
             return
         tokens = pos.tokens if frac >= 1 else pos.tokens * frac
         self.pending.add(s.mint)
-        await self._dispatch(self._run_sell(s, pos, tokens, reason))
+        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot}
+        if self._paper_delay() > 0:
+            self._defer({"side": "sell", "mint": s.mint, "pos": pos, "tokens": tokens, "reason": reason,
+                         "first_quote": s.curve.price, "attempt": 0, **meta})
+            return
+        await self._dispatch(self._run_sell(s, pos, tokens, reason, meta))
 
-    async def _run_sell(self, s: TokenState, pos: SniperPosition, tokens: float, reason: str) -> None:
+    async def _run_sell(self, s: TokenState, pos: SniperPosition, tokens: float, reason: str, meta=None) -> None:
         try:
             fill = await self.ex.sell(s.mint, s.curve, tokens,
                                       self.p.callouts.priority_fee_sol if pos.source == "callout" else None)
@@ -1018,10 +1121,12 @@ class Engine:
                               "sell until the chain says", s.mint)
             return
         self.pending.discard(s.mint)
-        self._apply_sell(s, pos, fill, reason)
+        self._apply_sell(s, pos, fill, reason, meta)
 
-    def _apply_sell(self, s: TokenState, pos: SniperPosition, fill: SniperFill, reason: str) -> None:
+    def _apply_sell(self, s: TokenState, pos: SniperPosition, fill: SniperFill, reason: str, meta=None) -> None:
         self._book_fees_lost(fill, s)
+        if self.positions.get(s.mint) is pos:
+            pos.failed_fees_sol += fill.fees_lost
         if not fill.ok:
             self.say("error", f"sell {s.symbol} failed: {fill.error}", s.mint)
             self.save_state()
@@ -1037,6 +1142,9 @@ class Engine:
         pos.proceeds_sol += fill.sol
         pos.rent_sol = max(pos.rent_sol - fill.rent_reclaimed, 0.0)
         pos.exits.append((self.now, reason, sold, fill.sol))
+        if meta and meta.get("quote") and sold > 0:
+            pos.exit_quote, pos.exit_fill = meta["quote"], fill.sol / sold
+            pos.exit_delay_s = round(self.now - meta.get("decided", self.now), 3)
         self.book.day_pnl += fill.sol - cost_part
         if reason.startswith("initials"):
             pos.initials_taken = True
@@ -1044,7 +1152,7 @@ class Engine:
             pos.ladder_hit += 1
             pos.initials_taken = True
         self.say("sell", f"{s.symbol} {sold / pos.initial_tokens:.0%} for {fill.sol:.3f} SOL | {reason}",
-                 s.mint, signature=fill.signature)
+                 s.mint, signature=fill.signature, timing=fill.timing, decided_slot=(meta or {}).get("slot"))
         if pos.tokens * s.curve.price < DUST_SOL:
             self._close(pos, s)
         self.save_state()
@@ -1123,6 +1231,11 @@ class Engine:
             # which run produced this trade: demo, paper and live results must never be mixed up
             "mode": self.mode, "session": self.session, "start_sol": self.book.start_sol,
             "config": self.config_id, "model": self._model_id(),
+            # execution: all-in fill vs the price when we decided (fees, impact, slippage, delay), and timing
+            "entry_vs_signal_pct": round((pos.entry_price / pos.entry_quote - 1) * 100, 2) if pos.entry_quote else None,
+            "exit_vs_signal_pct": round((pos.exit_fill / pos.exit_quote - 1) * 100, 2) if pos.exit_quote else None,
+            "entry_delay_s": pos.entry_delay_s, "exit_delay_s": pos.exit_delay_s,
+            "failed_fees_sol": round(pos.failed_fees_sol, 6),
         }
         self.book.closed.append(row)
         self.stats["wins" if pnl > 0 else "losses"] += 1
@@ -1140,6 +1253,8 @@ class Engine:
         asyncio.ensure_future(self._unwatch(pos.mint))
 
     async def _tick(self) -> None:
+        if self.deferred:
+            await self._settle_deferred()
         if self.persist and self.now - self._last_state_save >= 10:
             self.save_state()
         if self.feed.realtime and self.p.sizing.enabled and self.now - self._last_price_refresh >= 300:
