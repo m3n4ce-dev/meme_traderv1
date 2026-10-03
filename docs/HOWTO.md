@@ -18,7 +18,8 @@ Setup is in [MAC_SETUP.md](MAC_SETUP.md) and [UBUNTU_SETUP.md](UBUNTU_SETUP.md).
 | Copy a profitable wallet | [11](#11-copy-a-wallet) |
 | Run it 24/7 and check from my Mac | [12](#12-run-247-on-the-mini-pc-and-check-from-the-mac) |
 | Go live with real money | [13](#13-go-live) |
-| Fix something that looks wrong | [14](#14-when-something-looks-wrong) |
+| Let Claude operate the bot | [14](#14-let-claude-operate-the-bot) |
+| Fix something that looks wrong | [15](#15-when-something-looks-wrong) |
 
 ---
 
@@ -162,7 +163,18 @@ Only after weeks of paper trading that you're happy with in **Analytics**. Follo
 
 Start with the smallest sizes.
 
-## 14. When something looks wrong
+## 14. Let Claude operate the bot
+With the bot running (service or `scripts/start.sh paper`), open Claude Code in the project folder:
+```bash
+cd ~/meme_traderv1 && claude
+```
+The first time, approve the `meme-trader` MCP server. Then either type `/desk-check` for a full review, or just ask: "how are we doing?", "anything worth selling?", "is this token any good? <mint>".
+
+Reading is automatic. Every action (pause, setting change, buy, sell, watch, note) shows you the exact call, with its reason, and waits for your OK. The bot itself enforces the limits: Claude can make things safer but never riskier than your `config/params.yaml`. It can't go live or press KILL. Its actions show in the dashboard log as AGENT lines, and setting changes last until the next restart.
+
+To stop agent buys entirely: `sniper.agent.can_buy: false`. To turn the tools off: `sniper.agent.enabled: false`. Restart after either change.
+
+## 15. When something looks wrong
 | You see | Likely cause → fix |
 |---|---|
 | Feed badge red / `stale` | No market data. Check the internet, then the `trade logs` row of `scripts/start.sh doctor`. If the public RPC is struggling, set `SOLANA_WS_URL` to another Solana websocket. |

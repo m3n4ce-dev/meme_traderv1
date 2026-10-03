@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "meme-trader": {
+      "type": "stdio",
+      "command": ".venv/bin/python",
+      "args": ["-m", "meme_trader.sniper.mcp_server"]
+    }
+  }
+}
