@@ -12,6 +12,7 @@ SyntheticFeed  - a fake market with realistic launch archetypes (rugs, bundles, 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import heapq
 import itertools
 import json
@@ -19,6 +20,7 @@ import os
 import random
 import string
 import time
+from collections import deque
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -51,8 +53,8 @@ class Feed:
 class PumpPortalFeed(Feed):
     URL = "wss://pumpportal.fun/api/data"
 
-    def __init__(self, fallback_urls: list[str] | None = None):
-        key = os.environ.get("PUMPPORTAL_API_KEY", "")
+    def __init__(self, fallback_urls: list[str] | None = None, use_key: bool = True):
+        key = os.environ.get("PUMPPORTAL_API_KEY", "") if use_key else ""
         # primary first; on disconnect rotate to backups (e.g. pumpdev.io), then back to primary
         self.urls = [f"{self.URL}?api-key={key}" if key else self.URL] + list(fallback_urls or [])
         self.url_idx = 0
@@ -139,6 +141,153 @@ class PumpPortalFeed(Feed):
         if tx == "migrate":
             return Migration(mint=d["mint"], ts=now)
         return None
+
+
+PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+TRADE_EVENT = bytes.fromhex("bddb7fd34ee661ee")        # sha256("event:TradeEvent")[:8] (Anchor)
+PUBLIC_WS = "wss://api.mainnet-beta.solana.com"
+
+
+class SolanaTradeFeed(Feed):
+    """Launches + migrations from PumpPortal's free streams; trades read straight from the pump.fun
+    program's own logs (logsSubscribe + its Anchor TradeEvent) over a Solana RPC websocket.
+
+    Same events as PumpPortalFeed without the 0.01 SOL / 10k-trade meter. The cost is bandwidth:
+    every bonding-curve trade (~2-3k/min, ~20 GB/day), so point SOLANA_WS_URL at a provider that
+    doesn't bill per MB (Helius bills 2 credits / 0.1 MB = ~12M credits/month). The public endpoint
+    is free but best-effort: if trades stop arriving the feed reports degraded and entries pause.
+    """
+    STALL_S = 30            # no log notification for this long = stalled; reconnect
+    EARLY_S = 15            # hold unwatched trades this long: a launch's first buys (often its insider
+                            # bundle) can land before PumpPortal announces it; replay them on watch()
+
+    def __init__(self, ws_url: str = "", fallback_urls: list[str] | None = None):
+        self.ws_url = ws_url or os.environ.get("SOLANA_WS_URL") or PUBLIC_WS
+        self.launches = PumpPortalFeed(fallback_urls, use_key=False)
+        self.watched: set[str] = set()
+        self.accounts: set[str] = set()
+        self.trades_up = False
+        self.early: dict[str, list[Trade]] = {}
+        self._early_order: deque[tuple[float, str]] = deque()
+        self._q: asyncio.Queue | None = None
+        self.dev_buys: dict[str, tuple[str, float]] = {}   # mint -> (creator, tokens) until its event is seen
+
+    async def watch(self, mints: list[str]) -> None:
+        self.watched.update(mints)
+        now = time.time()
+        for m in mints:
+            for t in self.early.pop(m, ()):
+                if self._q is not None and not self._is_dev_buy(t):
+                    self._q.put_nowait(dataclasses.replace(t, ts=now))   # keep the feed's clock monotonic
+
+    def _is_dev_buy(self, t: Trade) -> bool:
+        """The launch already carries the creator's initial buy; its TradeEvent would count it twice."""
+        dev = self.dev_buys.get(t.mint)
+        if dev and t.side == "buy" and t.trader == dev[0] and abs(t.tokens - dev[1]) <= max(dev[1], 1) * 1e-6:
+            del self.dev_buys[t.mint]
+            return True
+        return False
+
+    def _hold(self, t: Trade) -> None:
+        if t.mint not in self.early:
+            self._early_order.append((t.ts, t.mint))
+        self.early.setdefault(t.mint, []).append(t)
+        while self._early_order and t.ts - self._early_order[0][0] > self.EARLY_S:
+            self.early.pop(self._early_order.popleft()[1], None)
+
+    async def unwatch(self, mints: list[str]) -> None:
+        self.watched.difference_update(mints)
+
+    async def watch_accounts(self, wallets: list[str]) -> None:
+        self.accounts.update(wallets)
+
+    @property
+    def host(self) -> str:
+        return self.launches.host if self.launches.degraded else self.ws_url.split("/")[2].split("?")[0]
+
+    @property
+    def degraded(self) -> bool:
+        return self.launches.degraded or not self.trades_up
+
+    @staticmethod
+    def parse_logs(value: dict, now: float) -> list[Trade]:
+        """Trades from one logsSubscribe notification value ({signature, err, logs})."""
+        import base64
+        import struct
+
+        from solders.pubkey import Pubkey
+
+        if value.get("err"):
+            return []                                   # failed transactions moved nothing
+        out = []
+        for line in value.get("logs") or ():
+            if not line.startswith("Program data: "):
+                continue
+            try:
+                raw = base64.b64decode(line[14:])
+            except ValueError:
+                continue                                # other programs log arbitrary data
+            if raw[:8] != TRADE_EVENT or len(raw) < 129:
+                continue
+            sol, tokens = struct.unpack_from("<QQ", raw, 40)
+            v_sol, v_tokens = struct.unpack_from("<QQ", raw, 97)
+            out.append(Trade(mint=str(Pubkey.from_bytes(raw[8:40])), ts=now,
+                             trader=str(Pubkey.from_bytes(raw[57:89])), side="buy" if raw[56] else "sell",
+                             sol=sol / 1e9, tokens=tokens / 1e6, v_sol=v_sol / 1e9, v_tokens=v_tokens / 1e6,
+                             signature=value.get("signature", "")))
+        return out
+
+    async def _trades(self, q: asyncio.Queue) -> None:
+        import aiohttp
+
+        backoff = 1
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session, \
+                        session.ws_connect(self.ws_url, heartbeat=20, max_msg_size=0) as ws:
+                    await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                                        "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": "processed"}]})
+                    while True:
+                        msg = await ws.receive(timeout=self.STALL_S)
+                        if msg.type != aiohttp.WSMsgType.TEXT:
+                            break
+                        try:
+                            value = json.loads(msg.data)["params"]["result"]["value"]
+                        except (ValueError, KeyError, TypeError):
+                            continue                    # subscription reply etc.
+                        self.trades_up, backoff = True, 1
+                        for t in self.parse_logs(value, time.time()):
+                            if t.mint in self.watched or t.trader in self.accounts:
+                                if not self._is_dev_buy(t):
+                                    q.put_nowait(t)
+                            else:
+                                self._hold(t)
+            except Exception as err:                    # anything: never leave a dead stream marked up
+                print(f"[feed] trade logs {self.host} down: {err!r}; retrying in {backoff}s")
+            self.trades_up = False
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+
+    async def _launches(self, q: asyncio.Queue) -> None:
+        async for e in self.launches.events():
+            if isinstance(e, Launch):
+                if e.dev_buy_tokens > 0:
+                    self.dev_buys[e.mint] = (e.creator, e.dev_buy_tokens)
+                    if len(self.dev_buys) > 5000:          # events never seen (e.g. while trades were down)
+                        self.dev_buys.pop(next(iter(self.dev_buys)))
+                q.put_nowait(e)
+            elif not isinstance(e, Trade):              # keyless: PumpPortal sends no trades anyway
+                q.put_nowait(e)
+
+    async def events(self) -> AsyncIterator[Event]:
+        q = self._q = asyncio.Queue()
+        tasks = [asyncio.ensure_future(self._launches(q)), asyncio.ensure_future(self._trades(q))]
+        try:
+            while True:
+                yield await q.get()
+        finally:
+            for t in tasks:
+                t.cancel()
 
 
 async def fetch_metadata(uri: str) -> dict:

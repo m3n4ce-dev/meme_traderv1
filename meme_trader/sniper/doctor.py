@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import sys
+import time
 
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 OK, WARN, FAIL = "\033[32m OK \033[0m", "\033[33mWARN\033[0m", "\033[31mFAIL\033[0m"
@@ -40,6 +41,24 @@ async def _pumpportal() -> str:
         return "connected"
 
 
+async def _trade_logs(ws_url: str) -> str:
+    import aiohttp
+
+    from .feeds import PUMP_PROGRAM, SolanaTradeFeed
+
+    async with aiohttp.ClientSession() as s, s.ws_connect(ws_url, timeout=10, max_msg_size=0) as ws:
+        await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                            "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": "processed"}]})
+        n, end = 0, time.time() + 15
+        while time.time() < end and n < 20:
+            d = json.loads((await asyncio.wait_for(ws.receive(), 15)).data)
+            if "params" in d:
+                n += len(SolanaTradeFeed.parse_logs(d["params"]["result"]["value"], 0))
+        if not n:
+            raise RuntimeError("no pump.fun trades in 15 s")
+        return f"{n} pump.fun trades decoded"
+
+
 def run(params) -> None:
     print("meme_trader doctor\n")
     line(OK if sys.version_info >= (3, 10) else FAIL, f"Python {sys.version.split()[0]}", "install Python 3.11+")
@@ -54,8 +73,10 @@ def run(params) -> None:
     line(OK if valid_pubkey(pk) else FAIL, f"wallet.pubkey {pk or '(empty)'}",
          "" if valid_pubkey(pk) else "set wallet.pubkey in config/params.yaml")
 
+    on_chain = params.sniper.feed.trades != "pumpportal"
     env = {
-        "PUMPPORTAL_API_KEY": "REQUIRED for the live feed: per-token trades + wallet streams (copy trading)",
+        "PUMPPORTAL_API_KEY": "not needed: trades come from Solana logs (sniper.feed.trades: solana)" if on_chain
+        else "REQUIRED for the live feed: per-token trades + wallet streams (copy trading)",
         "ANTHROPIC_API_KEY": "AI desk + review agent",
         "SOLANA_RPC_URL": "live trading + insider-cluster lookups (use a paid RPC, e.g. Helius)",
         "SOLANA_KEYPAIR_PATH": "live trading (bot wallet keypair file)",
@@ -66,13 +87,23 @@ def run(params) -> None:
         "TELEGRAM_ALERT_CHAT_ID": "phone alerts (your own chat id)",
     }
     for k, why in env.items():
-        line(OK if os.environ.get(k) else (FAIL if k == "PUMPPORTAL_API_KEY" else WARN), f"{k} {'set' if os.environ.get(k) else 'not set'} - {why}",
+        need = k == "PUMPPORTAL_API_KEY" and not on_chain
+        ok = os.environ.get(k) or (k == "PUMPPORTAL_API_KEY" and on_chain)
+        line(OK if ok else (FAIL if need else WARN), f"{k} {'set' if os.environ.get(k) else 'not set'} - {why}",
              "" if os.environ.get(k) else "add it to .env (see .env.example)")
 
     try:
         line(OK, "PumpPortal websocket: " + asyncio.run(_pumpportal()))
     except Exception as e:
         line(FAIL, f"PumpPortal websocket unreachable ({type(e).__name__})", "check internet / firewall")
+    if on_chain:
+        from .feeds import PUBLIC_WS
+        ws_url = params.sniper.feed.ws_url or os.environ.get("SOLANA_WS_URL") or PUBLIC_WS
+        try:
+            line(OK, f"trade logs {ws_url.split('/')[2].split('?')[0]}: " + asyncio.run(_trade_logs(ws_url)))
+        except Exception as e:
+            line(FAIL, f"trade logs unreachable at {ws_url.split('/')[2].split('?')[0]} ({type(e).__name__}: {e})",
+                 "check internet, or set SOLANA_WS_URL in .env to another Solana RPC websocket")
 
     rpc = os.environ.get("SOLANA_RPC_URL") or "https://api.mainnet-beta.solana.com"
     try:
@@ -112,5 +143,6 @@ def run(params) -> None:
     n = len(params.sniper.copy.leaders)
     line(OK if n else WARN, f"copy trading: {n} leader wallet(s) configured",
          "" if n else "add wallets under sniper.copy.leaders (find some with the `leaders` command)")
-    print("\nDemo (scripts/start.sh demo) needs nothing. Paper trading on the real market needs PUMPPORTAL_API_KEY\n"
-          "and a reachable PumpPortal websocket. Live trading needs every row OK.")
+    print("\nDemo (scripts/start.sh demo) needs nothing. Paper trading on the real market needs the PumpPortal\n"
+          "websocket plus trade data (the trade logs row, or PUMPPORTAL_API_KEY with sniper.feed.trades: pumpportal).\n"
+          "Live trading needs every row OK.")

@@ -53,6 +53,6 @@ fi
 say "Done. Next:"
 cat <<EOF
     Demo market:        scripts/start.sh demo     (then open http://127.0.0.1:8787)
-    Real market, paper: scripts/start.sh paper    (needs PUMPPORTAL_API_KEY in .env)
+    Real market, paper: scripts/start.sh paper    (no keys needed)
     Re-check setup:     scripts/start.sh doctor
 EOF
