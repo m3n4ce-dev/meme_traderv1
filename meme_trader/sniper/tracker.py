@@ -3,13 +3,20 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from .curve import FINAL_V_TOKENS, TOTAL_SUPPLY, Curve
 from .events import Launch, Social, Trade
 
+# pump.fun's Mayhem-mode agent: a Mayhem token mints 2B, half of it to this wallet, which then trades it
+MAYHEM_AGENT = "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
+MAYHEM_SUPPLY = 2 * TOTAL_SUPPLY
+
 
 @dataclass
 class TokenState:
+    # wallets whose trades move the price but aren't demand (set from sniper.market.non_organic_wallets)
+    NON_ORGANIC: ClassVar[frozenset] = frozenset({MAYHEM_AGENT})
     mint: str
     launch: Launch | None
     first_seen: float
@@ -40,6 +47,8 @@ class TokenState:
     p_ts: float = -1e12
     late_tried: bool = False      # graduation play already attempted
     price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
+    mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): seen when the agent trades it
+    non_organic_trades: int = 0
 
     @property
     def created_ts(self) -> float:
@@ -55,6 +64,15 @@ class TokenState:
 
     def age(self, now: float) -> float:
         return now - self.created_ts
+
+    @property
+    def supply(self) -> float:
+        return MAYHEM_SUPPLY if self.mayhem else TOTAL_SUPPLY
+
+    @property
+    def market_cap_sol(self) -> float:
+        """Price x real total supply (Mayhem tokens have 2B; curve.market_cap_sol assumes 1B)."""
+        return self.curve.price * self.supply
 
     # ---- updates ------------------------------------------------------------
     def on_launch(self, e: Launch) -> None:
@@ -73,14 +91,19 @@ class TokenState:
             # graduated (PumpSwap etc.): no curve reserves in the event, so price it from market cap on a
             # curve parked at its end state. Its depth roughly matches the migrated pool's.
             self.migrated = True
-            price = t.mcap_sol / TOTAL_SUPPLY
+            price = t.mcap_sol / self.supply
             self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS)
             self.price_known = True
-        self.volume_sol += t.sol
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)
         self.last_trade_ts = t.ts
         self.trades.append((t.ts, price, t.side, t.sol, t.trader))
+        if t.trader in self.NON_ORGANIC:              # price only: not demand, not a buyer, not a holder
+            self.non_organic_trades += 1
+            if t.trader == MAYHEM_AGENT:
+                self.mayhem = True
+            return
+        self.volume_sol += t.sol
         prev = self.holders.get(t.trader, 0.0)
         if t.side == "buy":
             self.buys += 1
@@ -136,7 +159,8 @@ class TokenState:
         return sum(sorted(self.holders.values(), reverse=True)[:n]) / TOTAL_SUPPLY * 100
 
     def window(self, now: float, seconds: float) -> list[tuple]:
-        return [t for t in self.trades if t[0] >= now - seconds]
+        """Organic trades of the last `seconds` (flow, buyers). Price history uses self.trades directly."""
+        return [t for t in self.trades if t[0] >= now - seconds and t[4] not in self.NON_ORGANIC]
 
     def net_flow_sol(self, now: float, seconds: float) -> float:
         return sum(t[3] if t[2] == "buy" else -t[3] for t in self.window(now, seconds))

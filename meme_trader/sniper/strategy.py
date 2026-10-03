@@ -253,6 +253,8 @@ def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, 
         return False, "serial deployer"
     if s.cluster and s.cluster["pct"] > red["max_cluster_pct"]:
         return False, "insider cluster"
+    if L.get("entry_mode", "rule") == "window":          # research baseline: no momentum condition at all
+        return True, f"window baseline: curve {prog:.0f}%"
     w = s.window(now, L.flow_window_s)
     nb = sum(1 for t in w if t[2] == "buy")
     ns = sum(1 for t in w if t[2] == "sell")

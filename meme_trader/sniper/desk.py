@@ -172,7 +172,7 @@ def snapshot_for(s, now: float, kind: str, extra: dict | None = None) -> dict:
         "token": {"symbol": s.symbol, "name": L.name if L else "", "twitter": L.twitter if L else "",
                   "telegram": L.telegram if L else "", "website": L.website if L else ""},
         "age_s": round(s.age(now)), "curve_progress_pct": round(s.curve.progress * 100, 1),
-        "market_cap_sol": round(s.curve.market_cap_sol, 1),
+        "market_cap_sol": round(s.market_cap_sol, 1),
         "unique_buyers": len(s.buyers), "buys": s.buys, "sells": s.sells,
         "buys_last_20s": sum(1 for t in w if t[2] == "buy"), "sells_last_20s": sum(1 for t in w if t[2] == "sell"),
         "net_flow_sol_20s": round(s.net_flow_sol(now, 20), 2),

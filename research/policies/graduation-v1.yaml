@@ -1,0 +1,63 @@
+# Graduation momentum, version 1. Evaluated with: python -m meme_trader.sniper research eval graduation-v1
+# Settings below are applied on top of config/params.example.yaml. Once frozen, ANY change (here or in a
+# default it relies on) changes the hash and `research` refuses it: copy this file to graduation-v2 instead.
+name: graduation-v1
+strategy: late
+
+thesis: >
+  When independent buyers keep pushing SOL into a pump.fun bonding curve that is already 55-85% full,
+  enough further demand follows on the way to graduation that buying then and selling before migration
+  (at 94% full, or earlier on a stop / momentum loss) earns more than the ~9-10% round trip in fees,
+  assumed fill slippage and transaction fees.
+
+rules: >
+  Universe: bonding-curve tokens 55-85% full, at most 15 min old, not migrated. Skip if the creator sold
+  anything, bundled early supply > 15%, early buyers sold > 35% of their bags, the creator launched > 2
+  tokens in 24 h, or a funding-linked insider cluster holds > 15%.
+  Entry: over the last 30 s, organic net inflow >= 3 SOL from >= 12 unique organic buyers, buys/sells >= 1.5,
+  price within 10% of its high. "Organic" excludes pump.fun's Mayhem agent (market.non_organic_wallets).
+  Exit (whole position): curve >= 94% or migrated; -15% stop; creator sells; 10 min max; momentum decay
+  (>= 1.5 SOL organic net outflow in 15 s while >= 12% off the peak); no new high for 45 s.
+  Size: fixed $20 per trade, at most 6 open, no new entries after -1 SOL in a UTC day. Entries pause where
+  the recording says the feed was degraded (> 5% trades missing or > 5 s behind the chain).
+
+costs: >
+  Per side: pump.fun 1.25% (measured on chain: 0.95% protocol + 0.30% creator), PumpPortal 0.5%, and an
+  ASSUMED 3% adverse fill between signal and landing (to be replaced by measurement). Per transaction:
+  0.001 SOL priority + 5000 lamports. Two transactions per trade. Operating costs (RPC, hosting, AI) are
+  deducted at ops_cost_usd_per_day. P&L is in SOL, i.e. already the result versus holding the SOL.
+
+overrides:
+  entry.enabled: false
+  copy.enabled: false
+  callouts.enabled: false
+  desk.enabled: false
+  late.enabled: true
+  late.entry_mode: rule
+  predict.display_only: true
+  capital.starting_sol: 5.0
+  capital.max_open_positions: 6
+  capital.daily_loss_limit_sol: 1.0
+  capital.max_drawdown_pct: 100          # research replays never halt; drawdown is judged in the report
+  sizing.base_usd: 20
+  sizing.max_usd: 20
+  late.buy_usd_mult: 1.0
+  execution.paper_latency_slippage_pct: 3
+
+ops_cost_usd_per_day: 0                  # set to what you actually pay (paid RPC, hosting, AI) before freezing
+
+# Pre-declared pass/fail, judged ONCE on data recorded after freezing (research final graduation-v1)
+gates:
+  min_days: 14                           # no verdict (and no numbers) before this much holdout
+  min_trades: 150
+  min_p_positive: 0.90                   # day-block bootstrap: share of resamples with mean daily net P&L > 0
+  min_pnl_ex_top3_sol: 0.0               # still >= 0 after removing the three best trades
+  min_breakeven_slippage_pct: 5          # still profitable with 5% adverse fill per side instead of the assumed 3%
+
+kill_criteria: >
+  Fail any gate on the holdout and graduation momentum, as specified here, is rejected: don't tune it on the
+  same holdout. A new idea becomes graduation-v2 with its own freeze and its own, later, holdout. A pass only
+  earns an execution-measurement phase (real fills vs these assumptions), not live capital.
+
+frozen_at: "2026-10-03T20:21:03Z"
+frozen_hash: "0f0fb20e990b"
