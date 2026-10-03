@@ -195,6 +195,9 @@ def test_solana_feed_watch_sets_and_degraded():
     assert f.watched == set() and f.accounts == {"w"}
     assert f.degraded                       # no trade notification yet: entries stay paused
     f.trades_up = True
+    assert f.degraded and "checking" in f.degraded_reason    # quality not measured yet
+    for _ in range(f.quality.min_checks):
+        f.quality.checks.append(True)
     assert not f.degraded and f.host == "example.org"
 
 

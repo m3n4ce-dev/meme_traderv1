@@ -97,8 +97,10 @@ def run(params) -> None:
     except Exception as e:
         line(FAIL, f"PumpPortal websocket unreachable ({type(e).__name__})", "check internet / firewall")
     if on_chain:
-        from .feeds import PUBLIC_WS
-        ws_url = params.sniper.feed.ws_url or os.environ.get("SOLANA_WS_URL") or PUBLIC_WS
+        from .feeds import ws_urls
+        urls = ws_urls(params.sniper.feed.ws_url)
+        ws_url = urls[0]
+        print(f"         trade-log endpoints, in order: {', '.join(u.split('/')[2].split('?')[0] for u in urls)}")
         try:
             line(OK, f"trade logs {ws_url.split('/')[2].split('?')[0]}: " + asyncio.run(_trade_logs(ws_url)))
         except Exception as e:

@@ -146,6 +146,58 @@ class PumpPortalFeed(Feed):
 PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 TRADE_EVENT = bytes.fromhex("bddb7fd34ee661ee")        # sha256("event:TradeEvent")[:8] (Anchor)
 PUBLIC_WS = "wss://api.mainnet-beta.solana.com"
+# free, keyless endpoints tried after the configured ones (both throttle a 24/7 stream eventually)
+FALLBACK_WS = ["wss://solana-rpc.publicnode.com", PUBLIC_WS]
+
+
+def ws_urls(configured="") -> list[str]:
+    """Endpoints in order: sniper.feed.ws_url (string, comma-separated string or list), else SOLANA_WS_URL
+    (comma-separated), then the free fallbacks. Duplicates dropped."""
+    raw = configured or os.environ.get("SOLANA_WS_URL", "")
+    first = [u.strip() for u in (raw if isinstance(raw, list) else str(raw).split(",")) if u and u.strip()]
+    out: list[str] = []
+    for u in first + FALLBACK_WS:
+        if u not in out:
+            out.append(u)
+    return out
+
+
+class FeedQuality:
+    """Live completeness check of the trade stream. Each pump.fun trade carries the curve's token reserves
+    after it, so consecutive trades of one token must chain exactly (reserves - bought, + sold). The share
+    that doesn't is the share of trades the endpoint dropped or reordered; free endpoints quietly drift
+    from ~0% to 30%+ as they throttle, without ever closing the connection."""
+
+    def __init__(self, max_gap_pct: float = 5.0, window: int = 2000, min_checks: int = 400):
+        self.max_gap_pct = max_gap_pct
+        self.min_checks = min_checks
+        self.checks: deque[bool] = deque(maxlen=window)
+        self.last: dict[str, float] = {}
+
+    def reset(self) -> None:
+        self.checks.clear()
+        self.last.clear()
+
+    def observe(self, t: Trade) -> None:
+        prev = self.last.pop(t.mint, None)
+        if prev is not None:
+            expected = prev - t.tokens if t.side == "buy" else prev + t.tokens
+            self.checks.append(abs(expected - t.v_tokens) < 1.0)
+        self.last[t.mint] = t.v_tokens
+        if len(self.last) > 20_000:                     # bounded: forget the least recently traded token
+            self.last.pop(next(iter(self.last)))
+
+    @property
+    def gap_pct(self) -> float:
+        return 100.0 * (1 - sum(self.checks) / len(self.checks)) if self.checks else 0.0
+
+    @property
+    def measured(self) -> bool:
+        return len(self.checks) >= self.min_checks
+
+    @property
+    def bad(self) -> bool:
+        return self.measured and self.gap_pct > self.max_gap_pct
 
 
 class SolanaTradeFeed(Feed):
@@ -157,15 +209,23 @@ class SolanaTradeFeed(Feed):
     doesn't bill per MB (Helius bills 2 credits / 0.1 MB = ~12M credits/month). The public endpoint
     is free but best-effort: if trades stop arriving the feed reports degraded and entries pause.
     """
-    STALL_S = 30            # no log notification for this long = stalled; reconnect
+    STALL_S = 30            # no websocket message at all for this long = dead connection; reconnect
     EARLY_S = 15            # hold unwatched trades this long: a launch's first buys (often its insider
                             # bundle) can land before PumpPortal announces it; replay them on watch()
+    RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
 
-    def __init__(self, ws_url: str = "", fallback_urls: list[str] | None = None, commitment: str = "confirmed"):
-        self.ws_url = ws_url or os.environ.get("SOLANA_WS_URL") or PUBLIC_WS
+    def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
+                 max_gap_pct: float = 5.0, stall_s: float = 60.0):
+        self.ws_urls = ws_urls(ws_url)
+        self.ws_idx = 0
         # "confirmed": a fraction of a second later than "processed", but complete. Measured 2026-10-03 on
         # PublicNode: processed missed ~25% of trades (reserve-chain gaps), confirmed 0.4%.
         self.commitment = commitment
+        # watchdog: pump.fun trades every second, so this long with no decoded trade means the stream is
+        # broken even if the connection is up (seen 2026-10-03: a 91-minute silence on an open socket)
+        self.stall_s = stall_s
+        self.quality = FeedQuality(max_gap_pct)
+        self.last_trade = 0.0
         self.launches = PumpPortalFeed(fallback_urls, use_key=False)
         self.watched: set[str] = set()
         self.accounts: set[str] = set()
@@ -205,12 +265,36 @@ class SolanaTradeFeed(Feed):
         self.accounts.update(wallets)
 
     @property
+    def ws_url(self) -> str:
+        return self.ws_urls[self.ws_idx]
+
+    @staticmethod
+    def _hostname(url: str) -> str:
+        return url.split("/")[2].split("?")[0] if "//" in url else url
+
+    @property
     def host(self) -> str:
-        return self.launches.host if self.launches.degraded else self.ws_url.split("/")[2].split("?")[0]
+        return self.launches.host if self.launches.degraded else self._hostname(self.ws_url)
+
+    @property
+    def gap_pct(self) -> float:
+        return round(self.quality.gap_pct, 2)
+
+    @property
+    def degraded_reason(self) -> str:
+        if self.launches.degraded:
+            return f"launch feed on backup {self.launches.host}"
+        if not self.trades_up:
+            return f"no trade data from {self.host}"
+        if not self.quality.measured:                   # ~20-30 s after (re)connecting
+            return f"checking trade data from {self.host}"
+        if self.quality.bad:
+            return f"trade data from {self.host} incomplete ({self.quality.gap_pct:.0f}% missing)"
+        return ""
 
     @property
     def degraded(self) -> bool:
-        return self.launches.degraded or not self.trades_up
+        return bool(self.degraded_reason)
 
     @staticmethod
     def parse_logs(value: dict, now: float) -> list[Trade]:
@@ -261,35 +345,58 @@ class SolanaTradeFeed(Feed):
                              signature=value.get("signature", "")))
         return out
 
+    def _check_stream(self, now: float, connected: float) -> str:
+        """Why the current endpoint should be dropped, or ''."""
+        if now - self.last_trade > self.stall_s:
+            return f"no pump.fun trades for {now - self.last_trade:.0f}s"
+        if self.quality.bad:
+            return f"{self.quality.gap_pct:.1f}% of trades missing"
+        if self.ws_idx != 0 and now - connected > self.RETRY_PRIMARY_S:
+            return "retry"
+        return ""
+
     async def _trades(self, q: asyncio.Queue) -> None:
         import aiohttp
 
         backoff = 1
         while True:
+            why = ""
             try:
                 async with aiohttp.ClientSession() as session, \
                         session.ws_connect(self.ws_url, heartbeat=20, max_msg_size=0) as ws:
                     await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
                                         "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": self.commitment}]})
-                    while True:
+                    connected = self.last_trade = time.time()
+                    self.quality.reset()
+                    while not why:
                         msg = await ws.receive(timeout=self.STALL_S)
                         if msg.type != aiohttp.WSMsgType.TEXT:
+                            why = f"connection closed ({msg.type.name})"
                             break
+                        now = time.time()
                         try:
                             value = json.loads(msg.data)["params"]["result"]["value"]
                         except (ValueError, KeyError, TypeError):
+                            why = self._check_stream(now, connected)
                             continue                    # subscription reply etc.
-                        self.trades_up, backoff = True, 1
-                        for t in self.parse_logs(value, time.time()):
+                        self.trades_up = True
+                        for t in self.parse_logs(value, now):
+                            self.last_trade = now
+                            backoff = 1
+                            self.quality.observe(t)
                             if t.mint in self.watched or t.trader in self.accounts:
                                 if not self._is_dev_buy(t):
                                     q.put_nowait(t)
                             else:
                                 self._hold(t)
+                        why = self._check_stream(now, connected)
             except Exception as err:                    # anything: never leave a dead stream marked up
                 why = f"HTTP {err.status} {err.message}" if hasattr(err, "status") else f"{type(err).__name__}: {err}"
-                print(f"[feed] trade logs {self.host} down: {why[:200]}; retrying in {backoff}s")
             self.trades_up = False
+            old = self.host
+            self.ws_idx = 0 if why == "retry" else (self.ws_idx + 1) % len(self.ws_urls)
+            print(f"[feed] trade logs {old}: {why[:200] if why != 'retry' else 'trying the first endpoint again'}"
+                  f"; switching to {self.host} in {backoff}s")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 

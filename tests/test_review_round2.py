@@ -946,3 +946,111 @@ def test_trade_feed_subscribes_at_the_configured_commitment():
     asyncio.run(go())
     assert sent[0]["params"][1] == {"commitment": "confirmed"}
     assert P.sniper.feed.commitment == "confirmed"
+
+
+# --------------------------------------------------------------------------- feed watchdog (2026-10-03 outage)
+def _chain(mint, n, skip_every=0):
+    """n consecutive buys of 1M tokens on one curve; every `skip_every`-th one is dropped (a missed trade)."""
+    out, vt = [], 1_000_000_000.0
+    for i in range(n):
+        vt -= 1_000_000
+        if skip_every and i % skip_every == 0:
+            continue
+        out.append(Trade(mint, i, "w", "buy", 0.03, 1_000_000, 31, vt))
+    return out
+
+
+def test_watchdog_measures_missing_trades():
+    from meme_trader.sniper.feeds import FeedQuality
+
+    q = FeedQuality(max_gap_pct=5, min_checks=100)
+    for t in _chain(A, 300):
+        q.observe(t)
+    assert q.measured and q.gap_pct == 0 and not q.bad
+    q.reset()
+    for t in _chain(A, 300, skip_every=8):                # ~1 in 8 trades never arrived
+        q.observe(t)
+    assert q.bad and 10 < q.gap_pct < 16
+
+
+def test_watchdog_endpoint_order(monkeypatch):
+    from meme_trader.sniper.feeds import FALLBACK_WS, ws_urls
+
+    monkeypatch.setenv("SOLANA_WS_URL", "wss://paid.example/k, wss://solana-rpc.publicnode.com")
+    assert ws_urls() == ["wss://paid.example/k", *FALLBACK_WS]                 # deduped, env first
+    assert ws_urls(["wss://a.example", "wss://b.example"])[:2] == ["wss://a.example", "wss://b.example"]
+
+
+def test_watchdog_flags_a_silent_open_connection_and_retries_primary():
+    f = SolanaTradeFeed("wss://primary.example", stall_s=60)
+    now = 1_000.0
+    f.last_trade = now - 61
+    assert "no pump.fun trades for 61s" in f._check_stream(now, now - 100)
+    f.last_trade = now
+    f.ws_idx = 1
+    assert f._check_stream(now, now - f.RETRY_PRIMARY_S - 1) == "retry"
+    f.ws_idx = 0
+    assert f._check_stream(now, now - f.RETRY_PRIMARY_S - 1) == ""
+
+
+def test_watchdog_switches_endpoint_when_trades_go_missing(monkeypatch):
+    import aiohttp
+
+    seen_urls = []
+    pump = [f"Program {PUMP_PROGRAM} invoke [1]", None, f"Program {PUMP_PROGRAM} success"]
+
+    def note(t):
+        logs = list(pump)
+        logs[1] = trade_log(bytes(32), 30_000_000, int(t.tokens * 1e6), True, bytes(range(32)),
+                            v_tokens=int(t.v_tokens * 1e6))
+        return types.SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=json.dumps(
+            {"params": {"result": {"value": {"err": None, "logs": logs, "signature": "s"}}}}))
+
+    class WS:
+        def __init__(self, msgs):
+            self.msgs = msgs
+
+        async def send_json(self, d):
+            pass
+
+        async def receive(self, timeout=None):
+            if self.msgs:
+                return self.msgs.pop(0)
+            await asyncio.get_running_loop().create_future()      # an open socket that never speaks
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Session:
+        def ws_connect(self, url, **k):
+            seen_urls.append(url)
+            gappy = [note(t) for t in _chain(A, 700, skip_every=5)]                # 20% missing
+            return WS(gappy if len(seen_urls) == 1 else [])
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    real_sleep = asyncio.sleep
+
+    async def quick_sleep(_):
+        await real_sleep(0)                                   # skip the backoff, still yield
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **k: Session())
+
+    async def go():
+        f = SolanaTradeFeed("wss://flaky.example", max_gap_pct=5)
+        monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+        task = asyncio.ensure_future(f._trades(asyncio.Queue()))
+        for _ in range(500):
+            await real_sleep(0)
+            if len(seen_urls) >= 2:
+                break
+        task.cancel()
+        return f
+    asyncio.run(asyncio.wait_for(go(), 20))
+    assert seen_urls[0] == "wss://flaky.example" and seen_urls[1] == "wss://solana-rpc.publicnode.com"
