@@ -60,13 +60,23 @@ class Social:
 
 
 @dataclass
+class Funding:
+    """Who first funded a wallet with SOL (from Helius funded-by or the wallet's first transaction)."""
+    wallet: str
+    ts: float
+    funder: str = ""          # "" = unknown (e.g. an old wallet with long history)
+    funder_type: str = ""     # e.g. "exchange" when the source labels it
+    kind: str = "funding"
+
+
+@dataclass
 class Tick:
     ts: float
     kind: str = "tick"
 
 
-Event = Launch | Trade | Migration | Social | Tick
-_KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "tick": Tick}
+Event = Launch | Trade | Migration | Social | Funding | Tick
+_KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "funding": Funding, "tick": Tick}
 
 
 def dumps(e: Event) -> str:

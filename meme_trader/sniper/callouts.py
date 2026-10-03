@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-RED_FLAGS = ("dev sold", "dev bought", "bundle", "early buyers dumped", "serial deployer", "copycat")
+RED_FLAGS = ("dev sold", "dev bought", "bundle", "early buyers dumped", "serial deployer", "copycat", "insider cluster")
 
 
 def is_red_flag(note: str) -> bool:
@@ -45,6 +45,8 @@ def eligible(s, now: float, c, red_flag_ctx: dict) -> tuple[bool, float, str]:
         return False, 0, "insider pattern"
     if red_flag_ctx["creator_launches"] > red_flag_ctx["max_creator_launches_24h"]:
         return False, 0, "serial deployer"
+    if s.cluster and s.cluster["pct"] > red_flag_ctx.get("max_cluster_pct", 100):
+        return False, 0, "insider cluster"
     if not (c.min_age_s <= age <= c.max_age_s):
         return False, 0, "age"
     if not (c.min_curve_pct <= prog <= c.max_curve_pct) or s.migrated:

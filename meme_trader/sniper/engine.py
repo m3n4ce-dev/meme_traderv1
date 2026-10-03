@@ -22,7 +22,9 @@ from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
 from .curve import Curve
-from .events import Event, Launch, Migration, Social, Tick, Trade, dumps
+from .events import Event, Funding, Launch, Migration, Social, Tick, Trade, dumps
+from .funding import FundingResolver, cluster_report, cohort
+from .notify import Notifier
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import SniperPosition, evaluate_entry, evaluate_exit
@@ -78,11 +80,20 @@ class Engine:
         self._last_summary = 0.0
         self.sol_price = SolPrice(self.p.sizing.sol_usd_fallback)
         self.callouts = CalloutBook()
+        self.notifier = Notifier(list(self.p.notify.levels))
+        f = self.p.entry.funding
+        self.funders: dict[str, tuple[str, str]] = {}     # wallet -> (funder, funder_type)
+        self.fanout: Counter = Counter()                   # funder -> wallets it funded (exchange detection)
+        self.resolver = FundingResolver(f.backend, f.max_lookups_per_min)
+        self.funding_started: dict[str, float] = {}
+        self._load_funders()
         self._last_price_refresh = -1e12
 
     # ------------------------------------------------------------------ helpers
     def say(self, level: str, text: str, mint: str = "", **fields) -> None:
         self.log.append({"ts": self.now, "level": level, "text": text, "mint": mint})
+        if self.feed.realtime:
+            self.notifier.push(level, text, self.mode)
         if self.journal:
             record("sniper", level, text=text, mint=mint, **fields)
 
@@ -148,6 +159,7 @@ class Engine:
             if self.record_file:
                 self.record_file.close()
             self.leaders.save()
+            self._save_funders()
 
     async def _ticker(self) -> None:
         while True:
@@ -169,6 +181,10 @@ class Engine:
                 await self._evaluate(s)
         elif isinstance(e, Social):
             await self._on_social(e)
+        elif isinstance(e, Funding):
+            if e.wallet not in self.funders and e.funder:
+                self.fanout[e.funder] += 1
+            self.funders[e.wallet] = (e.funder, e.funder_type)
         if self.now - self._last_tick >= 1:
             self._last_tick = self.now
             await self._tick()
@@ -281,6 +297,8 @@ class Engine:
                 return f"bundle {s.bundle_pct():.0f}%"
             if len(self.creators.get(s.creator, ())) > en.max_creator_launches_24h:
                 return "serial deployer"
+            if s.cluster and s.cluster["pct"] > en.funding.max_cluster_pct:
+                return f"insider cluster {s.cluster['pct']:.0f}%"
         return ""
 
     # ------------------------------------------------------------------ decisions
@@ -308,7 +326,79 @@ class Engine:
         if blocked:
             self.stats["skipped_" + blocked.split(":")[0].replace(" ", "_")] += 1
             return
+        verdict = await self._funding_gate(s)
+        if verdict == "wait":
+            return
+        if verdict:
+            s.decided = "rejected: " + verdict
+            self.rejects[reason_key(verdict)] += 1
+            self.say("info", f"{s.symbol} rejected: {verdict}", s.mint)
+            return
         await self._enter(s, kind="sniper", score=d.score, buy_sol=self.p.capital.buy_sol, notes=d.notes or [])
+
+    async def _funding_gate(self, s: TokenState) -> str:
+        """'' = pass, 'wait' = lookups in flight, otherwise a rejection reason."""
+        f = self.p.entry.funding
+        if not f.enabled:
+            return ""
+        wallets = cohort(s, f.cohort_size)
+        missing = [w for w in wallets + ([s.creator] if s.creator else []) if w not in self.funders]
+        if missing and self.resolver.available and self.feed.realtime:
+            started = self.funding_started.get(s.mint)
+            if started is None:
+                self.funding_started[s.mint] = self.now
+                asyncio.create_task(self._resolve_funders(missing))
+                return "wait"
+            if self.now - started < f.max_wait_s:
+                return "wait"
+        rep = cluster_report(s, wallets, self.funders, self.fanout, f.exchange_fanout)
+        s.cluster = rep
+        if rep["pct"] > f.max_cluster_pct:
+            return f"insider cluster {rep['pct']:.0f}% ({rep['linked']} linked wallets)"
+        return ""
+
+    def _load_funders(self) -> None:
+        path = DATA / "funders.json"
+        if self.journal and path.exists():
+            try:
+                d = json.loads(path.read_text())
+                self.funders = {w: tuple(v) for w, v in d.get("funders", {}).items()}
+                self.fanout = Counter(d.get("fanout", {}))
+            except (ValueError, OSError):
+                pass
+
+    def _save_funders(self) -> None:
+        if not self.journal:
+            return
+        DATA.mkdir(exist_ok=True)
+        recent = dict(list(self.funders.items())[-50_000:])
+        (DATA / "funders.json").write_text(json.dumps({"funders": recent, "fanout": dict(self.fanout.most_common(20_000))}))
+
+    async def _cluster_watch(self, s: TokenState) -> str:
+        """While holding: re-check the funding graph every few seconds, since insiders often keep
+        accumulating after we're in. Returns an exit reason or ''."""
+        f = self.p.entry.funding
+        if not f.enabled or self.now - s.last_cluster_check < 5:
+            return ""
+        s.last_cluster_check = self.now
+        wallets = cohort(s, f.cohort_size)
+        missing = [w for w in wallets if w not in self.funders]
+        if missing and self.resolver.available and self.feed.realtime:
+            asyncio.create_task(self._resolve_funders(missing[:10]))
+        rep = cluster_report(s, wallets, self.funders, self.fanout, f.exchange_fanout)
+        s.cluster = rep
+        if rep["pct"] > f.max_cluster_pct_hold:
+            return f"insider cluster grew to {rep['pct']:.0f}% ({rep['linked']} linked wallets)"
+        return ""
+
+    async def _resolve_funders(self, wallets: list[str]) -> None:
+        import aiohttp
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            results = await asyncio.gather(*(self.resolver.lookup(session, w) for w in wallets))
+        for r in results:
+            if r is not None:
+                await self.handle(r)              # cached + recorded so backtests replay the same graph
 
     def _size(self, s: TokenState, kind: str, score: float, buy_sol: float, desk_mult: float | None,
               notes: list[str]) -> float:
@@ -401,6 +491,8 @@ class Engine:
             held = self.now - pos.opened_at
             r = (1.0, "dev sold") if s.dev_sold else \
                 ((1.0, "callout hold done") if held >= self.p.callouts.hold_s else None)
+        elif (why := await self._cluster_watch(s)):
+            r = (1.0, why)
         elif pos.leader and not self.p.copy.use_own_exits:
             r = None
             if s.dev_sold and self.p.exit.exit_on_dev_sell:
@@ -508,6 +600,7 @@ class Engine:
         if self.journal and self.now - self._last_summary >= 60:
             self._last_summary = self.now
             DATA.mkdir(exist_ok=True)
+            self._save_funders()
             (DATA / "sniper_summary.json").write_text(json.dumps(
                 {"ts": self.now, "summary": self.summary(), "rejects": dict(self.rejects),
                  "leaders": self.leaders.snapshot(), "desk": self.desk_stats()}, default=str, indent=1))
@@ -530,7 +623,8 @@ class Engine:
             ok, score, _ = eligible(s, self.now, c, {
                 "max_bundle_pct": self.p.entry.max_bundle_pct, "max_early_sold_ratio": self.p.entry.max_early_sold_ratio,
                 "creator_launches": len(self.creators.get(s.creator, ())),
-                "max_creator_launches_24h": self.p.entry.max_creator_launches_24h})
+                "max_creator_launches_24h": self.p.entry.max_creator_launches_24h,
+                "max_cluster_pct": self.p.entry.funding.max_cluster_pct})
             if ok and (best is None or score > best[1]):
                 best = (s, score)
         if not best:

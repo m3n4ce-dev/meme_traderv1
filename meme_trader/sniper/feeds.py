@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from .curve import Curve
-from .events import Event, Launch, Migration, Trade, loads
+from .events import Event, Funding, Launch, Migration, Trade, loads
 
 
 class Feed:
@@ -171,12 +171,16 @@ class FileFeed(Feed):
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 WORDS = ["PEPE", "DOGE", "CAT", "MOON", "WIF", "BONK", "FROG", "TRUMP", "AI", "GOAT", "CHAD", "PNUT", "MOG",
          "BRETT", "SIGMA", "GIGA", "BOME", "SLERF", "POPCAT", "MEW", "NEIRO", "TURBO", "HAMSTER", "WOJAK"]
-ARCHETYPES = [("bundle_rug", 0.30), ("dev_dump", 0.18), ("dud", 0.34), ("fake_runner", 0.10), ("runner", 0.08)]
+ARCHETYPES = [("bundle_rug", 0.30), ("dev_dump", 0.18), ("dud", 0.27), ("fake_runner", 0.10), ("runner", 0.08),
+              ("stealth_rug", 0.07)]
 # phases: (duration_s range, buy probability, mean seconds between trades)
 PHASES = {
     "bundle_rug":  [((20, 70), 0.62, 1.2), ((15, 40), 0.25, 0.8), ((60, 120), 0.40, 4.0)],
     "dev_dump":    [((40, 160), 0.66, 1.0), ((30, 60), 0.30, 1.5), ((60, 120), 0.45, 5.0)],
     "dud":         [((40, 200), 0.52, 4.0)],
+    # insiders buy from dev-funded fresh wallets spread over the first minute (dodging bundle/sniper
+    # timing gates), let organic buyers pile in, then dump - only the funding graph exposes them
+    "stealth_rug": [((50, 110), 0.72, 0.5), ((20, 50), 0.22, 0.6), ((60, 120), 0.40, 3.0)],
     "fake_runner": [((25, 80), 0.78, 0.45), ((20, 60), 0.22, 0.6), ((60, 120), 0.40, 3.0)],
     "runner":      [((60, 240), 0.76, 0.35), ((60, 200), 0.56, 0.5), ((60, 300), 0.66, 0.4),
                     ((120, 400), 0.30, 0.7), ((120, 300), 0.45, 3.0)],
@@ -205,6 +209,8 @@ class SyntheticFeed(Feed):
         self.smart = [_addr(self.rng) for _ in range(2)]
         self.bait = _addr(self.rng)
         self.leader_labels = {self.smart[0]: "sim-smart-1", self.smart[1]: "sim-smart-2", self.bait: "sim-bait-kol"}
+        self.exchanges = [_addr(self.rng) for _ in range(6)]     # funders labelled "exchange" (as Helius does)
+        self.funded: set[str] = set()
 
     def now(self) -> float:
         if self.realtime:
@@ -250,12 +256,20 @@ class SyntheticFeed(Feed):
                 curve.apply(-gross, tok)
                 holders[who] -= tok
                 sol = gross * 0.9875
+            if who not in self.funded:
+                self.funded.add(who)
+                if rng.random() < 0.6:
+                    out.append(Funding(who, ts - 0.001, rng.choice(self.exchanges), "exchange"))
+                elif rng.random() < 0.5:
+                    out.append(Funding(who, ts - 0.001, _addr(rng)))       # its own unrelated funder
+                else:
+                    out.append(Funding(who, ts - 0.001, ""))               # old wallet, unknown
             out.append(Trade(mint=mint, ts=ts, trader=who, side=side, sol=round(sol, 6), tokens=tok,
                              v_sol=curve.v_sol, v_tokens=curve.v_tokens, new_balance=holders[who]))
 
         # leader wallets' scheduled actions: (time, wallet, side, sol)
         sched: list[tuple] = []
-        p_smart = {"runner": .6, "fake_runner": .35, "dev_dump": .15, "dud": .1, "bundle_rug": .05}[kind]
+        p_smart = {"runner": .6, "fake_runner": .35, "dev_dump": .15, "dud": .1, "bundle_rug": .05, "stealth_rug": .05}[kind]
         smart_in = [w for w in self.smart if rng.random() < p_smart]
         for w in smart_in:
             tb = t0 + rng.uniform(4, 25)
@@ -265,8 +279,19 @@ class SyntheticFeed(Feed):
         if rng.random() < .35:
             tb = t0 + rng.uniform(3, 10)
             sched += [(tb, self.bait, "buy", rng.uniform(1, 4)), (tb + rng.uniform(6, 15), self.bait, "sell", 0)]
+        insiders: list[str] = []
+        if kind == "stealth_rug":
+            mid = _addr(rng)                                       # dev -> mid wallet -> insiders (2 hops)
+            out.append(Funding(mid, t0 - 30, creator))
+            self.funded.add(mid)
+            for _ in range(rng.randint(5, 9)):
+                w = _addr(rng)
+                insiders.append(w)
+                out.append(Funding(w, t0 - 20, rng.choice([creator, mid])))
+                self.funded.add(w)
+                sched.append((t0 + rng.uniform(3, 55), w, "buy", rng.uniform(0.6, 2.0)))
         sched.sort()
-        leaders = set(self.leader_labels)
+        leaders = set(self.leader_labels) | set(insiders)
 
         def run_sched(until: float) -> None:
             while sched and sched[0][0] <= until:
@@ -289,6 +314,10 @@ class SyntheticFeed(Feed):
             if kind == "dev_dump" and i == 1 and dev_tokens:
                 t += 0.5
                 trade(t, creator, "sell", holders.get(creator, 0))
+            if kind == "stealth_rug" and i == 1:                   # insiders dump
+                for w in insiders:
+                    sched.append((t + rng.uniform(0, 10), w, "sell", 0))
+                sched.sort()
             if (kind, i) in (("runner", 3), ("fake_runner", 1)):     # skilled wallets exit as the move tops
                 for w in smart_in:
                     sched.append((t + rng.uniform(0, 15), w, "sell", 0))

@@ -4,6 +4,57 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #6: Callout agent, insider-cluster detection, phone alerts
+
+### Owner input
+- pump.fun callouts require buying and holding at least $1 of the coin; Callout Rewards pay on the volume calls attract; one call per 2 minutes. Example account shown: TGMetrics (data-driven calls, $1 positions, a public record).
+- "Keep improving."
+
+### Position on callouts (revised)
+With the $1 hold enforced by the platform and the bag kept at that minimum, the income is the rewards, not dumping on followers. That's a legitimate model, so we built it.
+
+What the TGMetrics screenshots show: their closed calls mostly fell from about $10–20K market cap to about $3K, and their trading P&L is +$6.68 on $326 of buys. Called coins mostly die, and the money is in the rewards. That makes picking clickable coins and keeping an honest record the whole game.
+
+Your old callout bot posted to Telegram, not to pump.fun. We know of no public API for posting pump.fun callouts, so posting there is two clicks from the dashboard (Copy + Open on pump.fun) until the owner captures the request the site sends.
+
+### Built
+- **Callout agent** (`sniper/callouts.py`):
+  - picks the most "clickable" eligible coin at most once per 2 min (holder growth, inflow, curve fill, smart wallets, near the high);
+  - only after the sniper has finished deciding on that coin;
+  - same red-flag exclusions as trading;
+  - buys a $1.10 bag (stays ≥ $1 after fees), held 1 h with an early exit only if the dev sells;
+  - bags don't take trading slots;
+  - factual card text: measured numbers only, no urgency, holding disclosed;
+  - 5 m / 1 h / peak outcome of every call tracked;
+  - optional Telegram channel posting;
+  - dashboard Callouts panel with Copy / Open on pump.fun / Mark posted.
+- **Insider-cluster detection** (`sniper/funding.py`):
+  - looks up the first funder of each early buyer and of the current top 10. Helius `funded-by` is used if `HELIUS_API_KEY` is set (paid, 100 credits per call, labels exchanges); otherwise any RPC, by reading the wallet's first transaction;
+  - links wallets funded by the dev, by the dev's funder, by another early buyer, or sharing one non-exchange funder;
+  - exchanges are excluded by label or by fan-out (a funder seen funding 50+ wallets);
+  - entry gate: linked wallets holding > 15% → reject. While holding: re-checked every 5 s, exit if the cluster grows past 20%;
+  - lookups are cached in `data/funders.json` and **recorded into the feed file**, so backtests replay the same graph;
+  - capped by a cost guard (240 lookups/min) and never holds an entry more than 6 s.
+- **Phone alerts** (`sniper/notify.py`): Telegram bot messages for buys, closes and errors (configurable). Sent in the background, rate-limited.
+- Dashboard fixes:
+  - callout bags moved out of Open positions;
+  - bag peak tracking fixed;
+  - capacity limits (copy rate limit, max positions) no longer counted as coin rejections.
+- Synthetic market: new "stealth rug" archetype. Insiders funded by the dev (directly or via a middle wallet) buy over the first minute, dodging the timing gates, then dump. Funding events are emitted for every wallet.
+- Tests: 44 passing (+5: transfer/createAccount parsing, cluster linking incl. exchange label and fan-out, engine rejects an insider-cluster entry from replayed funding events but buys the same tape with the gate off, callout rate limit/bag size/factual text, notifier level filtering).
+
+### Synthetic findings (logic check, not evidence)
+- Detection is accurate: on stealth rugs it measured 5–19% linked supply where the true figure was 11–21%.
+- **The P&L impact in the simulation is zero.** The simulated insiders never crossed the 15/20% limits, and the bot's fast exits made those coins profitable anyway. Real-world value is protection against insider farms. Tune `entry.funding.max_cluster_pct` on recorded real data.
+- Callout bags are roughly break-even in the simulation. Rewards aren't simulated, and they're the actual income.
+
+### Needs from owner
+- To automate pump.fun posting: post one callout by hand with the browser dev tools open (Network tab), then send the request it makes (URL plus payload, **without** cookies/tokens). Then I can wire up "auto_post: pumpfun".
+- `SOLANA_RPC_URL` (Helius free tier is fine) enables insider lookups in paper mode too. `HELIUS_API_KEY` (paid) adds exchange labels.
+- Telegram alerts: create a bot with @BotFather, get your chat id from @userinfobot, and put both in `.env`.
+
+---
+
 ## 2026-10-03 — Entry #5: Intel brief from the owner's other bot, integrated
 
 ### Owner input
