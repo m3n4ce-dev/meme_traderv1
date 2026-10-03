@@ -145,6 +145,7 @@ Live mode is locked behind `--live`, `MEME_TRADER_CONFIRM_LIVE=yes` and a matchi
 | [HOWTO.md](docs/HOWTO.md) | Task recipes and troubleshooting |
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
+| [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 
 ## Project layout
 
