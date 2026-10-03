@@ -89,6 +89,7 @@ Your browser opens the dashboard at **http://127.0.0.1:8787**:
   ```bash
   scripts/start.sh backtest --file data/feed-*.jsonl      # replay the recorded days
   scripts/start.sh leaders  --file data/feed-*.jsonl      # wallets worth copy-trading
+  scripts/start.sh sweep --file data/feed-*.jsonl --grid exit.profile=trail,ladder   # tune on old data, prove on new
   scripts/start.sh review --validate                      # AI review (needs Anthropic key)
   ```
 

@@ -21,6 +21,7 @@ python -m meme_trader.sniper run --synthetic --speed 5   # demo market -> open h
 python -m meme_trader.sniper run                         # live pump.fun feed, PAPER trades, records feed to data/
 python -m meme_trader.sniper backtest --file data/feed-*.jsonl --set exit.stop_loss_pct=25
 python -m meme_trader.sniper leaders --file data/feed-*.jsonl   # wallets worth copying
+python -m meme_trader.sniper sweep --file data/feed-*.jsonl --grid exit.profile=trail,ladder   # walk-forward tuning
 python -m meme_trader.sniper review --validate           # AI post-mortem, proposals backtested
 ```
 Strategy and research: [docs/STRATEGY.md](docs/STRATEGY.md). Optional env vars:
