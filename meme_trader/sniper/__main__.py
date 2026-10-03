@@ -193,6 +193,19 @@ def _leaders(args, params) -> None:
     print("\nRanked on the recorded feed only - re-check on fresh data before trusting a wallet.")
 
 
+def _sweep(args, params) -> None:
+    from .sweep import report, sweep
+
+    async def collect():
+        feed = _file_or_synth(args)
+        if isinstance(feed, SyntheticFeed):
+            _sim_leaders(params, feed)
+        return [e async for e in feed.events()]
+    events = asyncio.run(collect())
+    res = asyncio.run(sweep(params, events, args.grid, args.train, args.metric, args.min_trades, args.top))
+    print(report(res, args.metric))
+
+
 def _review(args, params) -> None:
     from . import review
 
@@ -235,7 +248,14 @@ def main() -> None:
     lead = sub.add_parser("leaders", help="rank wallets in recorded data as copy-trading candidates")
     lead.add_argument("--top", type=int, default=25)
     lead.add_argument("--min-tokens", type=int, default=5)
-    for p in (b, lead):
+    sw = sub.add_parser("sweep", help="walk-forward parameter tuning on recorded data")
+    sw.add_argument("--grid", action="append", required=True,
+                    help="key=v1,v2,... e.g. exit.stop_loss_pct=20,30,40 (repeat for more keys)")
+    sw.add_argument("--train", type=float, default=0.6, help="share of launches used for tuning")
+    sw.add_argument("--metric", choices=["pnl", "pf"], default="pnl")
+    sw.add_argument("--min-trades", type=int, default=10)
+    sw.add_argument("--top", type=int, default=3)
+    for p in (b, lead, sw):
         p.add_argument("--file", nargs="*", help="recorded feed JSONL file(s)")
         p.add_argument("--synthetic", type=int, default=1000, help="number of synthetic launches if no --file")
         p.add_argument("--seed", type=int, default=1)
@@ -243,7 +263,7 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
-    for p in (r, b, lead, rv, sub.choices["doctor"]):
+    for p in (r, b, lead, sw, rv, sub.choices["doctor"]):
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
@@ -256,6 +276,8 @@ def main() -> None:
         _leaders(args, params)
     elif args.cmd == "review":
         _review(args, params)
+    elif args.cmd == "sweep":
+        _sweep(args, params)
     else:
         from .doctor import run as doctor
 

@@ -4,7 +4,7 @@
 #   scripts/start.sh paper                real pump.fun market, fake money, records data
 #   scripts/start.sh paper --desk         ...with the AI trading desk (needs ANTHROPIC_API_KEY)
 #   scripts/start.sh live                 REAL money (needs everything in docs/SETUP.md step 5)
-#   scripts/start.sh doctor | backtest | leaders | review    (extra args are passed through)
+#   scripts/start.sh doctor | backtest | leaders | review | sweep    (extra args are passed through)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -x .venv/bin/python ] || { echo "Run the setup script first (scripts/setup_mac.sh or scripts/setup_ubuntu.sh)"; exit 1; }
@@ -33,7 +33,7 @@ case "$MODE" in
             || { echo "Live trading is locked. Read docs/SETUP.md step 5, then add MEME_TRADER_CONFIRM_LIVE=yes to .env"; exit 1; }
           echo "LIVE TRADING - real money. Dashboard: $URL  (KILL button sells everything)"; open_dashboard
           awake "$PY" -m meme_trader.sniper run --live "$@" ;;
-  doctor|backtest|leaders|review)
+  doctor|backtest|leaders|review|sweep)
           "$PY" -m meme_trader.sniper "$MODE" "$@" ;;
   *)      sed -n '2,8p' "$0"; exit 1 ;;
 esac

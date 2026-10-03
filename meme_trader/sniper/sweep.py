@@ -1,0 +1,134 @@
+"""Walk-forward parameter sweep: tune on earlier data, prove it on later data it never saw.
+
+    python -m meme_trader.sniper sweep --file data/feed-*.jsonl \\
+        --grid exit.stop_loss_pct=20,30,40 --grid entry.min_score=45,55,65
+
+Launches are split by launch time: the first `train` share of tokens is the tuning set, the rest
+is the test set (funding events go to both). Every grid combination runs on the tuning set; the
+best few, plus the current settings, are then run on the test set. A change is only recommended
+if it also beats the current settings on the test set - otherwise it was probably noise.
+"""
+from __future__ import annotations
+
+import copy
+import itertools
+import time
+
+import yaml
+
+from .events import Funding, Launch
+from .feeds import Feed
+
+
+class MemoryFeed(Feed):
+    realtime = False
+
+    def __init__(self, events: list):
+        self.ev = events
+
+    async def events(self):
+        for e in self.ev:
+            self._last = e.ts
+            yield e
+
+
+def split(events: list, train: float) -> tuple[list, list]:
+    events = sorted(events, key=lambda e: e.ts)
+    launches = [e for e in events if isinstance(e, Launch)]
+    if len(launches) < 2:
+        return events, []
+    cutoff = launches[int(len(launches) * train)].ts
+    side: dict[str, bool] = {e.mint: e.ts < cutoff for e in launches}
+    tr, te = [], []
+    for e in events:
+        if isinstance(e, Funding):
+            tr.append(e)
+            te.append(e)
+            continue
+        mint = getattr(e, "mint", None)
+        in_train = side.get(mint, e.ts < cutoff)
+        (tr if in_train else te).append(e)
+    return tr, te
+
+
+def combos(grids: list[str], cap: int = 200) -> list[list[str]]:
+    axes = []
+    for g in grids:
+        key, vals = g.split("=", 1)
+        axes.append([f"{key}={v.strip()}" for v in vals.split(",") if v.strip()])
+    out = [list(c) for c in itertools.product(*axes)]
+    if len(out) > cap:
+        raise SystemExit(f"{len(out)} combinations - narrow the grid (max {cap})")
+    return out
+
+
+def score(s: dict, metric: str, min_trades: int) -> float:
+    if s["closed"] < min_trades:
+        return float("-inf")
+    if metric == "pf":
+        return min(s["profit_factor"], 50.0)
+    return s["realized_pnl_sol"]
+
+
+def beats(cand: float, base: float, metric: str) -> bool:
+    """A real improvement, not noise: >= 5% better AND an absolute margin (0.02 SOL, or 0.1 PF)."""
+    margin = 0.02 if metric == "pnl" else 0.1
+    return cand >= base + max(abs(base) * 0.05, margin)
+
+
+async def sweep(params, events: list, grids: list[str], train: float = 0.6, metric: str = "pnl",
+                min_trades: int = 10, top: int = 3, log=print) -> dict:
+    from .__main__ import apply_overrides, run_backtest
+
+    tr, te = split(events, train)
+    grid = combos(grids)
+    log(f"{len(grid)} combination(s); tuning on {sum(isinstance(e, Launch) for e in tr)} launches, "
+        f"testing on {sum(isinstance(e, Launch) for e in te)}")
+
+    async def run(sets: list[str], evs: list) -> dict:
+        p = apply_overrides(copy.deepcopy(params), sets)
+        return (await run_backtest(p, MemoryFeed(evs))).summary()
+
+    t0 = time.time()
+    base_train = await run([], tr)
+    rows = []
+    for i, sets in enumerate(grid, 1):
+        s = await run(sets, tr)
+        rows.append({"sets": sets, "train": s, "score": score(s, metric, min_trades)})
+        log(f"  [{i}/{len(grid)}] {' '.join(sets):<60} train P&L {s['realized_pnl_sol']:+.3f}  "
+            f"PF {min(s['profit_factor'], 99):.2f}  n={s['closed']}  ({time.time() - t0:.0f}s)")
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    finalists = [r for r in rows[:top] if r["score"] != float("-inf")]
+    base_test = await run([], te) if te else None
+    for r in finalists:
+        r["test"] = await run(r["sets"], te) if te else None
+    best = None
+    if base_test is not None:
+        better = [r for r in finalists
+                  if r["test"]["closed"] >= max(1, min_trades // 2)
+                  and beats(score(r["test"], metric, 0), score(base_test, metric, 0), metric)]
+        best = max(better, key=lambda r: score(r["test"], metric, 0)) if better else None
+    return {"baseline": {"train": base_train, "test": base_test}, "finalists": finalists, "best": best,
+            "all": rows}
+
+
+def report(res: dict, metric: str) -> str:
+    def fmt(s):
+        if not s:
+            return "-"
+        return f"P&L {s['realized_pnl_sol']:+.3f}  PF {min(s['profit_factor'], 99):.2f}  win {s['win_rate']:.0%}  n={s['closed']}"
+    lines = ["", "=== walk-forward result ===", f"current settings    train: {fmt(res['baseline']['train'])}",
+             f"                    test:  {fmt(res['baseline']['test'])}"]
+    for r in res["finalists"]:
+        lines += [f"{' '.join(r['sets'])}", f"                    train: {fmt(r['train'])}",
+                  f"                    test:  {fmt(r.get('test'))}"]
+    if res["best"]:
+        sets = " ".join(f"--set {x}" for x in res["best"]["sets"])
+        yaml_lines = "\n".join(f"#   sniper.{x.split('=')[0]}: {yaml.safe_load(x.split('=', 1)[1])}"
+                               for x in res["best"]["sets"])
+        lines += ["", f"RECOMMENDED (beat current settings on unseen data by {metric}): {sets}",
+                  "Put it in config/params.yaml, paper-trade it a few days, then re-run this sweep:", yaml_lines]
+    else:
+        lines += ["", "No combination beat the current settings by a real margin (>=5% and >=0.02 SOL / 0.1 PF) "
+                      "on the unseen test data - keep current settings."]
+    return "\n".join(lines)

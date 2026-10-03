@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #8: Walk-forward tuning (`sweep`)
+
+- `python -m meme_trader.sniper sweep --file data/feed-*.jsonl --grid key=v1,v2 [--grid ...]` (or `scripts/start.sh sweep ...`).
+- **How it works:**
+  - recorded launches are split by time: the first 60% are for tuning, the rest for testing;
+  - each token stays on one side;
+  - funding data is shared by both sides;
+  - every combination runs on the tuning set; the top 3, plus the current settings, then run on the unseen test set.
+- **A change is recommended only if it beats the current settings on the test set by a real margin** (≥ 5% and ≥ 0.02 SOL, or 0.1 profit factor). This guard was added after the first demo run "recommended" a change that was identical to the current settings, to within rounding.
+- Demo on the simulated market (1200 launches, 9 combinations, ~2 min): stop loss at 20/30/40% made no difference. Momentum-decay and no-follow-through exits fire first. Real data may differ.
+- Tests: 59 passing (+3: split integrity, noise guard, a no-op change is never recommended).
+
+**Owner workflow once data exists:** record → `sweep` the two or three settings in question → apply only a recommended change → paper trade a few days → sweep again.
+
+---
+
 ## 2026-10-03 — Entry #7: Line-by-line review (25 fixes), restart safety, fee research
 
 ### Owner input
