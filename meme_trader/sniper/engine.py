@@ -197,7 +197,8 @@ class Engine:
         if self.paused:
             return "paused"
         if getattr(self.feed, "degraded", False):
-            return f"on backup feed {self.feed.host} (no trade data) - entries paused"
+            why = getattr(self.feed, "degraded_reason", "") or f"on backup feed {self.feed.host} (no trade data)"
+            return f"{why} - entries paused"
         if -self.book.day_pnl >= self.p.capital.daily_loss_limit_sol:
             return "daily loss limit"
         return ""
@@ -1682,6 +1683,8 @@ class Engine:
             "tracked_tokens": len(self.tokens),
             "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),
                      "degraded": bool(getattr(self.feed, "degraded", False)),
+                     "degraded_reason": getattr(self.feed, "degraded_reason", ""),
+                     "gap_pct": getattr(self.feed, "gap_pct", None),
                      "connected": getattr(self.feed, "ws", True) is not None,
                      "last_event_age_s": round(self.now - self.last_event, 1) if self.last_event else None},
         }
