@@ -95,7 +95,7 @@ def test_engine_with_desk_and_copy_trading():
     s = eng.summary()
     assert desk.calls > 0 and len(client.calls) == desk.calls
     assert s["entries"] > 0 and "copy" in s["by_source"] and "sniper" in s["by_source"]
-    assert all(c["desk"].startswith("APPROVED") for c in eng.book.closed)
+    assert all(c["desk"].startswith("APPROVED") for c in eng.book.closed if c["source"] != "callout")
     assert eng.book.sol == pytest.approx(eng.book.start_sol + s["realized_pnl_sol"], abs=1e-9)
     assert {"leaders", "desk"} <= set(eng.snapshot())
 
@@ -103,3 +103,26 @@ def test_engine_with_desk_and_copy_trading():
 def test_valid_pubkey():
     assert valid_pubkey("HTG4jCTAVB6H8QThytKtrApjNaQhMuUENFi9Whppag6Z")
     assert not valid_pubkey("not-a-key") and not valid_pubkey("")
+
+
+def test_callout_agent_rate_limit_bags_and_factual_text():
+    from meme_trader.sniper.callouts import compose, is_red_flag
+
+    params = copy.deepcopy(P)
+    feed = SyntheticFeed(seed=7, speed=0, launches=400, start_ts=1_780_000_000)
+    eng = asyncio.run(run_backtest(params, feed))
+    calls = eng.callouts.calls
+    assert calls, "expected some callouts"
+    gaps = [b.ts - a.ts for a, b in zip(calls, calls[1:])]
+    assert min(gaps) >= params.sniper.callouts.interval_s                 # one per 2 minutes
+    bags = [c for c in eng.book.closed if c["source"] == "callout"]
+    usd = eng.sol_price.usd
+    assert bags and all(c["cost"] * usd <= params.sniper.callouts.position_usd + 0.01 for c in bags)
+    for c in calls:
+        assert "Data, not advice" in c.text and "$1 callout position" in c.text
+        low = c.text.lower()
+        assert not any(w in low for w in ("window closes", "guarantee", "100x", "moon"))
+    assert is_red_flag("dev sold") and not is_red_flag("curve 45% > 40% (too late)")
+    # callout bags never count against trading position slots
+    assert "max positions" not in eng.entries_blocked() or \
+        sum(1 for p in eng.positions.values() if p.source != "callout") >= params.sniper.capital.max_open_positions

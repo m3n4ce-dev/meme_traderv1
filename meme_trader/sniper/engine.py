@@ -19,6 +19,7 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 
 from ..journal import DATA, record
+from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
 from .curve import Curve
 from .events import Event, Launch, Migration, Social, Tick, Trade, dumps
@@ -76,6 +77,7 @@ class Engine:
         self._last_equity = 0.0
         self._last_summary = 0.0
         self.sol_price = SolPrice(self.p.sizing.sol_usd_fallback)
+        self.callouts = CalloutBook()
         self._last_price_refresh = -1e12
 
     # ------------------------------------------------------------------ helpers
@@ -98,7 +100,8 @@ class Engine:
             return f"on backup feed {self.feed.host} (no trade data) - entries paused"
         if -self.book.day_pnl >= c.daily_loss_limit_sol:
             return "daily loss limit"
-        if len(self.positions) + len(self.pending) + len(self.reviewing) >= c.max_open_positions:
+        trading = sum(1 for p in self.positions.values() if p.source != "callout")   # $1 callout bags don't count
+        if trading + len(self.pending) + len(self.reviewing) >= c.max_open_positions:
             return "max positions"
         need = buy_sol or (self.p.sizing.max_usd / self.sol_price.usd if self.p.sizing.enabled else c.buy_sol)
         if self.book.sol - need < c.min_sol_reserve:
@@ -244,7 +247,9 @@ class Engine:
         why = self._copy_blocked(s, e)
         if why:
             self.stats["copy_skipped"] += 1
-            self.rejects["copy: " + reason_key(why)] += 1
+            if not why.startswith(("leader copy limit", "max positions", "paused", "halted", "low SOL",
+                                   "daily loss", "on backup feed")):   # capacity limits aren't coin rejections
+                self.rejects["copy: " + reason_key(why)] += 1
             if not why.startswith(("leader copy limit", "max positions", "paused", "halted")):   # don't flood the log
                 self.say("info", f"skip copy of {label} on {s.symbol}: {why}", e.mint)
             return
@@ -293,7 +298,8 @@ class Engine:
         if d.action == "reject":
             s.decided = "rejected: " + d.notes[0]
             self.rejects[reason_key(d.notes[0])] += 1
-            if s.mint not in self.positions:
+            keep = self.p.callouts.enabled and not is_red_flag(d.notes[0])   # may still be worth a callout later
+            if s.mint not in self.positions and not keep:
                 await self._unwatch(s.mint)
             return
         if d.action != "enter":
@@ -390,7 +396,12 @@ class Engine:
 
     async def _check_exit(self, s: TokenState) -> None:
         pos = self.positions[s.mint]
-        if pos.leader and not self.p.copy.use_own_exits:
+        if pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
+            pos.peak_price = max(pos.peak_price, s.curve.price)
+            held = self.now - pos.opened_at
+            r = (1.0, "dev sold") if s.dev_sold else \
+                ((1.0, "callout hold done") if held >= self.p.callouts.hold_s else None)
+        elif pos.leader and not self.p.copy.use_own_exits:
             r = None
             if s.dev_sold and self.p.exit.exit_on_dev_sell:
                 r = (1.0, "dev sold")
@@ -476,8 +487,13 @@ class Engine:
                     await self._check_exit(s)
             elif not s.decided:
                 await self._check_entry(s)
-            elif s.age(self.now) > self.p.entry.max_age_s + 60:
+            elif s.age(self.now) > max(self.p.entry.max_age_s,
+                                       self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60:
                 del self.tokens[mint]
+                if not self.record_file:
+                    await self._unwatch(mint)
+        await self._maybe_callout()
+        self.callouts.settle(self.now, lambda m: self.tokens[m].curve.price if m in self.tokens else None)
         for mint, until in list(self.watch_until.items()):
             if until <= self.now and mint not in self.positions and (mint not in self.tokens or self.tokens[mint].decided):
                 await self._unwatch(mint)
@@ -495,6 +511,53 @@ class Engine:
             (DATA / "sniper_summary.json").write_text(json.dumps(
                 {"ts": self.now, "summary": self.summary(), "rejects": dict(self.rejects),
                  "leaders": self.leaders.snapshot(), "desk": self.desk_stats()}, default=str, indent=1))
+
+    # ------------------------------------------------------------------ callouts
+    async def _maybe_callout(self) -> None:
+        c = self.p.callouts
+        if not c.enabled or self.book.halted or self.paused or self.now - self.callouts.last_ts < c.interval_s:
+            return
+        today = [x for x in self.callouts.calls if self.now - x.ts < 86400]
+        if len(today) >= c.max_per_day:
+            return
+        open_bags = sum(1 for p in self.positions.values() if p.source == "callout")
+        best = None
+        for s in self.tokens.values():
+            if s.mint in self.callouts.called or s.mint in self.pending or s.mint in self.reviewing:
+                continue
+            if not s.decided:       # the sniper decides first - a $1 bag must never block a real entry
+                continue
+            ok, score, _ = eligible(s, self.now, c, {
+                "max_bundle_pct": self.p.entry.max_bundle_pct, "max_early_sold_ratio": self.p.entry.max_early_sold_ratio,
+                "creator_launches": len(self.creators.get(s.creator, ())),
+                "max_creator_launches_24h": self.p.entry.max_creator_launches_24h})
+            if ok and (best is None or score > best[1]):
+                best = (s, score)
+        if not best:
+            return
+        s, score = best
+        usd = self.sol_price.usd
+        held = self.positions.get(s.mint)
+        if not held or held.tokens * s.curve.price * usd < c.min_hold_usd:
+            if open_bags >= c.max_open_bags or self.book.sol - c.position_usd / usd < self.p.capital.min_sol_reserve:
+                return
+            await self._buy(s, score, round(c.position_usd / usd, 5), [f"callout bag ${c.position_usd}"], "callout")
+            if s.mint not in self.positions:
+                return
+        text = compose(s, self.now, usd)
+        call = Callout(s.mint, s.symbol, self.now, s.curve.market_cap_sol, s.curve.price, text, score)
+        self.callouts.add(call)
+        self.stats["callouts"] += 1
+        self.say("callout", text, s.mint)
+        if c.auto_post == "telegram" and self.feed.realtime:
+            async def post():
+                call.posted = "telegram" if await post_telegram(text, s.mint) else ""
+            asyncio.create_task(post())
+
+    def mark_posted(self, mint: str) -> None:
+        for c in self.callouts.calls:
+            if c.mint == mint:
+                c.posted = c.posted or "manual"
 
     # ------------------------------------------------------------------ controls (UI)
     async def sell_now(self, mint: str) -> None:
@@ -552,10 +615,14 @@ class Engine:
                 "bundle_pct": s.bundle_pct(), "dev_pct": s.dev_initial_pct(), "spark": s.sparkline(40),
             })
         watching.sort(key=lambda w: (w["status"] not in ("watching", "AI desk reviewing"), -w["score"], w["age"]))
-        positions = []
+        positions, bags = [], []
         for m, pos in self.positions.items():
             s = self.tokens.get(m)
             if not s:
+                continue
+            if pos.source == "callout":       # $1 callout bags are listed with the callouts, not as trades
+                bags.append({"mint": m, "symbol": pos.symbol, "value_usd": pos.tokens * s.curve.price * self.sol_price.usd,
+                             "gain_pct": pos.gain_pct(s.curve.price), "held_s": round(self.now - pos.opened_at)})
                 continue
             price = s.curve.price
             positions.append({
@@ -577,6 +644,12 @@ class Engine:
                                for k, v in self.callers.stats.items()), key=lambda c: -c["calls"])[:15],
             "leaders": self.leaders.snapshot(), "desk": self.desk_stats(),
             "sol_usd": self.sol_price.usd, "sol_usd_source": self.sol_price.source,
+            "callouts": [{"mint": c.mint, "symbol": c.symbol, "ts": c.ts, "mcap_usd": c.mcap_sol * self.sol_price.usd,
+                          "text": c.text, "score": c.score, "posted": c.posted, "outcomes": c.outcomes}
+                         for c in self.callouts.calls[-20:][::-1]],
+            "callout_stats": self.callouts.stats(), "callout_bags": bags,
+            "callout_next_in": max(0, round(self.p.callouts.interval_s - (self.now - self.callouts.last_ts)))
+            if self.p.callouts.enabled else None,
             "blocked": self.entries_blocked(),
         }
 
