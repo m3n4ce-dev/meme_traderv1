@@ -16,8 +16,10 @@ The protocol:
     a profit-vs-size curve, a no-filter baseline, a random-entry baseline and one ablation per filter.
   * Every run is appended to data/research/experiments.jsonl, so the number of variants tried on the same
     data is known: the best of many tries is optimistically biased.
-  * `freeze` stamps the policy with its hash and the time. Data recorded after that is the holdout. Once
-    frozen, `eval` only reads data from before the freeze; changing a setting means a new version.
+  * `freeze` stamps the policy with its hash and the time, and saves the complete settings it ran with
+    (<name>.lock.json): a frozen policy replays with exactly those, so settings added to the bot later can't
+    change it. Data recorded after the freeze is the holdout; `eval` then only reads data from before it,
+    and changing a setting means a new version.
   * `final` shows nothing until the holdout has the policy's minimum days and trades - no peeking - and
     then judges it once against the gates. Later calls print the stored verdict.
 """
@@ -37,7 +39,7 @@ from pathlib import Path
 
 import yaml
 
-from ..config import EXAMPLE, ROOT, ConfigError, load
+from ..config import EXAMPLE, ROOT, ConfigError, Params, _merge, load, validate
 from ..journal import DATA
 from .curve import CURVE_TOKENS, INITIAL_V_TOKENS
 from .events import Health, Launch, Tick, Trade, loads
@@ -79,25 +81,45 @@ def load_policy(name: str) -> dict:
     return pol
 
 
+def lock_path(pol: dict) -> Path:
+    return Path(pol["_path"]).with_name(Path(pol["_path"]).stem + ".lock.json")
+
+
+def read_lock(pol: dict) -> dict | None:
+    path = lock_path(pol)
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 def policy_params(pol: dict, extra: list[str] | None = None):
-    """config/params.example.yaml + the policy's overrides (+ a variant's), validated."""
+    """The policy's settings (+ a variant's), validated. Frozen: config/params.example.yaml with the locked
+    snapshot on top (settings added since only fill gaps). Not frozen: the example + the policy's overrides."""
     from .__main__ import apply_overrides
 
-    params = load(EXAMPLE)
+    lock = read_lock(pol) if pol.get("frozen_at") else None
+    if lock:
+        data = _merge(dict(load(EXAMPLE)), {"sniper": lock["sniper"]})
+        validate(data)
+        return apply_overrides(Params(data), list(extra or [])) if extra else Params(data)
     sets = [f"{k}={json.dumps(v)}" for k, v in (pol.get("overrides") or {}).items()] + list(extra or [])
+    params = load(EXAMPLE)
     return apply_overrides(params, sets) if sets else params
 
 
+def _trading(sn: dict) -> dict:
+    return {k: v for k, v in sn.items() if k not in NOT_HASHED}
+
+
 def policy_hash(params) -> str:
-    sn = {k: v for k, v in params["sniper"].items() if k not in NOT_HASHED}
-    return hashlib.sha256(json.dumps(sn, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    return hashlib.sha256(json.dumps(_trading(params["sniper"]), sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
 def signature(pol: dict) -> str:
     """What freezing locks: every trading setting AND the yardstick - the gates and the operating costs - so
     neither the strategy nor the pass mark can move after the holdout has been seen."""
     judged = json.dumps({"gates": pol.get("gates") or {}, "ops": pol.get("ops_cost_usd_per_day") or 0}, sort_keys=True)
-    return hashlib.sha256((policy_hash(policy_params(pol)) + judged).encode()).hexdigest()[:12]
+    lock = read_lock(pol) if pol.get("frozen_at") else None
+    base = policy_hash({"sniper": lock["sniper"]}) if lock else policy_hash(policy_params(pol))
+    return hashlib.sha256((base + judged).encode()).hexdigest()[:12]
 
 
 def freeze(name: str, now: float | None = None) -> dict:
@@ -107,6 +129,7 @@ def freeze(name: str, now: float | None = None) -> dict:
                           f"copy it to a new name and edit that.")
     h = signature(pol)
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    write_lock(pol, at, h)
     path = Path(pol["_path"])
     text = path.read_text()
     for key, val in (("frozen_at", at), ("frozen_hash", h)):
@@ -116,6 +139,12 @@ def freeze(name: str, now: float | None = None) -> dict:
     path.write_text(text)
     log_experiment({"kind": "freeze", "policy": pol["name"], "hash": h, "frozen_at": at})
     return {"policy": pol["name"], "frozen_at": at, "hash": h}
+
+
+def write_lock(pol: dict, at: str, h: str) -> None:
+    sn = json.loads(json.dumps(policy_params(pol)["sniper"], default=str))
+    lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn},
+                                         indent=1, sort_keys=True) + "\n")
 
 
 def frozen_ts(pol: dict) -> float | None:
@@ -477,6 +506,17 @@ def _span_for(pol: dict, holdout: bool) -> tuple[float | None, float | None]:
 
 
 def _check_frozen_hash(pol: dict) -> str:
+    if pol.get("frozen_hash"):
+        lock = read_lock(pol)
+        if lock is None:
+            raise ConfigError(f"{pol['name']} is frozen but its settings snapshot {lock_path(pol).name} is missing")
+        for key, want in (pol.get("overrides") or {}).items():   # the file's settings must still match the lock
+            node = lock["sniper"]
+            for k in key.split("."):
+                node = node.get(k) if isinstance(node, dict) else None
+            if json.dumps(node, sort_keys=True) != json.dumps(want, sort_keys=True):
+                raise ConfigError(f"{pol['name']} changed after it was frozen ({key}: {node!r} -> {want!r}). "
+                                  f"Its holdout result would mean nothing: make a new version.")
     h = signature(pol)
     if pol.get("frozen_hash") and h != pol["frozen_hash"]:
         raise ConfigError(f"{pol['name']} changed after it was frozen (signature {h} != {pol['frozen_hash']}): "

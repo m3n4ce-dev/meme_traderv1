@@ -197,6 +197,10 @@ def validate_sniper(sn: dict) -> None:
             raise ConfigError("sniper.chat.model must be one of: \"\", opus, sonnet, haiku")
     _num(sn, "feed.stall_s", 0, lo_open=True)
     _num(sn, "feed.max_lag_s", 0)
+    if "risk" in sn:
+        _num(sn, "risk.max_level", 1, 5)
+        _num(sn, "risk.level", 1, 5)
+        _require(sn["risk"]["level"] <= sn["risk"]["max_level"], "sniper.risk.level can't be above risk.max_level")
     _require(sn["late"].get("entry_mode", "rule") in ("rule", "window"),
              "sniper.late.entry_mode must be rule or window")
     _require(isinstance((sn.get("market") or {}).get("non_organic_wallets", []), list),

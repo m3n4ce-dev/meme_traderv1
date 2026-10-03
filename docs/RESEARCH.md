@@ -12,7 +12,7 @@ The bot hasn't shown a trading edge yet. Paper profits from a few dozen trades s
    - the pass/fail gates.
 
    Its settings apply on top of `config/params.example.yaml`, never your local `params.yaml`, so anyone gets the same result.
-2. **Freeze before judging.** `research freeze <policy>` stamps the policy with a signature of its settings, gates and cost assumptions, plus the time. From then on:
+2. **Freeze before judging.** `research freeze <policy>` stamps the policy with a signature of its settings, gates and cost assumptions, plus the time. It also saves the complete settings snapshot (`<policy>.lock.json`); a frozen policy always replays with exactly that, so settings added to the bot later can't change it. From then on:
    - only data recorded **after** that moment counts as the holdout;
    - development runs only read data from before it;
    - changing anything means a new version (`graduation-v2`) with its own, later, holdout.

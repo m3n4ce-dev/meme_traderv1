@@ -174,6 +174,8 @@ Start with the smallest sizes.
 
 Claude Code has to be installed and logged in on this machine (run `claude` once in a terminal). The chat uses your Claude plan, not an API key; the meter at the top shows how much of your 5-hour and weekly allowance is used. Pick a lighter model (Haiku, Sonnet) in the menu to make it go further. **New chat** starts over.
 
+**More or less risk.** Use the **risk dial** on the Live tab (or Controls), or tell Claude "more risk" / "less risk" in Chat. Raising it always waits for your Approve, even with "Ask before actions" off. Each level shows exactly what changes: dollars per trade, open positions, and the daily loss limit.
+
 **Paper balance.** Ask in Chat ("add 5 paper SOL"), or use **Controls → Paper balance**. A deposit counts as starting capital, not profit. It lasts until the bot restarts, unless you tick "keep", which saves the new starting balance to `config/params.yaml`.
 
 **From a terminal.** Open Claude Code in the project folder:

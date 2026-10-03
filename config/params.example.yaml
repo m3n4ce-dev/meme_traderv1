@@ -219,6 +219,11 @@ sniper:
                                  # (measured 2026-10-03: PublicNode 12 s behind, public RPC 1-2 s; 0 = off)
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
+  risk:                          # the risk dial: scales trade size, open positions and the daily loss limit
+    level: 2                     # 1 Cautious x0.5 | 2 Normal = the settings above | 3 Bold x1.5 | 4 Aggressive x2 | 5 Max x3
+    max_level: 5                 # the highest level anyone can turn it to - you, or Claude with your approval
+                                 # (kill switch, stop losses, entry rules and the 3%-of-curve cap never change)
+
   market:                        # how trades are read
     non_organic_wallets:         # their trades move the price, but never count as demand, buyers or holders
       - BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s   # pump.fun's Mayhem-mode AI agent: ~22% of all trades (2026-10-03)

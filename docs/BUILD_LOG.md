@@ -4,6 +4,39 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #17: Risk dial, self-updating dashboard, locked policy settings
+
+### Owner input
+- "We need to have a risk dial or something or be able to tell the agent to take more risk etc"
+- "The UI looks the same on my end": the server was already sending the new page, but an open tab never reloads itself; it only reconnects its websocket.
+
+### Built
+- **Risk dial** (`Engine.set_risk`, `sniper.risk.level` / `max_level`):
+  - five levels scale trade size, open positions and the daily loss limit around the configured settings (= Normal): x0.5 / x1 / x1.5 / x2 / x3 (positions x2.5 at Max);
+  - the kill switch, stop losses, entry rules and the 3%-of-curve cap don't move;
+  - the dashboard's change is saved to `params.yaml`;
+  - saving settings writes the Normal values, so a restart doesn't scale twice;
+  - an owner edit to a scaled setting moves the Normal baseline; an agent edit doesn't.
+- **Claude and the dial:**
+  - new tool `set_risk_level`;
+  - the agent's ceilings follow the owner's dial level;
+  - lowering is free; raising never goes above `max_level`, and the dashboard chat **always** shows an Approve card for it, even with "Ask before actions" off;
+  - in a terminal it's on the "ask" list.
+- **UI:**
+  - a dial on Live and a table on Controls, each with a confirm showing exact numbers (a stronger warning in live mode);
+  - a risk badge in the header;
+  - "More risk" / "Less risk" quick buttons in Chat.
+- **Self-updating page:** the server stamps the page with a hash of its file and sends a `hello` with the current hash on every websocket connect. An open page that finds itself out of date reloads.
+- **Locked policy settings:**
+  - `research freeze` now saves `<policy>.lock.json`, the complete settings snapshot, and a frozen policy replays with it;
+  - adding the dial's settings would otherwise have changed graduation-v1's hash and voided its holdout;
+  - graduation-v1's lock was rebuilt from the unchanged config and reproduces its original signature (0f0fb20e990b);
+  - editing a frozen policy's file is still refused.
+
+Tests: 196 pass, including 8 new ones in `tests/test_risk_dial.py`.
+
+---
+
 ## 2026-10-03 — Entry #16: Research pipeline: one frozen strategy, clean data, an evaluation that can say no
 
 ### Why
