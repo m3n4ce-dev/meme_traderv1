@@ -907,3 +907,42 @@ def test_order_task_errors_are_reported_not_lost():
         await asyncio.sleep(0)
         assert any("internal error in an order task" in x["text"] for x in eng.log)
     asyncio.run(go())
+
+
+def test_trade_feed_subscribes_at_the_configured_commitment():
+    sent = []
+
+    class WS:
+        async def send_json(self, d):
+            sent.append(d)
+            raise OSError("stop after subscribing")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Session:
+        def ws_connect(self, *a, **k):
+            return WS()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def go():
+        f = SolanaTradeFeed("wss://example.org", commitment="confirmed")
+        import aiohttp
+        orig = aiohttp.ClientSession
+        aiohttp.ClientSession = lambda *a, **k: Session()
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(f._trades(asyncio.Queue()), 0.2)
+        finally:
+            aiohttp.ClientSession = orig
+    asyncio.run(go())
+    assert sent[0]["params"][1] == {"commitment": "confirmed"}
+    assert P.sniper.feed.commitment == "confirmed"
