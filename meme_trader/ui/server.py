@@ -51,6 +51,8 @@ def make_app(engine) -> web.Application:
             await engine.kill()
         elif action == "sell" and cmd.get("mint"):
             await engine.sell_now(cmd["mint"])
+        elif action == "posted" and cmd.get("mint"):
+            engine.mark_posted(cmd["mint"])
 
     app.add_routes([web.get("/", index), web.get("/ws", ws)])
     return app

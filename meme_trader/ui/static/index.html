@@ -96,6 +96,11 @@ tr.dim td { color: var(--muted); }
 .log .buy b { color: var(--series); } .log .sell b, .log .close b { color: var(--good); }
 .log .error b { color: var(--bad); } .log .signal b, .log .desk b { color: var(--accent); }
 .tag.copy { color: var(--accent); border-color: currentColor; }
+.co { padding: 8px 0; border-bottom: 1px solid var(--grid); display: block !important; }
+.co .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.co p { margin: 4px 0 6px; color: var(--ink-2); font-size: 12.5px; }
+.co .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.log .callout b { color: var(--good); }
 .rej-row { display: grid; grid-template-columns: 150px 1fr 40px; gap: 8px; align-items: center; font-size: 12.5px;
   padding: 3px 0; }
 .rej-row .bar { height: 10px; } .rej-row .bar > i { background: var(--axis); }
@@ -151,6 +156,10 @@ a { color: var(--series); }
     </div>
 
     <div class="stack">
+      <section class="panel">
+        <h2>Callouts <small id="co-sub"></small></h2>
+        <div id="callouts" class="log" style="max-height:420px"></div>
+      </section>
       <section class="panel">
         <h2>Launch radar <small id="radar-sub"></small></h2>
         <div class="scroll"><table>
@@ -271,6 +280,25 @@ function render(s) {
     <td class="r ${cls(l.copied_pnl)}">${l.copied ? signed(l.copied_pnl) : "–"}</td><td class="why" title="${esc(l.status)}">${esc(l.status)}</td></tr>`).join("")
     || `<tr><td colspan="6" class="empty">No leader wallets configured</td></tr>`;
 
+  // callouts
+  const cs = s.callout_stats || {};
+  $("co-sub").textContent = s.callout_next_in == null ? "off" :
+    `${cs.calls || 0} calls · ${(s.callout_bags || []).length} $1 bags held · ${cs.settled_5m ? Math.round(cs.up_after_5m * 100) + "% up after 5m · avg " + pct(cs.avg_5m_pct) : "no 5m results yet"} · next in ${s.callout_next_in}s`;
+  const coKeys = (s.callouts || []).map(c => c.mint + c.posted + JSON.stringify(c.outcomes)).join();
+  if ($("callouts").dataset.keys !== coKeys) {
+    $("callouts").dataset.keys = coKeys;
+    $("callouts").innerHTML = (s.callouts || []).map(c => `<div class="co">
+      <div class="row"><b>${esc(c.symbol)}</b><span class="note">${hhmmss(c.ts)} · MC $${(c.mcap_usd / 1000).toFixed(1)}K · score ${c.score.toFixed(0)}</span>
+        ${"5m" in c.outcomes ? `<span class="num ${cls(c.outcomes["5m"])}">5m ${pct(c.outcomes["5m"])}</span>` : ""}
+        ${"peak" in c.outcomes ? `<span class="num">peak ${pct(c.outcomes.peak)}</span>` : ""}
+        ${c.posted ? `<span class="tag ok">✓ posted${c.posted === "telegram" ? " (Telegram)" : ""}</span>` : ""}</div>
+      <p>${esc(c.text)}</p>
+      <div class="btns"><button class="small" data-copy="${c.mint}">Copy text</button>
+        <a class="small" href="https://pump.fun/coin/${encodeURIComponent(c.mint)}" target="_blank" rel="noopener"><button class="small">Open on pump.fun</button></a>
+        <button class="small" data-posted="${c.mint}">Mark posted</button></div></div>`).join("")
+      || `<div class="empty">No callouts yet — the agent picks at most one every 2 minutes.</div>`;
+  }
+
   // positions
   $("pos-sub").textContent = `${s.positions.length} open · ${sol(s.sol)} SOL free`;
   const pe = $("positions");
@@ -355,8 +383,15 @@ function connect() {
 const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
 $("pause").onclick = () => send({action: snap && snap.paused ? "resume" : "pause"});
 $("kill").onclick = () => confirm("Sell ALL positions and stop opening new ones?") && send({action: "kill"});
-document.addEventListener("click", e => { const m = e.target.dataset && e.target.dataset.sell;
-  if (m && confirm("Sell this whole position now?")) send({action: "sell", mint: m}); });
+document.addEventListener("click", e => {
+  const d = e.target.dataset || {};
+  if (d.sell && confirm("Sell this whole position now?")) send({action: "sell", mint: d.sell});
+  if (d.posted) send({action: "posted", mint: d.posted});
+  if (d.copy) {
+    const c = (snap.callouts || []).find(x => x.mint === d.copy);
+    if (c) navigator.clipboard.writeText(c.text).then(() => { e.target.textContent = "Copied ✓"; });
+  }
+});
 addEventListener("resize", () => snap && render(snap));
 connect();
 </script>

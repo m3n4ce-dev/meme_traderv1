@@ -172,6 +172,24 @@ sniper:
     price_in_per_mtok: 4.0       # for the cost meter on the dashboard (USD)
     price_out_per_mtok: 20.0
 
+  callouts:                      # pump.fun callouts: hold the $1 minimum, post a factual card, track results
+    enabled: true
+    interval_s: 120              # platform allows one callout per 2 minutes
+    max_per_day: 200
+    position_usd: 1.10           # buy slightly over $1 so the bag stays >= $1 after fees
+    min_hold_usd: 1.0            # platform minimum to call out
+    max_open_bags: 40
+    hold_s: 3600                 # keep the bag 1h (exit earlier only if the dev sells)
+    min_age_s: 60
+    max_age_s: 1800
+    min_curve_pct: 20            # coins people click: visibly filling but not about to migrate
+    max_curve_pct: 85
+    min_holders: 30
+    min_new_buyers_per_min: 10
+    max_top10_pct: 35
+    min_score: 45                # clickability score (holder growth, inflow, curve, smart wallets, near high)
+    auto_post: none              # none = dashboard Copy/Open buttons | telegram = also post to TELEGRAM_CHANNEL_ID
+
   feed:
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
