@@ -1,0 +1,18 @@
+# systemd unit for running the bot 24/7 on Ubuntu (installed by: bash scripts/setup_ubuntu.sh --service)
+# Paper trading by default. To go live: change "run" to "run --live" below, set
+# MEME_TRADER_CONFIRM_LIVE=yes in .env, then: sudo systemctl daemon-reload && sudo systemctl restart meme-sniper
+[Unit]
+Description=meme_trader pump.fun sniper (paper by default)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__ROOT__
+ExecStart=__ROOT__/.venv/bin/python -m meme_trader.sniper run
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
