@@ -147,7 +147,8 @@ sniper:
     slippage_pct: 15             # live: max buy slippage sent to PumpPortal (buys are never blindly retried)
     sell_slippage_steps: [15, 25, 40]   # live sells: re-quote with these slippages until one lands
     close_empty_accounts: true   # live: close emptied token accounts after a full exit (reclaims rent)
-    priority_fee_sol: 0.0005     # TBD
+    priority_fee_sol: 0.001      # buys (2026 norms: ~0.001-0.005 SOL; a pump.fun buy is ~250k CU)
+    sell_priority_fee_steps: [0.001, 0.003, 0.008]   # sells escalate with each re-quote (dumps are congested)
 
   signals:
     telegram_channels: []        # TBD - channel usernames/ids to watch for CAs (needs TG API id/hash)
@@ -186,6 +187,7 @@ sniper:
     interval_s: 120              # platform allows one callout per 2 minutes
     max_per_day: 200
     position_usd: 1.10           # buy slightly over $1 so the bag stays >= $1 after fees
+    priority_fee_sol: 0.00005    # a $1 bag is never urgent: minimal priority (fees would eat ~25% of it otherwise)
     min_hold_usd: 1.0            # platform minimum to call out
     max_open_bags: 40
     hold_s: 3600                 # keep the bag 1h (exit earlier only if the dev sells)

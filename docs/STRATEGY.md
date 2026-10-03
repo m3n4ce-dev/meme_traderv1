@@ -145,6 +145,12 @@ How the desk is wired:
 | Callout bot | Built as the callout agent once the platform rules were clear ($1 minimum hold, rewards on volume): $1 bags, factual cards, tracked outcomes. See §9. |
 | Insiders < 30% (deeper version) | Funding-graph cluster detection: Helius/RPC first-funder lookups, entry gate and hold-time exit. |
 
+## 8b. Costs that decide small-size profitability (research 2026-10-03)
+- Per trade: 1.25% curve fee + 0.5% PumpPortal fee + ~3% latency slippage, plus a **fixed ~0.001 SOL priority fee per transaction**. At a $5 buy, that fixed part alone is ~6% of the round trip, so tiny positions need bigger moves to break even. That's one more reason the sizing agent scales toward $20 on strong signals.
+- Sells in a dump need priority more than buys do. Each re-quote raises slippage (15 → 25 → 40%) and priority (0.001 → 0.003 → 0.008 SOL).
+- Callout bags use a minimal priority (0.00005 SOL). A $1 bag is never urgent, and normal fees would eat a quarter of it.
+- The ~0.002 SOL token-account rent per new token is a deposit, not a cost: it's returned when the account is closed after a full exit.
+
 ## 9. Ground rules
 - **Callouts:** pump.fun requires holding ≥ $1 of a coin to call it out. We hold exactly that minimum, keep it at least an hour (unless the dev sells), never size up on a called coin to sell into the buyers a call brings, disclose the bag on every card, and track every call's outcome. Card text is measured data only, with no urgency and no promises.
 - Read-only signals and our own trading only. No running call channels, shilling, bundling our own launches, or wash trading. Those are the behaviours this bot is built to avoid, and they carry legal risk.

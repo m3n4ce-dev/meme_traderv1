@@ -117,7 +117,8 @@ def test_callout_agent_rate_limit_bags_and_factual_text():
     assert min(gaps) >= params.sniper.callouts.interval_s                 # one per 2 minutes
     bags = [c for c in eng.book.closed if c["source"] == "callout"]
     usd = eng.sol_price.usd
-    assert bags and all(c["cost"] * usd <= params.sniper.callouts.position_usd + 0.01 for c in bags)
+    fee_usd = (params.sniper.callouts.priority_fee_sol + 0.000005) * usd
+    assert bags and all(c["cost"] * usd <= params.sniper.callouts.position_usd + fee_usd + 0.01 for c in bags)
     for c in calls:
         assert "Data, not advice" in c.text and "$1 callout position" in c.text
         low = c.text.replace(c.symbol, "").lower()      # coin names like MOONAI are the creator's, not ours

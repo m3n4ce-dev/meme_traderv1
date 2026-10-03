@@ -516,7 +516,8 @@ class Engine:
             sol = round(z.max_usd / self.sol_price.usd, 4)
         self.pending.add(s.mint)
         try:
-            fill = await self.ex.buy(s.mint, s.curve, sol)
+            fill = await self.ex.buy(s.mint, s.curve, sol,
+                                     self.p.callouts.priority_fee_sol if source == "callout" else None)
         finally:
             self.pending.discard(s.mint)
         s.decided = "entered"
@@ -562,7 +563,8 @@ class Engine:
         tokens = pos.tokens if frac >= 1 else pos.tokens * frac
         self.pending.add(s.mint)
         try:
-            fill = await self.ex.sell(s.mint, s.curve, tokens)
+            fill = await self.ex.sell(s.mint, s.curve, tokens,
+                                      self.p.callouts.priority_fee_sol if pos.source == "callout" else None)
         finally:
             self.pending.discard(s.mint)
         if not fill.ok:
