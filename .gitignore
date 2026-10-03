@@ -1,0 +1,9 @@
+# secrets - never commit
+.env
+*.keypair.json
+id.json
+# runtime data
+data/
+__pycache__/
+.pytest_cache/
+.venv/

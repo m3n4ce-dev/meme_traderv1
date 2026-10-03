@@ -1,0 +1,170 @@
+# How-tos
+
+Short recipes for the things you'll actually do. Every command runs from the `meme_traderv1` folder.
+Setup is in [MAC_SETUP.md](MAC_SETUP.md) and [UBUNTU_SETUP.md](UBUNTU_SETUP.md).
+
+| I want to… | Jump to |
+|---|---|
+| See it work right now | [1](#1-try-it-in-two-minutes) |
+| Understand the dashboard | [2](#2-read-the-dashboard) |
+| Know why a token was bought or skipped | [3](#3-see-why-a-token-was-bought-or-skipped) |
+| Start collecting real data | [4](#4-paper-trade-on-the-real-market) |
+| Train the prediction model | [5](#5-train-the-p2x-model) |
+| Change a setting while it runs | [6](#6-change-settings-while-it-runs) |
+| Test a change before trusting it | [7](#7-prove-a-change-before-you-use-it) |
+| Graduation plays | [8](#8-graduation-plays) |
+| Use the model as an entry filter | [9](#9-use-the-model-as-an-entry-filter) |
+| Make a report I can share | [10](#10-make-a-shareable-report) |
+| Copy a profitable wallet | [11](#11-copy-a-wallet) |
+| Run it 24/7 and check from my Mac | [12](#12-run-247-on-the-mini-pc-and-check-from-the-mac) |
+| Go live with real money | [13](#13-go-live) |
+| Fix something that looks wrong | [14](#14-when-something-looks-wrong) |
+
+---
+
+## 1. Try it in two minutes
+```bash
+scripts/start.sh demo
+```
+The dashboard opens at **http://127.0.0.1:8787** with a simulated market and fake money. No keys are needed. Press **Ctrl + C** in the terminal to stop.
+
+## 2. Read the dashboard
+Four views. Switch with the tabs or the keys **1–4**:
+
+- **Live**: money, open positions, the launch radar and every event.
+  - Click any token, position, closed trade or log line to open its **detail panel**.
+  - The coloured chips under the numbers turn whole strategies on and off.
+- **Analytics**: what is working, in plain English, plus charts:
+  - equity and drawdown;
+  - a projection of the next 100 trades;
+  - breakdowns by strategy, exit, hour and model score;
+  - the gate audit.
+- **Controls**: live settings. See [6](#6-change-settings-while-it-runs).
+- **Guide**: the same tour inside the app, plus keyboard shortcuts.
+
+Badges in the header:
+
+| Badge | Means |
+|---|---|
+| `PAPER` / `LIVE` | Fake or real money |
+| `model AUC 0.71` | A trained model is loaded. AUC is its score on launches it never saw: 0.5 is a coin flip, above 0.65 is useful. |
+| `pumpportal.fun · 2s` | Seconds since the last market event. It turns red (`stale`) if data stops. |
+| Amber banner | **Defense mode**: after a losing run, size is halved and the entry bar is raised for a while. |
+| Red banner | **Halted**: the drawdown kill switch fired or KILL was pressed. Nothing new is bought. |
+
+## 3. See why a token was bought or skipped
+Click the token anywhere. The panel shows:
+- **Gate checklist**: every filter, its live value, the limit, and pass/fail. "Red flag" gates reject for good. "Must hold" gates have to be true at the moment of entry.
+- **P(2x)**: the model's chance that the token doubles before falling 30% within 10 minutes, and the **expected value** after fees.
+- **Why the model says so**: the inputs pushing that probability up (green) or down (red).
+- **Top holders** (the dev is flagged, along with who funded each wallet) and the **tape** of recent trades.
+- Links to pump.fun, DexScreener and Solscan, plus the token's own socials.
+
+## 4. Paper trade on the real market
+```bash
+scripts/start.sh paper
+```
+This uses the real pump.fun feed with fake money. It needs `PUMPPORTAL_API_KEY` in `.env` (see [MAC_SETUP.md step 3](MAC_SETUP.md#3-get-your-pumpportal-key-required-for-the-real-market)).
+
+It **records the market** to `data/feed-YYYY-MM-DD.jsonl`. The model, backtests and tuning all learn from these files, so let it run. Finished days are compressed to `.jsonl.gz` automatically, which is about 8–10× smaller.
+
+## 5. Train the P(2x) model
+After **2–3 days** of recording (more is better):
+```bash
+scripts/start.sh train
+```
+It fits on your oldest launches, calibrates on the next slice, and **grades on the newest launches it never saw**. It prints a verdict:
+
+| Verdict | Do this |
+|---|---|
+| little skill (AUC < 0.6) | Nothing. P(2x) stays display-only. Record more and retrain. |
+| some skill (0.6–0.7) | Keep `min_p` at 0. The model still nudges sizing (quarter-Kelly). |
+| useful skill (> 0.7) | Test a gate first. See [9](#9-use-the-model-as-an-entry-filter). |
+
+A running bot picks up the new model within a minute; there's no need to restart it. **Retrain weekly**: pump.fun behaviour drifts, and research finds models trained on one period do worse on later ones.
+
+## 6. Change settings while it runs
+Open the **Controls** tab. Toggles and numbers apply instantly. Press **Save to config** to keep them after a restart; this writes `config/params.yaml`. Everything else lives in that file.
+
+The dollar **hard cap** (`Max buy`) is enforced in code. Nothing can buy more, whatever it asks for.
+
+## 7. Prove a change before you use it
+Two tools. Both use every CPU core, and both use your recordings by default.
+
+**Tune one setting** (walk-forward: tune on older days, test on newer ones):
+```bash
+scripts/start.sh sweep --grid exit.stop_loss_pct=20,30,40
+```
+It recommends a change only if it also wins on the data it never saw.
+
+**Compare whole strategies** across many samples (each recorded day is one sample):
+```bash
+scripts/start.sh compare --variant "late: late.enabled=true" --variant "ladder: exit.profile=ladder"
+```
+Read the **beat base** column. "7/8" means the variant made more than your current settings on 7 of 8 days. A variant that is better on average but wins only half its days is luck, not edge.
+
+## 8. Graduation plays
+A second strategy. It buys tokens already 55–85% up their bonding curve that are still filling fast, and sells before migration (post-migration liquidity drops sharply).
+
+It's **on by default in paper**, so it collects evidence. Before going live, check its row in **Analytics → By strategy**. Prove it on your own recordings:
+```bash
+scripts/start.sh compare --variant "no_late: late.enabled=false"
+```
+Turn it off any time with the **Graduation plays** chip, or `late.enabled: false` in the config.
+
+## 9. Use the model as an entry filter
+Only after `train` says *useful skill*:
+```bash
+scripts/start.sh sweep --grid predict.min_p=0,0.15,0.25,0.35
+```
+If a value wins on the unseen data, set **Min P(2x first)** in Controls and Save.
+
+`predict.require_positive_ev: true` is a softer filter. It skips entries the model says lose money after fees.
+
+## 10. Make a shareable report
+```bash
+scripts/start.sh report                   # your paper/live trades
+```
+This writes `data/report.html`, one self-contained page that opens anywhere, and `data/report.csv`, every trade for a spreadsheet. The page says plainly where its numbers come from. To report a backtest instead:
+```bash
+scripts/start.sh report --backtest --file data/feed-*
+```
+
+## 11. Copy a wallet
+```bash
+scripts/start.sh leaders
+```
+This ranks wallets in your recordings by profit, and flags insider-like and bot-speed ones. Paste a candidate under `copy.leaders` in `config/params.yaml` with `mode: signal`. In signal mode it boosts a token's score instead of copying blindly. Watch its results in the **Copy trading** panel. A leader that keeps losing is paused automatically.
+
+## 12. Run 24/7 on the mini PC and check from the Mac
+On the P8:
+```bash
+bash scripts/setup_ubuntu.sh --service
+```
+On the Mac:
+```bash
+ssh -L 8787:127.0.0.1:8787 you@wowe-p8.local
+```
+Then open http://127.0.0.1:8787 on the Mac. Details are in [UBUNTU_SETUP.md](UBUNTU_SETUP.md). The dashboard only answers on the P8 itself, because its buttons can sell, so always use the tunnel.
+
+## 13. Go live
+Only after weeks of paper trading that you're happy with in **Analytics**. Follow [SETUP.md step 5](SETUP.md#5-going-live-real-money):
+- a **dedicated** hot wallet holding only the bot's budget, never your main wallet;
+- its key in a file that only the signing code reads;
+- a paid RPC;
+- `MEME_TRADER_CONFIRM_LIVE=yes`.
+
+Start with the smallest sizes.
+
+## 14. When something looks wrong
+| You see | Likely cause → fix |
+|---|---|
+| Feed badge red / `stale` | No market data. Check the internet and `PUMPPORTAL_API_KEY` (`scripts/start.sh doctor`). |
+| Amber **Defense mode** banner | A losing run. It lifts by itself after the set minutes. Turn it off in Controls if you disagree. |
+| Red **Halted** banner | The drawdown kill switch fired or KILL was pressed. Restart the bot to reset. |
+| "running · max positions" | All trading slots are full. Raise **Max open positions** or wait for exits. |
+| No buys for a long time | Look at **Why we passed** and the radar's rejected tokens, then check the gate audit in Analytics. |
+| `no model` badge | Normal until you run `scripts/start.sh train`. |
+| Dashboard says disconnected | The bot stopped. Check the terminal, or `journalctl -u meme-sniper -n 50` on the P8. |
+
+Nothing here is financial advice. Most pump.fun tokens go to zero.
