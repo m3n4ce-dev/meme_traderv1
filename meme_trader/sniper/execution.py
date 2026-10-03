@@ -32,13 +32,20 @@ class PaperExecutor:
     def __init__(self, ex):
         self.fee = ex.curve_fee_pct + ex.platform_fee_pct
         self.slip = ex.paper_latency_slippage_pct / 100
+        # fixed SOL per transaction: priority fee + 5000-lamport base fee. At $5 sizes this is several % of
+        # the trade, so paper results must pay it too.
+        self.priority = ex.priority_fee_sol
 
-    async def buy(self, mint: str, curve: Curve, sol: float) -> SniperFill:
+    def _tx_cost(self, priority: float | None) -> float:
+        return (self.priority if priority is None else priority) + 0.000005
+
+    async def buy(self, mint: str, curve: Curve, sol: float, priority: float | None = None) -> SniperFill:
         tokens = curve.quote_buy(sol, self.fee) * (1 - self.slip)
-        return SniperFill(tokens > 0, sol=sol, tokens=tokens, error="" if tokens > 0 else "curve full")
+        return SniperFill(tokens > 0, sol=sol + self._tx_cost(priority), tokens=tokens,
+                          error="" if tokens > 0 else "curve full")
 
-    async def sell(self, mint: str, curve: Curve, tokens: float) -> SniperFill:
-        sol = curve.quote_sell(tokens, self.fee) * (1 - self.slip)
+    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None) -> SniperFill:
+        sol = max(curve.quote_sell(tokens, self.fee) * (1 - self.slip) - self._tx_cost(priority), 0.0)
         return SniperFill(True, sol=sol, tokens=tokens)
 
 
@@ -64,7 +71,7 @@ class LiveExecutor:
         self.wallet = wallet
 
     def _attempt(self, mint: str, action: str, amount, in_sol: bool, slippage: float,
-                 estimate_sol: float = 0.0) -> SniperFill:
+                 estimate_sol: float = 0.0, priority: float | None = None) -> SniperFill:
         import base64
 
         import httpx
@@ -72,11 +79,12 @@ class LiveExecutor:
         from ..wallet import confirm
 
         w = self.wallet
+        priority = self.ex.priority_fee_sol if priority is None else priority
         try:
             r = httpx.post(self.URL, timeout=10, data={
                 "publicKey": w.pubkey, "action": action, "mint": mint, "amount": amount,
                 "denominatedInSol": "true" if in_sol else "false", "slippage": slippage,
-                "priorityFee": self.ex.priority_fee_sol, "pool": "auto",
+                "priorityFee": priority, "pool": "auto",
             })
             if r.status_code != 200:
                 return SniperFill(False, error=f"pumpportal {r.status_code}: {r.text[:200]}")
@@ -125,17 +133,20 @@ class LiveExecutor:
             except Exception as e:
                 print(f"[live] close account for {mint[:6]} failed (harmless): {e}")
 
-    async def buy(self, mint: str, curve: Curve, sol: float) -> SniperFill:
-        return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct)
+    async def buy(self, mint: str, curve: Curve, sol: float, priority: float | None = None) -> SniperFill:
+        return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct, 0.0, priority)
 
-    async def sell(self, mint: str, curve: Curve, tokens: float) -> SniperFill:
+    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None) -> SniperFill:
         fee = self.ex.curve_fee_pct + self.ex.platform_fee_pct
         estimate = curve.quote_sell(tokens, fee) if curve is not None else 0.0
 
         def run() -> SniperFill:
             fill = SniperFill(False, error="no attempt")
-            for slip in self.ex.sell_slippage_steps:
-                fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate)
+            steps = list(self.ex.sell_slippage_steps)
+            prios = [priority] * len(steps) if priority is not None else \
+                list(self.ex.sell_priority_fee_steps) + [self.ex.sell_priority_fee_steps[-1]] * len(steps)
+            for slip, prio in zip(steps, prios):     # each retry: more slippage room AND more priority
+                fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate, prio)
                 if fill.ok:
                     try:
                         if self.wallet.token_balance(mint) == 0:

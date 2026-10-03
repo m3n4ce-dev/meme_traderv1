@@ -4,6 +4,58 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #7: Line-by-line review (25 fixes), restart safety, fee research
+
+### Owner input
+- "Improve", then "keep improving, comb every line and do more research."
+
+### Restart safety (new)
+Live positions used to live only in memory. The Ubuntu service restarts the bot after a crash, which would have orphaned open positions.
+- State (book, positions, called coins) is saved atomically after every fill and every 10 s.
+- On restart it's restored and **checked against the wallet**: positions that are gone get closed, changed balances get corrected, and unknown pump tokens get flagged.
+- Restored positions wait for a real price before any exit runs. They get a DexScreener fallback price, and the max-hold time still applies.
+
+### Full code review (26 findings; 25 fixed)
+Ranked by severity, with the money-path issues first:
+1. A preflight failure raised out of the executor. The sell never tried the next slippage step and the engine stopped. **Fixed:** every executor error is now a failed fill.
+2. Fills were read from wallet balances at "finalized" right after a "confirmed" confirmation, so a fill could show 0 tokens, then a divide-by-zero, then repeated sells. Concurrent trades also polluted each other's SOL changes, and token-account rent was booked as cost. **Fixed:** fills are measured from the confirmed transaction's own pre/post balances (`Wallet.tx_deltas`), with rent kept out of cost.
+3. Ticks could overlap during slow live sells, leading to a KeyError and a dead ticker. **Fixed:** a tick lock, safe lookups, and one bad event can no longer stop the live engine.
+4. A dashboard sell or KILL during an in-flight sell could double-count proceeds and crash on close. **Fixed:** `_sell` guards itself and close is idempotent.
+5. **Any website could send KILL/SELL to the local dashboard** over a websocket. **Fixed:** origin check. A foreign page is verified blocked in a real browser.
+6. Live start-up refused to run after a restart, since part of the budget sits in positions. **Fixed:** resuming needs only the fee reserve.
+7. Restored or quiet positions had no price and no exits. **Fixed:** DexScreener fallback price every 15 s for stale holdings, and max-hold applies even without a price.
+8. Callouts could stack a $1 bag on top of an existing position. **Fixed:** `_buy` never stacks on a held mint.
+9. Feed parsing could die on a null field (`newTokenBalance: null`). **Fixed.**
+10. Other fixes:
+    - pending sells were double-counted as positions;
+    - the AI desk was re-paid every tick after a "skip";
+    - funding lookups never re-ran for new early buyers;
+    - RPC errors were cached as "no funder";
+    - paused leaders' sells weren't followed;
+    - callers were scored against a placeholder price;
+    - `callers.json` was never saved;
+    - callout 1 h outcomes were lost;
+    - the funder cache was unbounded and saved on the event loop;
+    - each lookup batch opened a new HTTP session;
+    - config sections were copied on every access;
+    - old DexScreener bot: a missing price zeroed equity, and late landings were lost.
+- Not fixed (minor): a shared HTTP session for the SOL price, metadata and Telegram calls. The per-few-seconds funding lookups already share one.
+- 11 regression tests added, one per class of bug.
+
+### Research (2026-10-03)
+| Finding | Effect on the bot |
+|---|---|
+| Bonding-curve fee 1.25% (0.95% protocol + 0.30% creator); PumpSwap tiers 1.25% → 0.30% by market cap | `curve_fee_pct` 1.25 confirmed |
+| A pump.fun buy is ~250k compute units; normal priority/tip 0.001–0.005 SOL, 0.01+ in congestion | **Paper fills now pay a fixed tx cost**, which at $5 is ~6% of the round trip. Buy priority raised 0.0005 → 0.001; sells escalate 0.001 → 0.003 → 0.008 alongside slippage |
+| Callout Rewards: daily USDC from fixed pots, pro-rata by caller rank, on volume app users trade because of a call | Rank and real volume matter more than call count. **Callout bags use a minimal 0.00005 SOL priority**: normal fees ate ~27% of a $1 bag. The bags went from about −46% per losing bag to break-even overall in the simulation |
+| Cashback coins return the 0.3% creator fee to traders, but only on trades made through pump.fun's own Terminal | Not available to us via PumpPortal (noted, not used) |
+| pump.fun now offers built-in bundled launches (initial buy across up to 17 wallets) and a "Fair Launch Shield" | Already counted by the bundle window and the funding tracer. Re-check `max_bundle_pct` on real data, since some honest creators will use it |
+| PumpPortal message format unchanged (create/buy/sell/migrate, `marketCapSol`, `pool`) | Parser confirmed |
+
+Tests: 56 passing.
+
+---
+
 ## 2026-10-03 — Entry #6: Callout agent, insider-cluster detection, phone alerts
 
 ### Owner input
