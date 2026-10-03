@@ -22,7 +22,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 from .curve import Curve
-from .events import Funding, Launch, Migration, Trade
+from .events import Funding, Launch, Metadata, Migration, Trade
 from .features import FEATURES, extract
 from .funding import cluster_report, cohort
 from .tracker import TokenState
@@ -31,7 +31,10 @@ from .tracker import TokenState
 # --------------------------------------------------------------------------- dataset
 def build_dataset(events, params, checkpoints=None, up_pct=None, down_pct=None, horizon_s=None):
     """Replay events; snapshot features at each checkpoint age; label = hit +up before -down within horizon.
-    Returns (X rows, y labels, meta (mint, ts, curve_pct))."""
+    Returns (X rows, y labels, meta (mint, ts, curve_pct)).
+
+    A snapshot whose horizon runs past the end of the recording is censored (dropped): we never saw
+    whether it doubled, and calling it a loss would bias recent data toward failure."""
     pr = params.sniper.predict
     checkpoints = list(checkpoints or pr.checkpoints_s)
     up = (up_pct if up_pct is not None else pr.up_pct) / 100
@@ -94,13 +97,20 @@ def build_dataset(events, params, checkpoints=None, up_pct=None, down_pct=None, 
             if remaining_cp.get(mint, 0) <= 0:          # nothing left to snapshot or label: free memory
                 tokens.pop(mint, None)
 
+    end_ts = float("-inf")
     for e in sorted(events, key=lambda ev: ev.ts):
+        end_ts = max(end_ts, e.ts)
         while due and due[0][0] <= e.ts:
             t, _, m = heapq.heappop(due)
             snapshot(m, t)
+        if isinstance(e, Metadata) or (isinstance(e, Launch) and e.mint in tokens):
+            # social links arrive after the launch: apply them from their own timestamp, as the live
+            # engine does (recordings before 2026-10-03 stored them as a repeated Launch at launch time)
+            s = tokens.get(e.mint)
+            if s is not None and s.launch is not None:
+                s.launch.twitter, s.launch.telegram, s.launch.website = e.twitter, e.telegram, e.website
+            continue
         if isinstance(e, Launch):
-            if e.mint in tokens:
-                continue
             s = tokens[e.mint] = TokenState(e.mint, e, e.ts)
             s.on_launch(e)
             creators[e.creator].append(e.ts)
@@ -124,10 +134,15 @@ def build_dataset(events, params, checkpoints=None, up_pct=None, down_pct=None, 
             s = tokens.get(e.mint)
             if s:
                 s.migrated = True
-    for row, label in enumerate(y):                      # never resolved = never doubled
-        if label is None:
-            y[row] = 0
-    return X, y, meta
+    censored = set()
+    for rows in open_labels.values():
+        for row, _, deadline in rows:
+            if deadline <= end_ts:
+                y[row] = 0                               # watched the whole horizon: it never doubled
+            else:
+                censored.add(row)                        # horizon not fully observed: outcome unknown
+    keep = [i for i in range(len(y)) if i not in censored and y[i] is not None]
+    return [X[i] for i in keep], [y[i] for i in keep], [meta[i] for i in keep]
 
 
 # --------------------------------------------------------------------------- model
@@ -278,15 +293,22 @@ def evaluate(y, p) -> dict:
             "calibration": bins}
 
 
-def train(events, params, train_frac: float = 0.7, log=print) -> tuple[LogisticModel, dict]:
+def train(events, params, train_frac: float = 0.7, log=print, source: dict | None = None) -> tuple[LogisticModel, dict]:
     """Walk-forward in three slices by launch time: fit on the earliest, calibrate (temperature) on the
-    next, grade on the latest - data the model and its calibration never saw. Then refit on everything
-    for deployment, keeping the calibration."""
+    next, grade on the latest - data the model and its calibration never saw. The splits are purged
+    with an embargo of the longest checkpoint + horizon, so every training label is known before the
+    first later decision. Then refit on everything for deployment, keeping the calibration.
+
+    The deployment model has seen ALL of `events`; info records that window (data_start_ts/data_end_ts)
+    and where the data came from, so replays of the same data refuse to use it (Engine) and only a
+    model trained on recorded data can be promoted (`promote`)."""
     from .sweep import split
 
     t0 = time.time()
-    tr_ev, rest = split(events, train_frac)
-    cal_ev, te_ev = split(rest, 0.5)
+    pr = params.sniper.predict
+    embargo = max(pr.checkpoints_s) + pr.horizon_s
+    tr_ev, rest = split(events, train_frac, embargo)
+    cal_ev, te_ev = split(rest, 0.5, embargo)
     Xtr, ytr, _ = build_dataset(tr_ev, params)
     Xcal, ycal, _ = build_dataset(cal_ev, params)
     Xte, yte, _ = build_dataset(te_ev, params)
@@ -299,10 +321,16 @@ def train(events, params, train_frac: float = 0.7, log=print) -> tuple[LogisticM
     holdout.temp = fit_temperature(holdout.logits_rows(Xcal), ycal)
     test_metrics = evaluate(yte, holdout.predict_rows(Xte)) if yte else {"n": 0}
     train_metrics = evaluate(ytr, holdout.predict_rows(Xtr))
-    final = LogisticModel.fit(Xtr + Xcal + Xte, ytr + ycal + yte)   # deploy on all data; grade from the holdout
+    Xall, yall, _ = build_dataset(events, params)          # deploy on all data; grade from the holdout only
+    final = LogisticModel.fit(Xall, yall)
     final.temp = holdout.temp
-    pr = params.sniper.predict
+    ts = [e.ts for e in events]
+    src = source or {}
     final.info = {
+        "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
+        "files": [Path(f).name for f in src.get("files", [])],
+        "data_start_ts": min(ts) if ts else None, "data_end_ts": max(ts) if ts else None,
+        "embargo_s": embargo, "promoted": False,
         "trained_at": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
         "label": f"+{pr.up_pct}% before -{pr.down_pct}% within {pr.horizon_s}s",
         "n_train": len(ytr), "n_cal": len(ycal), "n_test": len(yte), "temperature": holdout.temp,

@@ -162,14 +162,14 @@ class WalletScore:
     closed: int = 0
     wins: int = 0
     realized_sol: float = 0.0
-    open_value_sol: float = 0.0
+    open_pnl_sol: float = 0.0     # open bags: current value minus their remaining cost
     entry_ages: list = field(default_factory=list)
     early_buys: int = 0      # bought inside the bundle window (insider-like)
     created: int = 0         # tokens this wallet launched
 
     @property
     def total_sol(self) -> float:
-        return self.realized_sol + self.open_value_sol
+        return self.realized_sol + self.open_pnl_sol
 
     @property
     def win_rate(self) -> float:
@@ -177,7 +177,9 @@ class WalletScore:
 
 
 def discover(events, bundle_window_s: float = 2.0, min_tokens: int = 5) -> list[WalletScore]:
-    """Rank wallets by realized + marked P&L across a recorded feed. Flags insider-like wallets."""
+    """Rank wallets by realized + marked P&L across a recorded feed. Flags insider-like wallets.
+    A bag (wallet x token) is one round trip: its win or loss is decided on the whole bag at closure,
+    and an open bag counts its value minus what's left of its cost."""
     from .events import Launch
 
     launched: dict[str, float] = {}
@@ -209,21 +211,21 @@ def discover(events, bundle_window_s: float = 2.0, min_tokens: int = 5) -> list[
                 s.entry_ages.append(age)
                 if e.mint in launched and age <= bundle_window_s:
                     s.early_buys += 1
-                bags[key] = [0.0, 0.0]
+                bags[key] = [0.0, 0.0, 0.0]               # tokens, remaining cost, realized so far
             bags[key][0] += e.tokens
             bags[key][1] += e.sol
         elif key in bags:
-            tok, cost = bags[key]
+            tok, cost, realized = bags[key]
             frac = min(e.tokens / tok, 1.0) if tok else 1.0
             pnl = e.sol - cost * frac
             s.realized_sol += pnl
-            bags[key] = [tok - tok * frac, cost * (1 - frac)]
+            bags[key] = [tok - tok * frac, cost * (1 - frac), realized + pnl]
             if bags[key][0] <= 1e-6:
                 s.closed += 1
-                s.wins += pnl > 0
+                s.wins += bags[key][2] > 0
                 del bags[key]
-    for (w, m), (tok, _) in bags.items():
-        scores[w].open_value_sol += tok * last_price.get(m, 0.0)
+    for (w, m), (tok, cost, _) in bags.items():
+        scores[w].open_pnl_sol += tok * last_price.get(m, 0.0) - cost
     ranked = [s for s in scores.values() if s.tokens >= min_tokens]
     ranked.sort(key=lambda s: -s.total_sol)
     return ranked

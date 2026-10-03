@@ -86,11 +86,20 @@ class Verdict:
     summary: str
 
 
-def aggregate(votes: list[Vote], weights: dict, quorum: float, veto_conviction: int) -> Verdict:
+def aggregate(votes: list[Vote], weights: dict, quorum: float, veto_conviction: int,
+              min_responding: float = 0.5) -> Verdict:
+    """Fails closed: a persona that errored still counts in the denominator (silence is not a yes), the
+    skeptic must have answered if it's on the desk, and at least `min_responding` of the configured
+    voting weight must have answered at all."""
     ok = [v for v in votes if not v.error]
-    if not ok:
-        return Verdict(False, 0.0, votes, "desk unavailable")
-    total = sum(weights.get(v.persona, 1.0) for v in ok)
+    configured = sum(weights.get(v.persona, 1.0) for v in votes)
+    answered = sum(weights.get(v.persona, 1.0) for v in ok)
+    if not ok or not configured or answered / configured < min_responding:
+        failed = ", ".join(v.persona for v in votes if v.error)
+        return Verdict(False, 0.0, votes, f"desk unavailable ({failed or 'no votes'} failed)")
+    if any(v.persona == "skeptic" and v.error for v in votes):
+        return Verdict(False, 0.0, votes, "PASSED | risk reviewer (skeptic) unavailable")
+    total = configured
     buy_w = sum(weights.get(v.persona, 1.0) * v.conviction / 100 for v in ok if v.vote == "buy")
     share = buy_w / total if total else 0.0
     veto = next((v for v in ok if v.persona == "skeptic" and v.vote == "pass" and v.conviction >= veto_conviction),

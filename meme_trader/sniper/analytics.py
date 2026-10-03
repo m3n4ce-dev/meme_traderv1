@@ -108,9 +108,11 @@ def _streaks(rows: list[dict]) -> tuple[int, int]:
     return best, worst
 
 
-def drawdown(equity_hist: list) -> dict:
-    """equity_hist: [(ts, equity_sol)]. Max and current peak-to-trough drawdown, plus a chartable series."""
-    peak, max_dd, series = 0.0, 0.0, []
+def drawdown(equity_hist: list, observed_max_pct: float | None = None) -> dict:
+    """equity_hist: [(ts, equity_sol)]. Max and current peak-to-trough drawdown, plus a chartable series.
+    The history may be a rolling chart buffer; observed_max_pct (tracked on every update for the whole
+    session) keeps an older, larger drawdown from disappearing when it scrolls out."""
+    peak, max_dd, series = 0.0, float(observed_max_pct or 0.0), []
     for ts, eq in equity_hist:
         peak = max(peak, eq)
         dd = (1 - eq / peak) * 100 if peak > 0 else 0.0
@@ -310,7 +312,7 @@ def insights(k: dict, trades: list[dict], by_source: list, by_exit: list, by_hou
 
 def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdown_pct: float,
             gate_audit: list | None = None, model_card: dict | None = None, fee_pct: float = 0.0,
-            horizon: int = 100, sims: int = 1000) -> dict:
+            horizon: int = 100, sims: int = 1000, observed_max_dd_pct: float | None = None) -> dict:
     trades = [c for c in closed if c.get("source") != "callout"]
     bags = [c for c in closed if c.get("source") == "callout"]
     k = kpis(trades, start_sol, fee_pct)
@@ -326,7 +328,7 @@ def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdow
     mc = monte_carlo(pnls, equity_now, start_sol, max_drawdown_pct, horizon, sims)
     gates = gate_audit or []
     return {
-        "generated_at": time.time(), "kpis": k, "drawdown": drawdown(equity_hist),
+        "generated_at": time.time(), "kpis": k, "drawdown": drawdown(equity_hist, observed_max_dd_pct),
         "by_source": by_source, "by_exit": by_exit, "by_hour": by_hour, "by_day": by_day,
         "by_score": by_score, "by_p": by_p, "live_calibration": live_calibration(trades),
         "pnl_hist": _hist([c["pnl_pct"] for c in trades], PNL_BINS),

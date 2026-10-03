@@ -38,8 +38,13 @@ def evaluate(c: Candidate, rc: dict, s) -> SafetyReport:
     if total_holders < s.min_holders:
         fails.append(f"holders {total_holders} < {s.min_holders}")
 
-    lp_locked = max((float((m.get("lp") or {}).get("lpLockedPct") or 0) for m in rc.get("markets") or []), default=0.0)
-    if lp_locked < s.min_lp_locked_pct:
+    # the lock that matters is the selected pool's: a small locked pool elsewhere says nothing about it
+    market = next((m for m in rc.get("markets") or [] if m.get("pubkey") == c.pair_address), None)
+    lp = (market or {}).get("lp") or {}
+    lp_locked = float(lp["lpLockedPct"]) if lp.get("lpLockedPct") is not None else None
+    if lp_locked is None:
+        fails.append("LP lock unknown for the selected pool")
+    elif lp_locked < s.min_lp_locked_pct:
         fails.append(f"LP locked {lp_locked:.0f}% < {s.min_lp_locked_pct}%")
 
     if c.liquidity_usd < s.min_liquidity_usd:

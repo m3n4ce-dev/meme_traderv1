@@ -36,18 +36,44 @@ class Wallet:
         if expected_pubkey and expected_pubkey != self.pubkey:
             raise RuntimeError(f"keypair pubkey {self.pubkey} != configured wallet.pubkey {expected_pubkey}")
 
-    def sign_and_send(self, tx_b64: str) -> str:
+    def sign(self, tx_b64: str) -> tuple[str, str]:
+        """(signed tx base64, its signature). The signature is known BEFORE sending, so an order whose
+        send call times out can still be looked up instead of being re-sent blindly."""
         from solders.transaction import VersionedTransaction
 
         unsigned = VersionedTransaction.from_bytes(base64.b64decode(tx_b64))
+        if str(unsigned.message.account_keys[0]) != self.pubkey:
+            raise RuntimeError("transaction fee payer is not this wallet - refusing to sign")
         signed = VersionedTransaction(unsigned.message, [self._kp])
-        raw = base64.b64encode(bytes(signed)).decode()
-        return rpc("sendTransaction", [raw, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}])
+        return base64.b64encode(bytes(signed)).decode(), str(signed.signatures[0])
 
-    def close_empty_token_accounts(self, mint: str) -> int:
-        """Close this wallet's zero-balance token accounts for `mint` and reclaim their rent.
-        Works for SPL Token and Token-2022 (program taken from the account's owner). The token
-        program rejects closing a non-empty account, so this can never burn tokens."""
+    def send(self, raw_b64: str) -> str:
+        return rpc("sendTransaction", [raw_b64, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}])
+
+    def sign_and_send(self, tx_b64: str) -> str:
+        raw, _ = self.sign(tx_b64)
+        return self.send(raw)
+
+    def simulate_sol_change(self, tx_b64: str) -> float:
+        """SOL this wallet would gain (+) or lose (-) if the unsigned transaction ran now. Raises if the
+        simulation fails (the transaction would fail too)."""
+        before = rpc("getBalance", [self.pubkey, {"commitment": "processed"}])["value"]
+        sim = rpc("simulateTransaction", [tx_b64, {"encoding": "base64", "sigVerify": False,
+                                                    "replaceRecentBlockhash": True, "commitment": "processed",
+                                                    "accounts": {"encoding": "base64", "addresses": [self.pubkey]}}])
+        v = sim["value"]
+        if v.get("err"):
+            raise RuntimeError(f"simulation failed: {v['err']} {(v.get('logs') or [''])[-1][:120]}")
+        after = (v.get("accounts") or [None])[0]
+        if not after:
+            raise RuntimeError("simulation returned no balance for this wallet")
+        return (after["lamports"] - before) / 1e9
+
+    def close_empty_token_accounts(self, mint: str) -> tuple[str, float]:
+        """Close this wallet's zero-balance token accounts for `mint` and reclaim their rent. Returns
+        (signature, SOL the accounts held) - ("", 0.0) if there was nothing to close. Works for SPL Token
+        and Token-2022 (program taken from the account's owner). The token program rejects closing a
+        non-empty account, so this can never burn tokens."""
         from solders.hash import Hash
         from solders.instruction import AccountMeta, Instruction
         from solders.message import MessageV0
@@ -57,18 +83,20 @@ class Wallet:
         owner = self._kp.pubkey()
         res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint}, {"encoding": "jsonParsed"}])
         ixs = []
+        lamports = 0
         for a in res["value"]:
             if int(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"]) != 0:
                 continue
+            lamports += int(a["account"].get("lamports") or 0)
             ixs.append(Instruction(Pubkey.from_string(a["account"]["owner"]), bytes([9]),   # 9 = CloseAccount
                                    [AccountMeta(Pubkey.from_string(a["pubkey"]), False, True),
                                     AccountMeta(owner, False, True), AccountMeta(owner, True, False)]))
         if not ixs:
-            return 0
+            return "", 0.0
         bh = rpc("getLatestBlockhash", [{"commitment": "confirmed"}])["value"]["blockhash"]
         tx = VersionedTransaction(MessageV0.try_compile(owner, ixs, [], Hash.from_string(bh)), [self._kp])
-        rpc("sendTransaction", [base64.b64encode(bytes(tx)).decode(), {"encoding": "base64"}])
-        return len(ixs)
+        sig = rpc("sendTransaction", [base64.b64encode(bytes(tx)).decode(), {"encoding": "base64"}])
+        return sig, lamports / 1e9
 
     def sol_balance(self) -> float:
         return rpc("getBalance", [self.pubkey, {"commitment": "confirmed"}])["value"] / 1e9
