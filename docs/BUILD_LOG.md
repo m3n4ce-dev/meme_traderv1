@@ -4,6 +4,97 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #9: Prediction model, graduation plays, analytics, new dashboard, A/B at scale
+
+### Owner input
+- "Full power improve for scalability, UI, interactiveness, highlights, how-tos, metrics, analysis… profitability, extreme out-of-the-box ideas and proven strats and quantum-level predictions… run it massive."
+- "Quantum-level predictions" was taken honestly. There is no quantum computing here. What was built is the strongest prediction that can be checked:
+  - a calibrated probability, graded on launches the model never saw;
+  - a Monte Carlo projection of the next 100 trades from the bot's own results.
+
+### Built
+**Prediction**
+- `features.py` takes a 36-number snapshot per token: curve state, first-minute flow, holders and insiders, socials, smart wallets.
+- `predictor.py` models P(+100% before −30% within 10 min):
+  - walk-forward in three slices (fit on the oldest launches, calibrate with temperature scaling on the next, grade on the newest);
+  - reports AUC, Brier skill and top-decile lift.
+- `train` saves `data/model.json`, and a running bot hot-reloads it within a minute.
+- P(2x) shows on the radar, positions, closed trades and the token panel.
+- The model feeds quarter-Kelly sizing. It can also gate entries (`predict.min_p`, `require_positive_ev`), which is off until trained on your data.
+
+**Strategies and risk**
+- Graduation plays (`late.*`): late-curve momentum, sold at 94% of the curve, before migration.
+- Defense mode: after 5 losses in a row or a bad 10-trade window, half size and +10 entry score for 30 min.
+- Gate audit: every decision is followed for 10 minutes and scored by the model's first-passage rule, against our own buys as the yardstick.
+  - The first version measured "fell 50%" from the rejection price. That was impossible for early rejects, which sit at the bonding curve's price floor, so it was replaced.
+
+**Analysis**
+- `analytics.py` computes:
+  - expectancy, payoff, SQN, profit factor, capture of peak runs, and MAE of winners;
+  - breakdowns by strategy, exit, hour, score and P(2x);
+  - bootstrap confidence in the edge, and a block-bootstrap projection with kill-switch odds;
+  - plain-English highlights.
+- `report` writes a static, shareable HTML page and CSV. The AI review agent now receives the analytics too.
+
+**Dashboard**
+- Four views: Live, Analytics, Controls, Guide.
+- A token detail panel: gate checklist, P(2x) with EV, model drivers, holders and funders, tape.
+- Live settings with Save, strategy chips, radar filter, toasts, highlights, feed-health and model badges, keyboard shortcuts, theme toggle.
+
+**Scale**
+- `sweep --jobs` and the new `compare` run on every core.
+- The summary is cached until a trade closes. Analytics runs in a worker thread with bounded bootstrap work. The snapshot is built and encoded once per tick.
+- Recordings rotate at UTC midnight and finished days are gzipped (~8–10× smaller). Replays read `.gz` and tolerate crash damage.
+- `scripts/start.sh train|sweep|compare|backtest|leaders` use `data/feed-*` automatically.
+
+**Docs**
+- `docs/HOWTO.md` (task recipes), STRATEGY §8c (research), README, new screenshots.
+
+### Bugs found and fixed
+- **Dashboard froze after an all-wins start.** Profit factor = ∞ was sent as bare `Infinity`, which `JSON.parse` rejects. All JSON now goes through `jsonsafe`.
+- **Websocket dropped on the first settings change.**
+  - Cause: with permessage-deflate (negotiated by browsers), a reply sent between the ~80 KB snapshots corrupted the compressed stream, and Chromium closed the socket with 1002.
+  - Fix: compression is off for this local socket and writes are serialized. A test guards it.
+- **Graduation plays could never trigger live.** Rejected tokens were unsubscribed (immediately, or after 10 minutes when recording) before the 15-minute late window. They are now kept, and recordings always cover the full window, so `compare` can evaluate late plays even on days they were off.
+
+### "Run it massive": 72 backtests (8 simulated markets × 1500 launches × 9 variants, 235 s on 4 cores)
+The model used by the variants was trained on a **different** market seed (101) and scored AUC 0.946 on held-out launches. The simulated market is learnable by design: expect far lower AUC on real data.
+
+| Variant | Mean P&L / market | sd | Beat base | Paired t | Median PF | Trades |
+|---|---|---|---|---|---|---|
+| base | +2.408 | 0.850 | – | – | 8.9 | 107 |
+| **late + gate 0.15** | **+4.446** | 0.993 | **8/8** | **+12.1** | 9.8 | 135 |
+| late (graduation plays) | +4.017 | 1.017 | 8/8 | +9.0 | 7.6 | 150 |
+| defense mode off | +3.149 | 0.766 | 7/8 | +5.3 | 9.3 | 112 |
+| model Kelly sizing | +2.468 | 0.894 | 7/8 | +2.7 | 9.9 | 107 |
+| gate 0.15 | +2.544 | 0.806 | 4/8 | +1.0 | 15.5 | 91 |
+| gate 0.30 | +2.452 | 0.790 | 3/8 | +0.3 | 14.9 | 86 |
+| positive-EV filter | +2.453 | 0.787 | 3/8 | +0.3 | 14.9 | 86 |
+| ladder exits | +1.665 | 0.513 | 2/8 | −2.3 | 7.2 | 82 |
+
+### Decisions (simulated market = logic check, not evidence)
+- **Graduation plays: on by default in paper.** They won on all 8 markets, and paper costs nothing. The by-strategy table in Analytics decides before going live.
+- **Model gate: off by default.**
+  - Alone it is noise (4/8): it raises profit factor but cuts trades.
+  - Combined with late plays it was the best variant, so test `predict.min_p` with `sweep` once a model is trained on real data.
+  - The positive-EV filter behaves exactly like gate 0.30, because with these costs EV ≥ 0 ⟺ P ≥ ~0.30.
+- **Kelly sizing input: stays at ¼.** It is a small but consistent gain (7/8).
+- **Ladder exits: stay off.** They lost on 6 of 8 markets.
+- **Defense mode: stays ON, knowingly.**
+  - It cost ~24% of profit here. That's expected: simulated trades are independent, so a brake can only cost money.
+  - Real markets have regimes (cold memecoin weeks, an edge that decays), and that is what the brake is for.
+  - Test it on your recordings: `scripts/start.sh compare --variant "no_defense: risk_adapt.enabled=false"`.
+
+Tests: 88 passing (+29 this entry).
+
+### Owner next steps
+1. Run `scripts/start.sh paper` for 2–3 days, on the P8 as a service.
+2. Then run `scripts/start.sh train`. Keep the model display-only unless the verdict says "useful".
+3. Then run `scripts/start.sh compare --variant "no_late: late.enabled=false" --variant "no_defense: risk_adapt.enabled=false"`.
+4. Read Analytics, and share `scripts/start.sh report`.
+
+---
+
 ## 2026-10-03 — Entry #8: Walk-forward tuning (`sweep`)
 
 - `python -m meme_trader.sniper sweep --file data/feed-*.jsonl --grid key=v1,v2 [--grid ...]` (or `scripts/start.sh sweep ...`).

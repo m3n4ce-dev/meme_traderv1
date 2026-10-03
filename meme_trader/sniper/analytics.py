@@ -131,6 +131,7 @@ def edge_confidence(pnls: list[float], sims: int = 1000, seed: int = 11) -> dict
     if n < MIN_TRADES_MC:
         return None
     rng = random.Random(seed)
+    sims = max(200, min(sims, 2_000_000 // n))          # bounded work however long the history gets
     means = sorted(sum(rng.choices(pnls, k=n)) / n for _ in range(sims))
     return {"mean_sol": _f(sum(pnls) / n), "lo_sol": _f(means[int(0.05 * sims)]), "hi_sol": _f(means[int(0.95 * sims) - 1]),
             "p_positive": sum(m > 0 for m in means) / sims}

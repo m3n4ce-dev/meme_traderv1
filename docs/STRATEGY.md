@@ -60,7 +60,7 @@ For every new launch (PumpPortal websocket, about 100s of ms behind the chain):
 
 ## 3. How we'd know it actually wins (no hype)
 
-1. **Record.** `run` saves every live launch, trade and migration to `data/feed-*.jsonl`.
+1. **Record.** `run` saves every live launch, trade and migration to `data/feed-*`.
 2. **Backtest on recorded data.** Replay it with `backtest --file`. Fills use exact curve math, our own price impact, 1.75% fees and a 3% latency haircut.
 3. **Sweep parameters on one period, validate on another (walk-forward).** Tune only when results hold on data the tuning never saw.
 4. **Paper trade live** for at least 1–2 weeks. Compare paper fills with what the curve did.
@@ -150,6 +150,24 @@ How the desk is wired:
 - Sells in a dump need priority more than buys do. Each re-quote raises slippage (15 → 25 → 40%) and priority (0.001 → 0.003 → 0.008 SOL).
 - Callout bags use a minimal priority (0.00005 SOL). A $1 bag is never urgent, and normal fees would eat a quarter of it.
 - The ~0.002 SOL token-account rent per new token is a deposit, not a cost: it's returned when the account is closed after a full exit.
+
+## 8c. Prediction, graduation plays and risk control (research 2026-10-03)
+
+What the published evidence says, and what was built from it.
+
+| Evidence | Built |
+|---|---|
+| Rug pulls are predictable from **first-minutes trading features** (buy/sell counts and values, unique buyers and sellers, volatility, timing): gradient-boosted models reach AUC-PR ~0.76–0.80 (arXiv:2608.20271). | A 36-feature snapshot per token (`features.py`) and a learned model of P(+100% before −30% within 10 min) (`predictor.py`). Pure Python logistic regression: small data, no extra dependencies, readable weights. |
+| **SOL locked in the bonding curve** is the key state variable for graduation; broad retail participation raises the odds (arXiv:2602.14860). | Curve %, real SOL, buyer counts and the retail share of buys are model inputs. The rule score already weighted flow and buyers. |
+| Graduation is rare (~0.2% of launches). **Telegram** carries the largest social lift (8.9×), and all three links together 17.4× (arXiv:2607.02823). | Socials are weighted Telegram 0.5 / X 0.25 / website 0.25 in the rule score. Each link is a model input and shows on the radar (T G W). |
+| The same study finds **models don't generalize across time**: a model fit on one period degrades on later ones. | Training is walk-forward only (fit old → calibrate newer → grade newest). Retrain weekly. A running bot hot-reloads `data/model.json`. The verdict tells you when to keep the model display-only. |
+| Probabilities that feed position sizing must be **calibrated**, or Kelly sizing over-bets. | Temperature scaling on a separate slice. The calibration chart is in Analytics, and a live check compares predicted P(2x) with how often trades actually reached 2x. |
+| Full Kelly is far too aggressive for fat-tailed crypto outcomes; practitioners use **fractional Kelly (¼)**. | The model's quarter-Kelly edge is one input to the sizing agent's strength, always under the $ hard cap. |
+| After graduation, **liquidity falls ~57% between minute 5 and minute 30**. | Graduation plays (`late.*`) buy strong late-curve momentum (55–85% filled, net inflow, broad buyers, near the high) and sell at 94% of the curve, before migration. On by default in **paper**, so it gathers evidence. It beat the base settings in 8 of 8 simulated markets (entry #9). Check its row in Analytics before going live. |
+| Losing streaks cluster; trading the same size through them deepens drawdowns (**equity-curve risk control**). | Defense mode: after 5 losses in a row or a bad 10-trade window, half size and +10 min score for 30 min. |
+| Filters that look sensible can cost more winners than they save. | **Gate audit**: every rejection is followed for 10 minutes and scored by the same first-passage rule as the model, against our own buys as the yardstick. |
+
+**What this does not do.** It doesn't predict a specific coin's future. On real data, expect a held-out AUC well below the simulated market's: the simulation is deliberately learnable. A model only earns a place in the entry decision after `train`, `sweep` and `compare` all agree on unseen data.
 
 ## 9. Ground rules
 - **Callouts:** pump.fun requires holding ≥ $1 of a coin to call it out. We hold exactly that minimum, keep it at least an hour (unless the dev sells), never size up on a called coin to sell into the buyers a call brings, disclose the bag on every card, and track every call's outcome. Card text is measured data only, with no urgency and no promises.

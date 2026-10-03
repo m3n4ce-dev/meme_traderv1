@@ -123,7 +123,10 @@ class Engine:
         self._last_price_refresh = -1e12
         # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
         mp = Path(self.p.predict.model_path)
-        self.model = LogisticModel.load(mp if mp.is_absolute() else ROOT / mp) if self.p.predict.enabled else None
+        self.model_path = mp if mp.is_absolute() else ROOT / mp
+        self.model = LogisticModel.load(self.model_path) if self.p.predict.enabled else None
+        self._model_mtime = self._mtime(self.model_path)
+        self._last_model_check = 0.0
         self.audit: dict[str, list] = {}                   # mint -> [gate, t0, p0, peak, trough, outcome]
         self.gate_stats: dict[str, dict] = defaultdict(lambda: {"n": 0, "win": 0, "loss": 0, "peak_sum": 0.0})
         self.defense_until = 0.0
@@ -131,6 +134,7 @@ class Engine:
         self._last_late_scan = -1e12
         self._snap_cache: tuple[float, dict] | None = None
         self._analytics: tuple | None = None
+        self._summary_cache: tuple | None = None
         self.last_event = 0.0                              # feed health: time of the last real event
         self._last_flush = 0.0
 
@@ -176,6 +180,28 @@ class Engine:
                 "social_weight": max(ws) if ws else 0.0}
 
     @staticmethod
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _maybe_reload_model(self) -> None:
+        """`train` while the bot runs: the new model is picked up within a minute, no restart."""
+        if not self.p.predict.enabled or not self.feed.realtime or self.now - self._last_model_check < 60:
+            return
+        self._last_model_check = self.now
+        mt = self._mtime(self.model_path)
+        if mt and mt != self._model_mtime:
+            m = LogisticModel.load(self.model_path)
+            if m is not None:
+                self.model, self._model_mtime = m, mt
+                for s in self.tokens.values():
+                    s.p = None                              # re-score with the new model
+                auc = (m.info or {}).get("test", {}).get("auc")
+                self.say("info", f"new prediction model loaded (held-out AUC {auc:.3f})" if auc else "new prediction model loaded")
+
+    @staticmethod
     def _open_record(path: Path):
         if str(path).endswith(".gz"):
             import gzip
@@ -206,9 +232,9 @@ class Engine:
             asyncio.get_running_loop().run_in_executor(None, job)
 
     async def _watch(self, mint: str) -> None:
-        keep = self.p.record.full_window_s
-        if self.p.late.enabled:                    # graduation plays look at tokens up to late.max_age_s old
-            keep = max(keep, self.p.late.max_age_s)
+        # recordings cover graduation plays' whole window (late.max_age_s) even while they're off, so
+        # `compare` can test turning them on without the data running out halfway
+        keep = max(self.p.record.full_window_s, self.p.late.max_age_s)
         self.watch_until[mint] = self.now + (keep if self.record_file else 1e12)
         await self.feed.watch([mint])
 
@@ -847,6 +873,7 @@ class Engine:
                     await self._unwatch(mint)
         if cleanup:
             self._audit_settle()
+            self._maybe_reload_model()
         await self._maybe_callout()
         await self._maybe_late()
         if self.record_file and self.now - self._last_flush >= 30:
@@ -1181,16 +1208,34 @@ class Engine:
                 "calibration": t.get("calibration", []), "weights": info.get("weights", [])[:12],
                 "temperature": info.get("temperature")}
 
+    def _analytics_args(self):
+        key = (len(self.book.closed), sum(g["n"] for g in self.gate_stats.values()))
+        fresh = self._analytics and self._analytics[0] == key and self.now - self._analytics[1] < 60
+        args = (list(self.book.closed), list(self.book.equity_hist), self.book.start_sol,
+                self.p.capital.max_drawdown_pct, self.gate_audit(), self.model_card())
+        return key, fresh, args
+
     def analytics(self) -> dict:
         """Recomputed when a trade closes or the gate audit moves, else at most once a minute (feed time)."""
         from .analytics import compute
 
-        key = (len(self.book.closed), sum(g["n"] for g in self.gate_stats.values()))
-        if self._analytics and self._analytics[0] == key and self.now - self._analytics[1] < 60:
+        key, fresh, args = self._analytics_args()
+        if fresh:
             return self._analytics[2]
-        out = compute(self.book.closed, list(self.book.equity_hist), self.book.start_sol,
-                      self.p.capital.max_drawdown_pct, self.gate_audit(), self.model_card(), fee_pct=self.fee)
+        out = compute(*args, fee_pct=self.fee)
         self._analytics = (key, self.now, out)
+        return out
+
+    async def analytics_async(self) -> dict:
+        """Dashboard path: copies the inputs here, computes in a worker thread so trading isn't held up."""
+        from .analytics import compute
+
+        key, fresh, args = self._analytics_args()
+        if fresh:
+            return self._analytics[2]
+        now = self.now
+        out = await asyncio.to_thread(compute, *args, fee_pct=self.fee)
+        self._analytics = (key, now, out)
         return out
 
     # ------------------------------------------------------------------ reporting
@@ -1213,11 +1258,14 @@ class Engine:
 
     def summary(self) -> dict:
         closed = self.book.closed
-        out = self._stats(closed)
+        if self._summary_cache is None or self._summary_cache[0] != len(closed):   # only changes when a trade closes
+            st = self._stats(closed)
+            st["by_source"] = {src: self._stats([c for c in closed if c["source"].split(":")[0] == src])
+                               for src in sorted({c["source"].split(":")[0] for c in closed})}
+            self._summary_cache = (len(closed), st)
+        out = dict(self._summary_cache[1])
         out.update({"launches": self.stats["launches"], "entries": self.stats["entries"],
-                    "equity_sol": self.equity(), "start_sol": self.book.start_sol,
-                    "by_source": {src: self._stats([c for c in closed if c["source"].split(":")[0] == src])
-                                  for src in sorted({c["source"].split(":")[0] for c in closed})}})
+                    "equity_sol": self.equity(), "start_sol": self.book.start_sol})
         return out
 
     def desk_stats(self) -> dict:

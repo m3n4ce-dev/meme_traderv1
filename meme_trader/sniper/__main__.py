@@ -9,6 +9,7 @@
   python -m meme_trader.sniper leaders --file data/feed-*        # find wallets worth copying
   python -m meme_trader.sniper sweep --file data/feed-* --jobs 4 --grid exit.stop_loss_pct=20,30,40
   python -m meme_trader.sniper train --file data/feed-*          # fit + grade the P(2x) model
+  python -m meme_trader.sniper compare --seeds 1-8 --variant "late: late.enabled=true"   # A/B on many markets
   python -m meme_trader.sniper report                            # HTML report of paper/live trades
   python -m meme_trader.sniper review --validate    # AI post-mortem + backtest of its proposals
 """
@@ -298,6 +299,20 @@ def _report(args, params) -> None:
     print(f"report: {html_path}\ntrades: {csv_path}")
 
 
+def _compare(args, params) -> None:
+    from .compare import compare, parse_seeds, parse_variant, report
+    from .feeds import dedupe_feed_paths
+
+    variants = [parse_variant(v) for v in args.variant]
+    if args.file:
+        samples = [(Path(f).name.split(".")[0], {"files": [str(f)]}) for f in dedupe_feed_paths(args.file)]
+    else:
+        samples = [(f"seed {sd}", {"synthetic": args.synthetic, "seed": sd}) for sd in parse_seeds(args.seeds)]
+    jobs = args.jobs or max(1, min((os.cpu_count() or 2) - 1, 8))     # leave a core for a running bot
+    res = compare(params, variants, samples, jobs)
+    print(report(res, synthetic=not args.file))
+
+
 def _synthetic_with_leaders(args, params) -> SyntheticFeed:
     feed = SyntheticFeed(seed=args.seed, speed=0, launches=args.synthetic, start_ts=1_780_000_000)
     _sim_leaders(params, feed)
@@ -362,6 +377,12 @@ def main() -> None:
     rp.add_argument("--days", type=int, help="recorded trades: only the last N days")
     rp.add_argument("--out", help="output HTML (default: data/report.html)")
     rp.add_argument("--title", default="Sniper performance report")
+    cp = sub.add_parser("compare", help="A/B test setting variants across many market samples, in parallel")
+    cp.add_argument("--variant", action="append", default=[], help="'name: key=value key=value' (repeat)")
+    cp.add_argument("--seeds", default="1-6", help="synthetic market seeds, e.g. 1-8 or 1,3,5")
+    cp.add_argument("--jobs", type=int, default=0, help="parallel processes (default: CPU cores - 1)")
+    cp.add_argument("--file", nargs="*", help="recorded feed files: each file (one UTC day) is one sample")
+    cp.add_argument("--synthetic", type=int, default=1000, help="launches per synthetic sample")
     for p in (b, lead, sw, tr, rp):
         p.add_argument("--file", nargs="*", help="recorded feed file(s): data/feed-*")
         p.add_argument("--synthetic", type=int, default=1000, help="number of synthetic launches if no --file")
@@ -370,7 +391,7 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
-    for p in (r, b, lead, sw, tr, rp, rv, sub.choices["doctor"]):
+    for p in (r, b, lead, sw, tr, rp, cp, rv, sub.choices["doctor"]):
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
@@ -389,6 +410,8 @@ def main() -> None:
         _train(args, params)
     elif args.cmd == "report":
         _report(args, params)
+    elif args.cmd == "compare":
+        _compare(args, params)
     else:
         from .doctor import run as doctor
 

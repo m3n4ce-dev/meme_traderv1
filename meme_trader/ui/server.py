@@ -58,7 +58,7 @@ def make_app(engine) -> web.Application:
         return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
     async def analytics(_):
-        return _json(engine.analytics())
+        return _json(await engine.analytics_async())
 
     async def token(request):
         d = engine.token_detail(request.match_info["mint"])
