@@ -142,9 +142,10 @@ How the desk is wired:
 | Close token accounts on exit | Done after every full live exit. |
 | pumpdev.io websocket as a backup feed | Automatic failover; entries pause while on the backup. |
 | Instagram "filter" settings | Treated as hypotheses. They're marketing funnels; every setting is a `--set` flag to backtest. |
-| Callout bot with auto-buy alongside | Not built as specified. See §9. |
+| Callout bot | Built as the callout agent once the platform rules were clear ($1 minimum hold, rewards on volume): $1 bags, factual cards, tracked outcomes. See §9. |
+| Insiders < 30% (deeper version) | Funding-graph cluster detection: Helius/RPC first-funder lookups, entry gate and hold-time exit. |
 
 ## 9. Ground rules
-- **Callouts:** if we ever post calls, we post before we trade and never sell into the buyers a call brings in. That means a cooldown before trading our own call, holdings disclosed on every call, and a public record of every call's outcome. Calls that front-run followers harm them and carry legal risk.
+- **Callouts:** pump.fun requires holding ≥ $1 of a coin to call it out. We hold exactly that minimum, keep it at least an hour (unless the dev sells), never size up on a called coin to sell into the buyers a call brings, disclose the bag on every card, and track every call's outcome. Card text is measured data only, with no urgency and no promises.
 - Read-only signals and our own trading only. No running call channels, shilling, bundling our own launches, or wash trading. Those are the behaviours this bot is built to avoid, and they carry legal risk.
 - Every trade is journaled. Taxes apply to realised gains.

@@ -103,6 +103,15 @@ sniper:
     sniper_window_s: 10          # buys this soon after launch count as snipes
     max_sniper_pct: 20           # snipers still holding > this % of supply -> wait (intel: Turtle's audit)
     max_insider_pct: 30          # dev + bundle wallets still holding > this % -> wait
+    funding:                     # insider clusters via the wallet funding graph (sniper/funding.py)
+      enabled: true
+      backend: rpc               # rpc = any SOLANA_RPC_URL (cheap) | helius = HELIUS_API_KEY funded-by (paid, labels exchanges)
+      cohort_size: 20            # first N buyers (+ current top 10) are checked
+      max_cluster_pct: 15        # reject if dev-/co-funded early wallets still hold more than this % of supply
+      max_cluster_pct_hold: 20   # while holding: exit if the linked cluster grows past this
+      exchange_fanout: 50        # a funder seen funding this many wallets is treated as an exchange, not a link
+      max_wait_s: 6              # don't hold an entry longer than this waiting for lookups
+      max_lookups_per_min: 240   # cost guard
     require_socials: false       # TBD - require twitter/telegram/website in metadata
     allow_unknown_launch: false  # allow entries on CAs we only saw via social signals
 
@@ -189,6 +198,9 @@ sniper:
     max_top10_pct: 35
     min_score: 45                # clickability score (holder growth, inflow, curve, smart wallets, near high)
     auto_post: none              # none = dashboard Copy/Open buttons | telegram = also post to TELEGRAM_CHANNEL_ID
+
+  notify:                        # phone alerts (TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID in .env)
+    levels: [buy, close, error]  # any of: buy, sell, close, callout, error, signal, desk, info
 
   feed:
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)

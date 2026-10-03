@@ -120,7 +120,7 @@ def test_callout_agent_rate_limit_bags_and_factual_text():
     assert bags and all(c["cost"] * usd <= params.sniper.callouts.position_usd + 0.01 for c in bags)
     for c in calls:
         assert "Data, not advice" in c.text and "$1 callout position" in c.text
-        low = c.text.lower()
+        low = c.text.replace(c.symbol, "").lower()      # coin names like MOONAI are the creator's, not ours
         assert not any(w in low for w in ("window closes", "guarantee", "100x", "moon"))
     assert is_red_flag("dev sold") and not is_red_flag("curve 45% > 40% (too late)")
     # callout bags never count against trading position slots

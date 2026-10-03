@@ -57,10 +57,13 @@ def run(params) -> None:
     env = {
         "PUMPPORTAL_API_KEY": "REQUIRED for the live feed: per-token trades + wallet streams (copy trading)",
         "ANTHROPIC_API_KEY": "AI desk + review agent",
-        "SOLANA_RPC_URL": "live trading (use a paid RPC, e.g. Helius)",
+        "SOLANA_RPC_URL": "live trading + insider-cluster lookups (use a paid RPC, e.g. Helius)",
         "SOLANA_KEYPAIR_PATH": "live trading (bot wallet keypair file)",
         "TELEGRAM_API_ID": "Telegram call ingestion", "TELEGRAM_API_HASH": "Telegram call ingestion",
         "X_BEARER_TOKEN": "X call ingestion",
+        "HELIUS_API_KEY": "wallet-funding lookups with exchange labels (else SOLANA_RPC_URL is used)",
+        "TELEGRAM_BOT_TOKEN": "phone alerts / posting callout cards",
+        "TELEGRAM_ALERT_CHAT_ID": "phone alerts (your own chat id)",
     }
     for k, why in env.items():
         line(OK if os.environ.get(k) else (FAIL if k == "PUMPPORTAL_API_KEY" else WARN), f"{k} {'set' if os.environ.get(k) else 'not set'} - {why}",

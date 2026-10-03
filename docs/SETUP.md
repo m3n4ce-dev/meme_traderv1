@@ -13,6 +13,8 @@ Go in this order. Each stage works before the next one is added. **Don't skip pa
 | 5 | **A dedicated bot wallet** (keypair file) | live trading only | — | `solana-keygen new` (step 5) |
 | 6 | Paid Solana RPC (Helius / Triton / QuickNode) | live trading only | free tier → ~$50/mo | helius.dev |
 | 7 | Telegram API id/hash, X bearer token | social call signals (optional) | X is pay-per-use | my.telegram.org, developer.x.com |
+| 8 | Telegram bot token + your chat id | phone alerts for buys/closes/errors (optional) | free | @BotFather, @userinfobot |
+| 9 | Helius API key (paid plan) | insider-cluster lookups with exchange labels (optional; `SOLANA_RPC_URL` works without labels) | 100 credits per lookup | helius.dev |
 
 ## 1. Install
 **Step-by-step guides with screenshots:** [Mac](MAC_SETUP.md) · [Ubuntu mini PC](UBUNTU_SETUP.md). They use the setup scripts, which do all of the below for you.

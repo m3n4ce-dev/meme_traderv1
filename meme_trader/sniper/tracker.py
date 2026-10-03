@@ -33,6 +33,8 @@ class TokenState:
     score: float = 0.0
     score_notes: list[str] = field(default_factory=list)
     desk: str = ""             # last AI desk verdict
+    cluster: dict | None = None   # funding-graph insider report (see funding.py)
+    last_cluster_check: float = 0.0
 
     @property
     def created_ts(self) -> float:
