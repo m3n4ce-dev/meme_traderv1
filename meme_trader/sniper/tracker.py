@@ -35,6 +35,7 @@ class TokenState:
     desk: str = ""             # last AI desk verdict
     cluster: dict | None = None   # funding-graph insider report (see funding.py)
     last_cluster_check: float = 0.0
+    price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
 
     @property
     def created_ts(self) -> float:
@@ -54,6 +55,7 @@ class TokenState:
     # ---- updates ------------------------------------------------------------
     def on_launch(self, e: Launch) -> None:
         self.curve = Curve(e.v_sol, e.v_tokens)
+        self.price_known = True
         self.peak_price = self.curve.price
         if e.dev_buy_tokens > 0:
             self.holders[e.creator] = e.dev_buy_tokens
@@ -62,12 +64,14 @@ class TokenState:
     def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
             self.curve = Curve(t.v_sol, t.v_tokens)
+            self.price_known = True
         elif t.pool != "pump" and t.mcap_sol > 0:
             # graduated (PumpSwap etc.): no curve reserves in the event, so price it from market cap on a
             # curve parked at its end state. Its depth roughly matches the migrated pool's.
             self.migrated = True
             price = t.mcap_sol / TOTAL_SUPPLY
             self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS)
+            self.price_known = True
         self.volume_sol += t.sol
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)

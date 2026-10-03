@@ -51,7 +51,7 @@ class Book:
 
 class Engine:
     def __init__(self, params, feed, executor, mode: str = "paper", record_path: Path | None = None,
-                 log_to_journal: bool = True, desk=None):
+                 log_to_journal: bool = True, desk=None, persist: bool | None = None):
         self.p = params.sniper
         self.feed = feed
         self.ex = executor
@@ -86,6 +86,10 @@ class Engine:
         self.fanout: Counter = Counter()                   # funder -> wallets it funded (exchange detection)
         self.resolver = FundingResolver(f.backend, f.max_lookups_per_min)
         self.funding_started: dict[str, float] = {}
+        # live money must survive restarts (the Ubuntu service restarts on crash)
+        self.persist = mode.startswith("live") if persist is None else persist
+        self.state_path = DATA / f"sniper_state_{mode.split('-')[0]}.json"
+        self._last_state_save = 0.0
         self._load_funders()
         self._last_price_refresh = -1e12
 
@@ -97,9 +101,12 @@ class Engine:
         if self.journal:
             record("sniper", level, text=text, mint=mint, **fields)
 
+    def _mark(self, m: str, pos: SniperPosition) -> float:
+        s = self.tokens.get(m)
+        return s.curve.price if s and s.price_known else pos.entry_price
+
     def equity(self) -> float:
-        return self.book.sol + sum(pos.tokens * self.tokens[m].curve.price for m, pos in self.positions.items()
-                                   if m in self.tokens)
+        return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items())
 
     def entries_blocked(self, buy_sol: float | None = None) -> str:
         c = self.p.capital
@@ -141,6 +148,8 @@ class Engine:
     # ------------------------------------------------------------------ event loop
     async def run(self, stop_after_s: float | None = None) -> None:
         start = None
+        if self.persist:
+            await self.restore_state()
         ticker = asyncio.create_task(self._ticker()) if self.feed.realtime else None
         if self.p.copy.enabled and self.leaders.leaders:
             await self.feed.watch_accounts(list(self.leaders.leaders))
@@ -160,6 +169,7 @@ class Engine:
                 self.record_file.close()
             self.leaders.save()
             self._save_funders()
+            self.save_state()
 
     async def _ticker(self) -> None:
         while True:
@@ -480,12 +490,15 @@ class Engine:
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
             peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""))
         self.stats["entries"] += 1
+        self.save_state()
         self.stats["entries_" + source.split(":")[0]] += 1
         self.say("buy", f"{s.symbol} {fill.sol:.3f} SOL @ curve {s.curve.progress:.0%} [{source}] | score {score:.0f} | "
                         + ", ".join(notes), s.mint, signature=fill.signature)
 
     async def _check_exit(self, s: TokenState) -> None:
         pos = self.positions[s.mint]
+        if not s.price_known:          # restored after a restart: wait for a real price before any exit logic
+            return
         if pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
             pos.peak_price = max(pos.peak_price, s.curve.price)
             held = self.now - pos.opened_at
@@ -528,6 +541,7 @@ class Engine:
                  s.mint, signature=fill.signature)
         if pos.tokens * s.curve.price < DUST_SOL:
             self._close(pos, s)
+        self.save_state()
 
     def _close(self, pos: SniperPosition, s: TokenState) -> None:
         del self.positions[pos.mint]
@@ -554,6 +568,8 @@ class Engine:
         asyncio.ensure_future(self._unwatch(pos.mint))
 
     async def _tick(self) -> None:
+        if self.persist and self.now - self._last_state_save >= 10:
+            self.save_state()
         if self.feed.realtime and self.p.sizing.enabled and self.now - self._last_price_refresh >= 300:
             self._last_price_refresh = self.now
             asyncio.create_task(self.sol_price.refresh())
@@ -604,6 +620,69 @@ class Engine:
             (DATA / "sniper_summary.json").write_text(json.dumps(
                 {"ts": self.now, "summary": self.summary(), "rejects": dict(self.rejects),
                  "leaders": self.leaders.snapshot(), "desk": self.desk_stats()}, default=str, indent=1))
+
+    # ------------------------------------------------------------------ persistence (live)
+    def save_state(self) -> None:
+        if not self.persist:
+            return
+        from dataclasses import asdict
+
+        self._last_state_save = self.now
+        b = self.book
+        state = {"saved_at": time.time(), "mode": self.mode,
+                 "book": {"sol": b.sol, "start_sol": b.start_sol, "day": b.day, "day_pnl": b.day_pnl,
+                          "halted": b.halted, "closed": b.closed[-500:]},
+                 "positions": {m: asdict(p) for m, p in self.positions.items()},
+                 "called": sorted(self.callouts.called)[-2000:]}
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.state_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, default=str))
+        tmp.replace(self.state_path)          # atomic: a crash mid-write never corrupts the state
+
+    async def restore_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        d = json.loads(self.state_path.read_text())
+        b = d["book"]
+        self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
+        self.book.day_pnl, self.book.halted, self.book.closed = b["day_pnl"], b["halted"], b["closed"]
+        self.callouts.called.update(d.get("called", []))
+        now = self.feed.now()
+        for m, pd in d["positions"].items():
+            pd["exits"] = [tuple(x) for x in pd.get("exits") or []]
+            self.positions[m] = SniperPosition(**pd)
+            s = self.tokens[m] = TokenState(m, None, now)       # price unknown until its next trade
+            s.decided = "entered"
+            await self._watch(m)
+        self.say("info", f"restored {len(self.positions)} open position(s) from {self.state_path.name}")
+        await self.reconcile()
+
+    async def reconcile(self) -> None:
+        """Live: trust the wallet. Positions sold while we were down are closed, changed balances fixed,
+        and pump tokens in the wallet we don't know about are reported."""
+        wallet = getattr(self.ex, "wallet", None)
+        if wallet is None:
+            return
+        try:
+            balances = await asyncio.to_thread(wallet.all_token_balances)
+        except Exception as e:
+            self.say("error", f"wallet reconcile failed ({e}); positions kept as saved")
+            return
+        for m, pos in list(self.positions.items()):
+            have = balances.get(m, 0) / 1e6
+            if have <= 0:
+                pos.exits.append((self.now, "gone from wallet while offline", pos.tokens, 0.0))
+                pos.tokens = 0
+                self._close(pos, self.tokens[m])
+                self.say("error", f"{pos.symbol}: not in wallet any more (sold/moved while offline) - closed at 0")
+            elif abs(have - pos.tokens) / max(pos.tokens, 1e-9) > 0.01:
+                self.say("info", f"{pos.symbol}: wallet holds {have:,.0f} tokens, saved {pos.tokens:,.0f} - corrected")
+                pos.tokens = have
+        orphans = [m for m, raw in balances.items() if m.endswith("pump") and m not in self.positions and raw > 0]
+        if orphans:
+            self.say("error", f"{len(orphans)} pump token(s) in the wallet aren't tracked (sell manually): "
+                              + ", ".join(o[:6] + "…" for o in orphans[:8]))
+        self.save_state()
 
     # ------------------------------------------------------------------ callouts
     async def _maybe_callout(self) -> None:
@@ -718,7 +797,7 @@ class Engine:
                 bags.append({"mint": m, "symbol": pos.symbol, "value_usd": pos.tokens * s.curve.price * self.sol_price.usd,
                              "gain_pct": pos.gain_pct(s.curve.price), "held_s": round(self.now - pos.opened_at)})
                 continue
-            price = s.curve.price
+            price = self._mark(m, pos)
             positions.append({
                 "mint": m, "symbol": pos.symbol, "held_s": round(self.now - pos.opened_at), "entry": pos.entry_price,
                 "price": price, "gain_pct": pos.gain_pct(price), "peak_gain_pct": pos.gain_pct(pos.peak_price),

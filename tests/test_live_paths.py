@@ -158,3 +158,49 @@ def test_ladder_exit_profile():
     pos3 = SniperPosition(MINT, "T", 0, p0 * 10, 1000, 1000, 0.05, 0.05, 80, peak_price=p0 * 10, exits=[])
     frac, why = evaluate_exit(pos3, s, 1, x, 1.75)
     assert frac == 1.0 and why.startswith("ladder stop")   # 0.23x <= 0.3x stop
+
+
+def test_live_state_survives_restart_and_reconciles_with_wallet(tmp_path, monkeypatch):
+    import copy as _copy
+
+    from meme_trader.sniper.engine import Engine
+    from meme_trader.sniper.execution import PaperExecutor
+    from meme_trader.sniper.feeds import Feed
+
+    monkeypatch.setattr("meme_trader.sniper.engine.DATA", tmp_path)
+    monkeypatch.setattr("meme_trader.journal.DATA", tmp_path)
+
+    class Quiet(Feed):
+        realtime = False
+
+        async def events(self):
+            return
+            yield
+
+    params = _copy.deepcopy(P)
+    eng = Engine(params, Quiet(), PaperExecutor(params.sniper.execution), mode="live", log_to_journal=False)
+    for m, tok in (("KEEP" + "k" * 36 + "pump", 1000.0), ("GONE" + "g" * 36 + "pump", 500.0),
+                   ("FIX" + "f" * 37 + "pump", 800.0)):
+        eng.positions[m] = SniperPosition(m, m[:4], 0, 1e-7, tok, tok, 0.05, 0.05, 70, peak_price=1e-7, exits=[])
+    eng.book.sol = 0.8
+    eng.save_state()
+
+    class W:                      # wallet after the restart: one sold elsewhere, one partially, plus an orphan
+        def all_token_balances(self):
+            return {"KEEP" + "k" * 36 + "pump": 1000_000_000, "FIX" + "f" * 37 + "pump": 400_000_000,
+                    "ORPH" + "o" * 36 + "pump": 5}
+
+    ex = PaperExecutor(params.sniper.execution)
+    ex.wallet = W()
+    eng2 = Engine(params, Quiet(), ex, mode="live", log_to_journal=False)
+    asyncio.run(eng2.run())
+    keep, gone, fix = ("KEEP" + "k" * 36 + "pump", "GONE" + "g" * 36 + "pump", "FIX" + "f" * 37 + "pump")
+    assert keep in eng2.positions and gone not in eng2.positions
+    assert eng2.positions[fix].tokens == pytest.approx(400.0)
+    assert eng2.book.sol == pytest.approx(0.8)
+    assert any("aren't tracked" in x["text"] for x in eng2.log)
+    # price unknown after restart -> no exit fires even though the default curve price looks like -90%
+    s = eng2.tokens[keep]
+    assert not s.price_known
+    asyncio.run(eng2._check_exit(s))
+    assert keep in eng2.positions
