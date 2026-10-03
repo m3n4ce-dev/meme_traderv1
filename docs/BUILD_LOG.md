@@ -7,9 +7,9 @@ A running record of decisions, research, parameters and status. Newest entries a
 ## 2026-10-03 — Entry #10: Free on-chain trade feed (PumpPortal's meter was the bottleneck)
 
 ### What happened
-- First real-market paper run (2026-10-02, 22:35–23:12 CDT). PumpPortal billed 0.01 SOL every ~4 min (23:00, 23:04, 23:08, 23:12). The 0.046 SOL in its wallet fell under the 0.02 minimum in ~75 min, and the trade stream stopped.
+- First real-market paper run (2026-10-02). Trade data streamed 22:52–23:40 CDT (~48 min, 1,959 launches). PumpPortal billed 0.01 SOL every ~4 min (23:00, 23:04, 23:08, 23:12). That took its wallet from 0.046 SOL to under the 0.02 minimum, and the trade stream stopped.
 - Measured volume: 1,000–2,000 streamed trades/min with recording on ≈ **3 SOL/day for data alone**, against $5–20 positions.
-- Paper result while it could see: 7 trades, +0.136 SOL on 1 SOL. That's almost all one graduation play (BOOBIES +208%). The sniper made 1 trade (−17%). Far too few trades to mean anything.
+- Paper result while it could see: 7 trades (2 wins), +0.136 SOL on 1 SOL. That's almost all one graduation play (BOOBIES +208%). The sniper made 1 trade (−17%). Far too few trades to mean anything.
 
 ### Analysis (recorded feed, 50k trades)
 - Top 10 tokens = 58% of trades; top 100 = 90%. The bill is driven by the popular tokens, which are exactly what the strategies want to watch.
@@ -337,7 +337,7 @@ backtest --file data/feed-*.jsonl --set entry.max_sniper_pct=100
 ## 2026-10-02 — Entry #3: Copy trading, AI agent desk, setup tooling
 
 ### Owner input
-- Wallet (public): `HTG4jCTAVB6H8QThytKtrApjNaQhMuUENFi9Whppag6Z`. It's a valid 32-byte Solana key and is now set as `wallet.pubkey` in `config/params.yaml`. The sandbox can't reach Solana RPC, so its balance is unverified.
+- Wallet (public address, redacted here). It's a valid 32-byte Solana key and is now set as `wallet.pubkey` in `config/params.yaml`. The sandbox can't reach Solana RPC, so its balance is unverified.
 - Wants a fully automatic bot with an agent team: senior dev, senior meme trader, Ansem-style trader, other profitable traders.
 - Wants copy trading of profitable wallets in real time.
 
@@ -526,7 +526,7 @@ Fill in or tell me these values. Defaults currently in `config/params.example.ya
 
 | # | Parameter | Default | Owner value |
 |---|---|---|---|
-| 1 | Wallet public key (dedicated hot wallet) | — | `HTG4jCTA…pag6Z` (2026-10-02). Confirm whether this is the main wallet or a dedicated bot wallet. |
+| 1 | Wallet public key (dedicated hot wallet) | — | set 2026-10-02 (address in the local `config/params.yaml`). Confirm whether this is the main wallet or a dedicated bot wallet. |
 | 2 | Total budget `starting_sol` | 1.0 SOL | |
 | 3 | Size per trade `per_trade_sol` | 0.05 SOL | |
 | 4 | Max open positions | 3 | |

@@ -18,7 +18,6 @@ Paste these lines into Terminal and press Enter:
 cd ~
 git clone https://github.com/m4n3ce/meme_traderv1.git
 cd meme_traderv1
-git checkout claude/kind-ritchie-8xooqh      # skip this line once the branch is merged into main
 bash scripts/setup_mac.sh
 ```
 

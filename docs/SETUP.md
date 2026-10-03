@@ -24,7 +24,6 @@ Manual version:
 ```bash
 git clone https://github.com/m4n3ce/meme_traderv1.git
 cd meme_traderv1
-git checkout claude/kind-ritchie-8xooqh
 python3 -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                                     # then fill in keys as you get them
@@ -73,7 +72,7 @@ python -m meme_trader.sniper review --validate                                # 
    chmod 600 ~/.config/solana/meme-bot.json
    solana-keygen pubkey ~/.config/solana/meme-bot.json            # -> put this in wallet.pubkey
    ```
-   Your current address `HTG4jCTAVB6H8QThytKtrApjNaQhMuUENFi9Whppag6Z` is set as `wallet.pubkey`. If that's your main wallet, keep it as the wallet you **fund the bot wallet from**, and put the bot wallet's address in `config/params.yaml` instead.
+   Never use your main wallet as the bot wallet. Keep the main wallet as the one you **fund the bot wallet from**, and put only the bot wallet's address in `config/params.yaml`.
 2. Send the bot wallet **only** the budget: `sniper.capital.starting_sol` plus ~0.05 SOL for fees.
 3. In `.env`, set `SOLANA_RPC_URL` (paid RPC), `SOLANA_KEYPAIR_PATH`, and `MEME_TRADER_CONFIRM_LIVE=yes`.
 4. Run `python -m meme_trader.sniper doctor`. Every row should be OK.
