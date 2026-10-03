@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ui-version" content="__UI_VERSION__">
 <title>Sniper Console</title>
 <link rel="icon" href="data:,">
 <style>
@@ -336,6 +337,19 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
 @media (max-width: 640px) { .mix { grid-template-columns: 1fr; justify-items: center; } }
 .pulse-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin-bottom: 4px; }
 .pulse-stats b { color: var(--ink); font-size: 15px; }
+/* risk dial */
+.dial { display: inline-flex; border: 1px solid var(--ring); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.dial button { border: 0; border-radius: 0; padding: 4px 11px; font-size: 12.5px; background: transparent; color: var(--ink-2); }
+.dial button + button { border-left: 1px solid var(--ring); }
+.dial button[aria-pressed="true"] { color: #fff; font-weight: 700; }
+.dial button[data-lv="1"][aria-pressed="true"] { background: var(--series); }
+.dial button[data-lv="2"][aria-pressed="true"] { background: var(--good-mark); }
+.dial button[data-lv="3"][aria-pressed="true"] { background: var(--warn-mark); color: #1a1a1a; }
+.dial button[data-lv="4"][aria-pressed="true"], .dial button[data-lv="5"][aria-pressed="true"] { background: var(--bad); }
+.dial button:disabled { opacity: .35; cursor: not-allowed; }
+.badge.r1 { color: var(--series); } .badge.r2 { color: var(--good); } .badge.r3 { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.badge.r4, .badge.r5 { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+tr.cur td { background: var(--accent-soft); font-weight: 600; }
 /* guide */
 .guide { max-width: 980px; display: grid; gap: 16px; }
 .guide h3 { margin: 0 0 8px; font-size: 16px; }
@@ -357,6 +371,7 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
 <header>
   <div class="brand">MEME_TRADER <span>/ sniper console</span></div>
   <span id="mode" class="badge paper">PAPER</span>
+  <button id="risk-badge" class="badge" data-tab-link="controls" title="Risk dial (Controls tab)">risk</button>
   <span class="status"><span id="dot" class="dot off"></span><span id="state">connecting…</span></span>
   <button id="model-badge" class="badge" data-tab-link="analytics" title="Prediction model">model: –</button>
   <span id="feed-badge" class="badge hide-sm" title="Market data feed">feed</span>
@@ -393,6 +408,8 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
     <div class="toolbar">
       <span class="note">Strategies</span>
       <div class="chips" id="strats"></div>
+      <span class="note" style="margin-left:8px">Risk</span>
+      <div class="dial" id="dial" role="group" aria-label="Risk dial"></div>
       <div class="spacer"></div>
       <span class="note hide-sm">Click any token for details · <kbd>/</kbd> filter · <kbd>c</kbd> chat · <kbd>?</kbd> guide</span>
     </div>
@@ -536,6 +553,12 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
   <!-- ============================================================ CONTROLS -->
   <section class="view" data-view="controls" hidden>
     <section class="panel">
+      <h2>Risk dial <small>scales trade size, open positions and the daily loss limit together · saved · Claude can lower it, and raise it only with your Approve</small></h2>
+      <div class="tablewrap"><table><thead><tr><th>Level</th><th class="r">Per trade</th><th class="r">Open positions</th><th class="r">Daily loss limit</th><th></th></tr></thead>
+        <tbody id="dial-table"></tbody></table></div>
+      <p class="note">“Normal” is your settings below. The kill switch, stop losses, entry rules and the cap of 3% of a curve's SOL per buy never change with the dial. The top level allowed is <code>risk.max_level</code> in the config.</p>
+    </section>
+    <section class="panel">
       <h2>Live settings <small>apply instantly · Save writes config/params.yaml so they survive a restart</small></h2>
       <div class="ctl-grid" id="ctl"></div>
       <div class="toolbar" style="margin-top:12px">
@@ -561,7 +584,7 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
         <li><b>Live</b>: your money and positions. Every token is clickable and opens its detail panel: gate checklist, the model’s P(2x), why it says so, holders, and the live tape.</li>
         <li><b>Launch radar</b>: new pump.fun launches, best first. <i>Score</i> is the rule engine’s rating. <i>P(2x)</i> is the trained model’s chance the token doubles before it falls 30%. The <code>T G W</code> marks show which social links (X, Telegram, website) the launch has.</li>
         <li><b>Analytics</b>: what is and isn’t working, with highlights in plain English, a projection of the next 100 trades, and an audit of every filter.</li>
-        <li><b>Controls</b>: turn strategies on or off and adjust the main limits while it runs.</li>
+        <li><b>Controls</b>: the <b>risk dial</b> (also on Live) scales trade size, positions and the daily loss limit in one move; turn strategies on or off and adjust the main limits while it runs. In Chat, “more risk” asks Claude to raise the dial, and you approve it.</li>
       </ol>
     </section>
     <section class="panel">
@@ -781,6 +804,7 @@ function renderChrome(s) {
 function render(s) {
   snap = s;
   renderChrome(s);
+  renderRisk(s);
   logToasts(s);
   if (S.tab === "chat") renderChatSide(s);
   if (S.tab === "controls") $("paper-panel").hidden = s.mode.startsWith("live");
@@ -1299,6 +1323,31 @@ function hbars(rows, max, color = r => "var(--series)") {
     <div class="track"><i style="width:${Math.max(1.5, Math.min(100, Math.abs(r.v) / (max || 1) * 100)).toFixed(1)}%;background:${color(r)}"></i></div><span class="num" style="text-align:right">${r.text}</span></div>`).join("");
 }
 
+// ---------------------------------------------------------------- risk dial
+function riskText(l) { return `$${l.base_usd}–${l.max_usd} per trade, ${l.max_open_positions} positions, ${l.daily_loss_limit_sol} SOL daily loss limit`; }
+function setRisk(lv) {
+  const r = snap && snap.risk; if (!r) return;
+  const l = r.levels.find(x => x.level === lv); if (!l || lv === r.level) return;
+  const live = snap.mode.startsWith("live");
+  if (!confirm(`${lv > r.level ? "Raise" : "Lower"} risk to ${l.name}?\n\n${riskText(l)}${live ? "\n\nLIVE MODE: this changes how much REAL money each trade uses." : ""}`)) return;
+  send({action: "risk", level: lv});
+}
+function renderRisk(s) {
+  const r = s.risk; if (!r) return;
+  const k = r.level + "|" + r.max_level + "|" + JSON.stringify(r.levels);
+  $("risk-badge").textContent = `risk: ${r.name}`;
+  $("risk-badge").className = `badge r${r.level}`;
+  $("risk-badge").title = `Risk dial level ${r.level} of 5: ${riskText(r.levels[r.level - 1])}. Change it on Live or Controls.`;
+  if ($("dial").dataset.k !== k) {
+    $("dial").dataset.k = k;
+    $("dial").innerHTML = r.levels.map(l => `<button data-lv="${l.level}" aria-pressed="${l.level === r.level}" ${l.level > r.max_level ? "disabled" : ""}
+      title="${esc(l.name)}: ${esc(riskText(l))}${l.level > r.max_level ? " (above risk.max_level)" : ""}">${esc(l.name)}</button>`).join("");
+    $("dial-table").innerHTML = r.levels.map(l => `<tr class="${l.level === r.level ? "cur" : ""}"><td>${l.level} · ${esc(l.name)}</td>
+      <td class="r num">$${l.base_usd}–${l.max_usd}</td><td class="r num">${l.max_open_positions}</td><td class="r num">${l.daily_loss_limit_sol} SOL</td>
+      <td>${l.level === r.level ? '<span class="tag ok">current</span>' : l.level > r.max_level ? '<span class="note">above max</span>' : `<button class="small" data-lv="${l.level}">Use</button>`}</td></tr>`).join("");
+  }
+}
+
 // ---------------------------------------------------------------- live visuals
 function renderLiveVisuals(s) {
   const sm = s.summary, lim = s.limits || {}, eh = s.equity_hist || [];
@@ -1391,10 +1440,12 @@ const TOOL = {get_status: ["📊", "Checked status", "Checking status"], get_pos
   get_settings: ["⚙️", "Read settings", "Reading settings"], set_setting: ["⚙️", "Changed a setting", "Changing a setting"],
   pause_entries: ["⏸", "Paused entries", "Pausing entries"], resume_entries: ["▶️", "Resumed entries", "Resuming entries"],
   sell_position: ["💸", "Sold", "Selling"], buy_token: ["🛒", "Bought", "Buying"], watch_token: ["👀", "Watching token", "Adding to watch"],
-  add_paper_funds: ["💰", "Added paper SOL", "Adding paper SOL"], add_note: ["📝", "Wrote a note", "Writing a note"]};
+  add_paper_funds: ["💰", "Added paper SOL", "Adding paper SOL"], add_note: ["📝", "Wrote a note", "Writing a note"],
+  set_risk_level: ["🎚", "Turned the risk dial", "Turning the risk dial"]};
 const QUICK = [["Desk check", "Do a desk check: feed, P&L, positions, radar and analytics. Act only if something clearly needs it, then sum up in a few lines."],
   ["How are we doing?", "How are we doing today? Short answer with the key numbers."], ["Anything to sell?", "Look at the open positions. Anything worth selling now? Why?"],
   ["Best on radar", "What are the 3 most interesting tokens on the radar right now, and why?"], ["Explain last trade", "Explain the most recent closed trade: why it was entered, how it exited, and what we can learn."],
+  ["More risk", "Raise the risk dial one level."], ["Less risk", "Lower the risk dial one level."],
   ["Add 5 paper SOL", "Add 5 SOL to the paper balance."]];
 function tokenName(m) {
   const all = snap ? [...snap.positions, ...snap.watching, ...snap.closed] : [];
@@ -1411,6 +1462,8 @@ function actionText(name, a) {
     case "watch_token": return `Start tracking ${tokenName(a.mint)}`;
     case "add_paper_funds": return `Add <b>${esc(a.sol)} paper SOL</b>${a.keep_after_restart ? " and keep it as the starting balance" : " (until the next restart)"}`;
     case "add_note": return `Journal note: “${esc(a.text)}”`;
+    case "set_risk_level": { const r = snap && snap.risk, l = r && r.levels.find(x => x.level === +a.level);
+      return `${r && +a.level > r.level ? "<b>Raise</b>" : "Lower"} the risk dial to <b>${esc(a.level)}${l ? " · " + esc(l.name) : ""}</b>${l ? `: ${esc(riskText(l))}` : ""}`; }
   }
   return esc(name);
 }
@@ -1563,6 +1616,7 @@ function renderChatSide(s) {
       <span class="num ${cls(eqd)}">${signed(eqd)} (${pct(eqd / sm.start_sol * 100, 1)})</span></div>
     <div class="spark" style="height:36px;margin:6px 0">${svgSpark((s.equity_hist || []).slice(-120).map(e => e[1]), eqd >= 0 ? "var(--good-mark)" : "var(--bad)", 36)}</div>
     <div class="note num">today ${signed(s.day_pnl)} SOL · ${sol(s.sol)} SOL cash · ${sm.closed} closed · win ${sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"}</div>
+    ${s.risk ? `<div class="note">risk dial: <b>${esc(s.risk.name)}</b> (${s.risk.level}/5) · ${esc(riskText(s.risk.levels[s.risk.level - 1]))}</div>` : ""}
     ${s.blocked ? `<div class="note" style="color:var(--warn)">entries blocked: ${esc(s.blocked)}</div>` : ""}`;
   $("cs-pos-sub").textContent = `${s.positions.length} open`;
   $("cs-pos").innerHTML = s.positions.map(p => `<div data-open="${esc(p.mint)}"><b>${esc(p.symbol)}</b><span class="note">${esc(p.source)} · ${dur(p.held_s)}</span><span class="num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span></div>`).join("")
@@ -1593,6 +1647,11 @@ function connect() {
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === "chat") { onChat(m); return; }
+    if (m.type === "hello") {                 // the bot restarted with a different page: load it
+      const mine = document.querySelector('meta[name="ui-version"]').content;
+      if (m.ui && /^[0-9a-f]{10}$/.test(mine) && m.ui !== mine) location.reload();   // (unstamped page: never)
+      return;
+    }
     if (m.type === "ack") {
       if (m.action === "lookup" && m.lookup && S.drawer === m.mint) {
         $("dr-title").textContent = (m.lookup.symbol || short(m.mint)) + (m.lookup.name ? " · " + m.lookup.name : "");
@@ -1635,9 +1694,10 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv]");
   if (!t) return;
   const d = t.dataset;
+  if (d.lv) { setRisk(+d.lv); return; }
   if (d.decide) { send({action: "chat_decide", aid: d.decide, allow: d.allow === "1"}); t.closest(".btns")?.querySelectorAll("button").forEach(b => b.disabled = true); return; }
   if (d.ask !== undefined) { if (S.tab !== "chat") setTab("chat"); if (d.ask) chatSend(d.ask); else $("ch-in").focus(); return; }
   if (d.sell) { e.stopPropagation(); if (confirm("Sell this whole position now?")) send({action: "sell", mint: d.sell}); return; }

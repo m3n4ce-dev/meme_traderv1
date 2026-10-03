@@ -48,6 +48,12 @@ def reason_key(note: str) -> str:
 
 
 # Settings the dashboard may change at runtime: (key under sniper, type, min, max, label, help)
+# The risk dial scales exposure around the configured settings (= level 2). It never touches the kill switch,
+# the stop losses, the entry rules or the 3%-of-curve liquidity cap. (name, size x, positions x, daily loss x)
+RISK_LEVELS = {1: ("Cautious", 0.5, 0.5, 0.5), 2: ("Normal", 1.0, 1.0, 1.0), 3: ("Bold", 1.5, 1.5, 1.5),
+               4: ("Aggressive", 2.0, 2.0, 2.0), 5: ("Max", 3.0, 2.5, 3.0)}
+RISK_KEYS = ("sizing.base_usd", "sizing.max_usd", "capital.max_open_positions", "capital.daily_loss_limit_sol")
+
 CONTROLS = [
     ("entry.enabled", "bool", None, None, "Sniper entries", "Early-entry sniper buys"),
     ("copy.enabled", "bool", None, None, "Copy trading", "Mirror leader wallets"),
@@ -99,6 +105,12 @@ class Engine:
     def __init__(self, params, feed, executor, mode: str = "paper", record_path: Path | None = None,
                  log_to_journal: bool = True, desk=None, persist: bool | None = None):
         self.p = params.sniper
+        # risk dial: the configured exposure is "Normal"; the dial level scales it (dashboard, or Claude with approval)
+        self.risk_base = {k: self._get(k) for k in RISK_KEYS}
+        self.risk_level = 2
+        lvl = int((self.p.get("risk") or {}).get("level", 2))
+        if lvl != 2:
+            self._apply_risk(lvl)
         # one process = one market reading: whose trades are price-only (pump.fun's Mayhem agent by default)
         TokenState.NON_ORGANIC = frozenset((self.p.get("market") or {}).get("non_organic_wallets") or [])
         self.feed = feed
@@ -1483,8 +1495,9 @@ class Engine:
             out.append({"key": key, "type": typ, "min": lo, "max": hi, "label": label, "help": help_, "value": node})
         return out
 
-    def set_control(self, key: str, value) -> str:
-        """Validate and apply one dashboard setting. Returns '' or an error message."""
+    def set_control(self, key: str, value, owner: bool = True) -> str:
+        """Validate and apply one dashboard setting. Returns '' or an error message. owner=False (the AI agent):
+        the risk dial's Normal baseline stays the owner's."""
         spec = next((c for c in CONTROLS if c[0] == key), None)
         if spec is None:
             return f"unknown setting {key}"
@@ -1518,11 +1531,79 @@ class Engine:
         except ConfigError as e:
             node[last] = old
             return f"{label}: {e}"
+        if owner and key in self.risk_base:              # the owner set it: the dial's baseline follows
+            mult = {"sizing.base_usd": 1, "sizing.max_usd": 1, "capital.max_open_positions": 2,
+                    "capital.daily_loss_limit_sol": 3}[key]
+            m = RISK_LEVELS[self.risk_level][mult]
+            self.risk_base[key] = round(v / m) if key == "capital.max_open_positions" else v / m
         self.say("info", f"setting changed: {label} = {v}")
         return ""
 
+    # ------------------------------------------------------------------ risk dial
+    def _get(self, key: str):
+        node = self.p
+        for k in key.split("."):
+            node = node[k]
+        return node
+
+    def _set(self, key: str, value) -> None:
+        *path, last = key.split(".")
+        node = self.p
+        for k in path:
+            node = node[k]
+        node[last] = value
+
+    def risk_values(self, level: int) -> dict:
+        _, m, pm, dm = RISK_LEVELS[level]
+        b = self.risk_base
+        return {"sizing.base_usd": round(b["sizing.base_usd"] * m, 2),
+                "sizing.max_usd": round(b["sizing.max_usd"] * m, 2),
+                "capital.max_open_positions": max(1, round(b["capital.max_open_positions"] * pm)),
+                "capital.daily_loss_limit_sol": round(b["capital.daily_loss_limit_sol"] * dm, 4)}
+
+    @property
+    def risk_max_level(self) -> int:
+        return int((self.p.get("risk") or {}).get("max_level", 5))
+
+    def _apply_risk(self, level: int) -> None:
+        for k, v in self.risk_values(level).items():
+            self._set(k, v)
+        self.risk_level = level
+
+    def set_risk(self, level, who: str = "dashboard", reason: str = "") -> str:
+        """Turn the dial. Returns '' or why not. The dashboard's change is saved to params.yaml; anyone else's
+        lasts until a restart."""
+        try:
+            level = int(level)
+        except (TypeError, ValueError):
+            return "risk level must be 1-5"
+        if level not in RISK_LEVELS:
+            return "risk level must be 1-5"
+        if level > self.risk_max_level:
+            return f"risk level {level} is above risk.max_level ({self.risk_max_level}) in the config"
+        old = self.risk_level
+        self._apply_risk(level)
+        v = self.risk_values(level)
+        self.say("agent" if who == "agent" else "info",
+                 f"risk dial {old} -> {level} {RISK_LEVELS[level][0]}: "
+                 f"${v['sizing.base_usd']:g}-{v['sizing.max_usd']:g} per trade, {v['capital.max_open_positions']} positions, {v['capital.daily_loss_limit_sol']:g} SOL "
+                 f"daily loss limit" + (f" | {reason}" if reason else ""))
+        if who == "dashboard":
+            try:
+                self.save_setting("risk.level", level)
+            except OSError as e:
+                return f"applied, but not saved: {e}"
+        return ""
+
+    def risk_info(self) -> dict:
+        levels = [{"level": lv, "name": RISK_LEVELS[lv][0],
+                   **{k.split(".")[1]: v for k, v in self.risk_values(lv).items()}} for lv in RISK_LEVELS]
+        return {"level": self.risk_level, "name": RISK_LEVELS[self.risk_level][0], "max_level": self.risk_max_level,
+                "levels": levels}
+
     def save_controls(self, path: Path | None = None) -> str:
-        """Write the dashboard-controllable settings into config/params.yaml (other keys untouched)."""
+        """Write the dashboard-controllable settings into config/params.yaml (other keys untouched). Dial-scaled
+        settings are saved at their Normal value, with the dial level beside them, so a restart doesn't scale twice."""
         import yaml
 
         path = path or ROOT / "config" / "params.yaml"
@@ -1530,12 +1611,12 @@ class Engine:
         data = data or {}
         sn = data.setdefault("sniper", {}) or {}
         data["sniper"] = sn
-        for c in self.controls():
+        for c in self.controls() + [{"key": "risk.level", "value": self.risk_level}]:
             *keys, last = c["key"].split(".")
             node = sn
             for k in keys:
                 node = node.setdefault(k, {}) or {}
-            node[last] = c["value"]
+            node[last] = self.risk_base.get(c["key"], c["value"])
             # re-attach in case setdefault returned a fresh {} for a None value
             parent = sn
             for k in keys[:-1]:
@@ -1750,6 +1831,7 @@ class Engine:
                            "callouts": self.p.callouts.enabled, "late": self.p.late.enabled},
             "tracked_tokens": len(self.tokens),
             "pulse": [list(r) for r in self.pulse][-60:], "deposits": self.book.deposits[-20:],
+            "risk": self.risk_info(),
             "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
                        "kill_dd_pct": self.p.capital.max_drawdown_pct},
             "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),

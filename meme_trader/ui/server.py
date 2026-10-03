@@ -8,8 +8,9 @@ this port to the internet without putting auth in front of it.
   GET /api/token/{mint}  token detail: gate checklist, model drivers, holders, tape
   GET /api/controls      live-adjustable settings
   GET /api/chat          chat history and status (chat.py)
-  WS  /ws                1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
-                         lookup chat chat_stop chat_new chat_decide chat_opts
+  WS  /ws                a hello with the UI version (an open page reloads itself after an update), then
+                         1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
+                         risk lookup chat chat_stop chat_new chat_decide chat_opts
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
@@ -19,6 +20,7 @@ rebinding (a hostile site pointing its own domain at 127.0.0.1 to read these pag
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -37,6 +39,19 @@ def _local(host: str) -> bool:
     """Host header -> is it this machine? '127.0.0.1:8787', 'localhost', '[::1]:8787' are."""
     name = host.split("]")[0] + "]" if host.startswith("[") else host.split(":")[0]
     return name in LOCAL_HOSTS
+
+
+_UI: dict = {}
+
+
+def ui_version() -> tuple[str, bytes]:
+    """(version, page) from the file on disk now, re-read only when it changes."""
+    path = STATIC / "index.html"
+    mtime = path.stat().st_mtime_ns
+    if _UI.get("mtime") != mtime:
+        raw = path.read_bytes()
+        _UI.update(mtime=mtime, raw=raw, version=hashlib.sha1(raw).hexdigest()[:10])
+    return _UI["version"], _UI["raw"]
 
 
 def _json(obj, status: int = 200) -> web.Response:
@@ -61,7 +76,9 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
         return cache["text"]
 
     async def index(_):
-        return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+        version, raw = ui_version()
+        return web.Response(body=raw.replace(b"__UI_VERSION__", version.encode()), content_type="text/html",
+                            charset="utf-8", headers={"Cache-Control": "no-store"})
 
     async def analytics(_):
         return _json(await engine.analytics_async())
@@ -101,6 +118,7 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
                 await send(snapshot_text())
                 await asyncio.sleep(1)
 
+        await send(jsonsafe.dumps({"type": "hello", "ui": ui_version()[0]}))
         task = asyncio.create_task(pump())
         chat_q = chat.subscribe() if chat else None
 
@@ -156,6 +174,10 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
         if action == "save":
             err = engine.save_controls()
             return {"ok": not err, "text": err or "Settings written to config/params.yaml"}
+        if action == "risk":
+            err = engine.set_risk(cmd.get("level"), who="dashboard")
+            info = engine.risk_info()
+            return {"ok": not err, "text": err or f"Risk dial: {info['name']} (level {info['level']} of 5), saved"}
         if action == "deposit":
             try:
                 out = engine.deposit_paper(float(cmd.get("sol") or 0))

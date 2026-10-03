@@ -59,6 +59,7 @@ def test_dashboard_websocket_rejects_foreign_origins():
             bad = await c.get("/ws", headers={"Origin": "https://evil.example", "Host": host})
             rebound = await c.get("/ws", headers={"Origin": "http://evil.example:8787", "Host": "evil.example:8787"})
             ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            assert (await ws.receive_json())["type"] == "hello"        # the page's version check comes first
             snap = await ws.receive_json()
             await ws.close()
             return bad.status, rebound.status, snap

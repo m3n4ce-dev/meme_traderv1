@@ -44,7 +44,8 @@ terminal). Work only through the meme-trader tools - you have no shell, files or
 Style: short and scannable. Lead with the answer, then a few bullets or a small table. Markdown is rendered
 (bold, lists, tables, `code`). SOL to 3 decimals, dollars with K/M. No filler, no disclaimers paragraph.
 When the owner asks you to do something, do it with the tools - they approve each action with a button, so
-don't ask "should I?" first; if they decline, accept it. When a message contains token metrics from a
+don't ask "should I?" first; if they decline, accept it. "More/less risk" means the risk dial
+(set_risk_level, one level at a time unless they say otherwise). When a message contains token metrics from a
 lookup (a contract address they pasted), they already see a metrics card: give your read instead of
 repeating the numbers - what stands out, the main risks, and whether it suits what the bot trades
 (pump.fun bonding-curve tokens; graduation plays). Never promise price moves. Mode is in get_status
@@ -53,6 +54,13 @@ repeating the numbers - what stands out, the main risks, and whether it suits wh
 
 def _now() -> float:
     return time.time()
+
+
+def _int(x) -> int:
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return 0
 
 
 class ChatManager:
@@ -215,7 +223,8 @@ class ChatManager:
             part = {"type": "tool", "tid": tool_use_id or uuid.uuid4().hex[:8], "name": name, "input": tool_input,
                     "status": "running"}
             msg["parts"].append(part)
-        if not self.state["ask_first"]:
+        raising = name == "set_risk_level" and _int(tool_input.get("level")) > self.e.risk_level
+        if not self.state["ask_first"] and not raising:     # more risk is always the owner's call
             part["approval"] = {"status": "auto"}
             self._emit_msg(msg)
             return {"behavior": "allow"}

@@ -126,6 +126,8 @@ The engine makes split-second decisions on its own. An AI operator works one lev
 - It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
 - Claude gets only the bot's tools here: no shell, no files, no other connectors.
 
+**Risk dial:** five levels on the Live and Controls tabs: Cautious, Normal (your settings), Bold, Aggressive and Max. Each scales trade size, open positions and the daily loss limit together. Say "more risk" in Chat and Claude asks you to approve a higher level. It can always turn the dial down, but only raises it with your click, and never above `risk.max_level`. The kill switch, stop losses and entry rules never move.
+
 **In a terminal:** the same tools load in Claude Code from `.mcp.json`.
 
 ```bash
