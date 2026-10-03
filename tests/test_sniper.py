@@ -66,7 +66,7 @@ CTX = {"creator_launches": 1, "symbol_dupes": 0, "social_weight": 0}
 
 
 def test_entry_on_organic_launch():
-    s, now = make_state()
+    s, now = make_state(organic=40)            # 10 SOL volume -> 0.125 SOL fees paid
     d = evaluate_entry(s, now, E, CTX)
     assert d.action == "enter", d.notes
 

@@ -37,6 +37,7 @@ class Trade:
     new_balance: float = -1.0   # trader's token balance after the trade, if the source reports it
     signature: str = ""
     pool: str = "pump"          # pump = bonding curve; pump-amm etc. = graduated
+    mcap_sol: float = 0.0       # market cap in SOL after the trade (prices graduated-pool trades)
     kind: str = "trade"
 
 

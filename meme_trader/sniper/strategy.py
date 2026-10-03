@@ -67,6 +67,13 @@ def evaluate_entry(s: TokenState, now: float, p, ctx: dict) -> EntryDecision:
         waits.append(f"curve {prog:.1f}% < {p.min_curve_progress_pct}%")
     if len(s.buyers) < p.min_unique_buyers:
         waits.append(f"buyers {len(s.buyers)} < {p.min_unique_buyers}")
+    fees = s.fees_paid_sol()
+    if fees < p.min_fees_paid_sol:
+        waits.append(f"fees paid {fees:.2f} < {p.min_fees_paid_sol} SOL")
+    if s.sniper_pct() > p.max_sniper_pct:
+        waits.append(f"snipers hold {s.sniper_pct():.0f}% > {p.max_sniper_pct}%")
+    if s.insider_pct() > p.max_insider_pct:
+        waits.append(f"insiders hold {s.insider_pct():.0f}% > {p.max_insider_pct}%")
     top = s.top_holders_pct(10)
     if top > p.max_top10_pct:
         waits.append(f"top10 {top:.0f}% > {p.max_top10_pct}%")
@@ -120,6 +127,7 @@ class SniperPosition:
     source: str = "sniper"     # sniper | copy:<leader label>
     leader: str = ""           # leader wallet for copy positions
     desk: str = ""             # AI desk verdict summary at entry
+    ladder_hit: int = 0        # ladder exit profile: steps already sold
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
@@ -146,12 +154,14 @@ def evaluate_exit(pos: SniperPosition, s: TokenState, now: float, x, fee_pct: fl
     # red flags: get out entirely
     if s.dev_sold > 0 and x.exit_on_dev_sell:
         return 1.0, "dev sold"
-    if gain <= -x.stop_loss_pct:
+    if gain <= -x.stop_loss_pct and x.profile != "ladder":     # the ladder profile has its own stop (stop_x)
         return 1.0, f"stop loss {gain:.0f}%"
     if s.migrated or s.curve.progress * 100 >= x.exit_at_curve_progress_pct:
         return 1.0, f"pre-graduation exit (curve {s.curve.progress:.0%})"
     if held >= x.max_hold_s:
         return 1.0, "max hold time"
+    if x.profile == "ladder":
+        return _ladder_exit(pos, price, x.ladder, fee_pct)
 
     # initials: recover cost at the first target
     if not pos.initials_taken and gain >= x.initials_at_pct:
@@ -175,4 +185,23 @@ def evaluate_exit(pos: SniperPosition, s: TokenState, now: float, x, fee_pct: fl
     # dead entry: never got going
     if held >= x.no_progress_s and peak_gain < x.no_progress_min_gain_pct:
         return 1.0, "no follow-through"
+    return None
+
+
+def _ladder_exit(pos: SniperPosition, price: float, L, fee_pct: float):
+    """Fixed take-profit ladder (e.g. 2x sell half, 5x sell rest, 0.3x stop) with a stop that ratchets up
+    after trail_after_x so a big winner can't round-trip back to entry."""
+    mult = price / pos.entry_price
+    peak_mult = pos.peak_price / pos.entry_price
+    if mult <= L.stop_x:
+        return 1.0, f"ladder stop at {mult:.2f}x"
+    if peak_mult >= L.trail_after_x:
+        floor = max(pos.entry_price * (1 + fee_pct / 100), pos.peak_price * (1 - L.trail_pct / 100))
+        if price <= floor:
+            return 1.0, f"ladder trail stop at {mult:.1f}x (peak {peak_mult:.1f}x)"
+    steps = L.steps
+    if pos.ladder_hit < len(steps) and mult >= steps[pos.ladder_hit]["at_x"]:
+        step = steps[pos.ladder_hit]
+        frac = 1.0 if step["sell_frac"] >= 1 else min(1.0, pos.initial_tokens * step["sell_frac"] / pos.tokens)
+        return frac, f"ladder {step['at_x']}x sell {'rest' if frac >= 1 else f'{frac:.0%}'}"
     return None

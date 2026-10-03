@@ -51,9 +51,11 @@ class Feed:
 class PumpPortalFeed(Feed):
     URL = "wss://pumpportal.fun/api/data"
 
-    def __init__(self):
+    def __init__(self, fallback_urls: list[str] | None = None):
         key = os.environ.get("PUMPPORTAL_API_KEY", "")
-        self.url = f"{self.URL}?api-key={key}" if key else self.URL
+        # primary first; on disconnect rotate to backups (e.g. pumpdev.io), then back to primary
+        self.urls = [f"{self.URL}?api-key={key}" if key else self.URL] + list(fallback_urls or [])
+        self.url_idx = 0
         self.ws = None
         self.watched: set[str] = set()
         self.accounts: set[str] = set()
@@ -70,6 +72,15 @@ class PumpPortalFeed(Feed):
         self.watched.difference_update(mints)
         await self._send({"method": "unsubscribeTokenTrade", "keys": mints})
 
+    @property
+    def host(self) -> str:
+        return self.urls[self.url_idx].split("/")[2]
+
+    @property
+    def degraded(self) -> bool:
+        """On a backup feed, which may carry launches but not per-token trades."""
+        return self.url_idx != 0
+
     async def watch_accounts(self, wallets: list[str]) -> None:
         self.accounts.update(wallets)
         await self._send({"method": "subscribeAccountTrade", "keys": wallets})
@@ -80,7 +91,8 @@ class PumpPortalFeed(Feed):
         backoff = 1
         while True:
             try:
-                async with aiohttp.ClientSession() as session, session.ws_connect(self.url, heartbeat=20) as ws:
+                url = self.urls[self.url_idx]
+                async with aiohttp.ClientSession() as session, session.ws_connect(url, heartbeat=20) as ws:
                     self.ws = ws
                     await ws.send_json({"method": "subscribeNewToken"})
                     await ws.send_json({"method": "subscribeMigration"})
@@ -89,15 +101,19 @@ class PumpPortalFeed(Feed):
                     if self.accounts:
                         await ws.send_json({"method": "subscribeAccountTrade", "keys": list(self.accounts)})
                     backoff = 1
+                    connected = time.time()
                     async for msg in ws:
+                        if self.degraded and time.time() - connected > 300:
+                            break                       # on a backup: go try the primary again
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             continue
                         e = self.parse(json.loads(msg.data), time.time())
                         if e:
                             yield e
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-                print(f"[pumpportal] disconnected: {err!r}; retrying in {backoff}s")
+                print(f"[feed] {self.host} disconnected: {err!r}; retrying in {backoff}s")
             self.ws = None
+            self.url_idx = (self.url_idx + 1) % len(self.urls)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
@@ -115,7 +131,7 @@ class PumpPortalFeed(Feed):
                          sol=float(d.get("solAmount") or 0), tokens=float(d.get("tokenAmount") or 0),
                          v_sol=float(d.get("vSolInBondingCurve") or 0), v_tokens=float(d.get("vTokensInBondingCurve") or 0),
                          new_balance=float(d.get("newTokenBalance", -1)), signature=d.get("signature", ""),
-                         pool=d.get("pool") or "pump")
+                         pool=d.get("pool") or "pump", mcap_sol=float(d.get("marketCapSol") or 0))
         if tx == "migrate":
             return Migration(mint=d["mint"], ts=now)
         return None

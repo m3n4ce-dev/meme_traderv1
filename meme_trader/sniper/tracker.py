@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
-from .curve import TOTAL_SUPPLY, Curve
+from .curve import FINAL_V_TOKENS, TOTAL_SUPPLY, Curve
 from .events import Launch, Social, Trade
 
 
@@ -19,6 +19,8 @@ class TokenState:
     sellers: set[str] = field(default_factory=set)
     early_bought: dict[str, float] = field(default_factory=dict)   # wallet -> tokens bought in the bundle window
     early_sold: float = 0.0
+    snipers: set[str] = field(default_factory=set)   # non-dev wallets that bought in the sniper window
+    volume_sol: float = 0.0
     dev_sold: float = 0.0
     buys: int = 0
     sells: int = 0
@@ -55,9 +57,16 @@ class TokenState:
             self.holders[e.creator] = e.dev_buy_tokens
             self.buyers.add(e.creator)
 
-    def on_trade(self, t: Trade, bundle_window_s: float) -> None:
-        if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:   # graduated-pool trades carry no curve state
+    def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
+        if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
             self.curve = Curve(t.v_sol, t.v_tokens)
+        elif t.pool != "pump" and t.mcap_sol > 0:
+            # graduated (PumpSwap etc.): no curve reserves in the event, so price it from market cap on a
+            # curve parked at its end state. Its depth roughly matches the migrated pool's.
+            self.migrated = True
+            price = t.mcap_sol / TOTAL_SUPPLY
+            self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS)
+        self.volume_sol += t.sol
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)
         self.last_trade_ts = t.ts
@@ -67,8 +76,11 @@ class TokenState:
             self.buys += 1
             self.buyers.add(t.trader)
             bal = prev + t.tokens
-            if t.ts - self.created_ts <= bundle_window_s and t.trader != self.creator:
-                self.early_bought[t.trader] = self.early_bought.get(t.trader, 0.0) + t.tokens
+            if t.trader != self.creator:
+                if t.ts - self.created_ts <= bundle_window_s:
+                    self.early_bought[t.trader] = self.early_bought.get(t.trader, 0.0) + t.tokens
+                if t.ts - self.created_ts <= sniper_window_s:
+                    self.snipers.add(t.trader)
         else:
             self.sells += 1
             self.sellers.add(t.trader)
@@ -91,6 +103,20 @@ class TokenState:
     def bundle_pct(self) -> float:
         """Supply bought by non-dev wallets inside the bundle window (insider/sniper proxy)."""
         return sum(self.early_bought.values()) / TOTAL_SUPPLY * 100
+
+    def fees_paid_sol(self, fee_pct: float = 1.25) -> float:
+        """Total trading fees paid on the curve so far - a proxy for real, paying demand."""
+        return self.volume_sol * fee_pct / 100
+
+    def sniper_pct(self) -> float:
+        """Supply currently held by wallets that bought within the sniper window (excl. dev)."""
+        return sum(self.holders.get(w, 0.0) for w in self.snipers) / TOTAL_SUPPLY * 100
+
+    def insider_pct(self) -> float:
+        """Supply currently held by the dev + bundle-window wallets. (Funding-graph clustering would
+        catch more insiders - see roadmap.)"""
+        ws = set(self.early_bought) | ({self.creator} if self.creator else set())
+        return sum(self.holders.get(w, 0.0) for w in ws) / TOTAL_SUPPLY * 100
 
     def early_sold_ratio(self) -> float:
         total = sum(self.early_bought.values())

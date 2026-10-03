@@ -129,6 +129,22 @@ How the desk is wired:
 4. **Wallet-quality features for every buyer, not just leaders.** Count how many "smart" (historically profitable) wallets are among a token's first 50 buyers.
 5. **A nightly scheduled review.** A routine runs `review --validate` and opens a PR with the changes that won on recorded data, so improvements ship only on evidence.
 
-## 8. Ground rules
+## 8. Intel from the owner's other bot (2026-10-03)
+
+| Intel | What we did |
+|---|---|
+| Spikes round-trip within 2–5 min; speed decides everything | Already the design: websocket feed, decisions in seconds, fast exits. Trailing exits beat a fixed 5x target in backtests. |
+| Pump.fun sells must use the AMM after graduation | Live trades use `pool=auto`; graduated trades are priced from market cap. |
+| Fees paid ≥ 0.1–3 SOL; snipers < 20%; insiders < 30% | Added as entry filters (fees ≥ 0.1, snipers ≤ 20%, insiders ≤ 30%). |
+| $5–$20 per buy from pre-check strength, hard cap $20, copies smaller | Sizing agent with a hard cap enforced in code; copies ×0.6; curve-depth cap. |
+| 2x half / 5x rest / 0.3x stop, ratchet after 3x | `exit.profile: ladder`. Kept as an option; `trail` stays the default until real data says otherwise. |
+| Re-quote failed transactions instead of blind retries | Buys are single-shot; sells re-quote with rising slippage; late landings are booked. |
+| Close token accounts on exit | Done after every full live exit. |
+| pumpdev.io websocket as a backup feed | Automatic failover; entries pause while on the backup. |
+| Instagram "filter" settings | Treated as hypotheses. They're marketing funnels; every setting is a `--set` flag to backtest. |
+| Callout bot with auto-buy alongside | Not built as specified. See §9. |
+
+## 9. Ground rules
+- **Callouts:** if we ever post calls, we post before we trade and never sell into the buyers a call brings in. That means a cooldown before trading our own call, holdings disclosed on every call, and a public record of every call's outcome. Calls that front-run followers harm them and carry legal risk.
 - Read-only signals and our own trading only. No running call channels, shilling, bundling our own launches, or wash trading. Those are the behaviours this bot is built to avoid, and they carry legal risk.
 - Every trade is journaled. Taxes apply to realised gains.

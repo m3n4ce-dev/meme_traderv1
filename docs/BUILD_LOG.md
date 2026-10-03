@@ -4,6 +4,59 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #5: Intel brief from the owner's other bot, integrated
+
+### Owner input
+- Uploaded `memecoin-bot-bundle`: an intel brief (filter stack, Instagram-sourced filter settings, Sep 23–24 alert data, sizing/exit/risk rules) and the `pump-callout-bot` code.
+- Instruction: "do whatever you think will be the most profitable."
+
+### Assessment (summary of what was said in chat)
+- **Strongest intel:** spikes round-trip within 2–5 min, so speed matters. Your other bot was minutes late by design: it scanned DexScreener for pairs up to 12 h old and alerted a human. Our websocket sniper acts in seconds.
+- The Instagram filter settings come from marketing funnels. They're hypotheses for backtesting, not proven. The 32-alert, one-night sample is too small to tune on.
+- **Callout bot:** not integrated. "Post callouts and auto-buy alongside, rewarded on the volume the calls attract" slides into buying ahead of your own followers and selling into them. That harms the followers and carries legal risk. We offered a version with guardrails (post first, cooldown before trading the call, disclosure, public track record), pending a decision.
+- **Your other bot's SOL price source (`lite-api.jup.ag`) was shut down on 2026-01-31**, so its dollar sizing will fail. Replaced here with Jupiter v3 (needs a key) → CoinGecko → config fallback.
+
+### Built
+- **Bug fix (could have trapped live money):** live trades now use PumpPortal `pool=auto`. Before, they always targeted the bonding curve, so selling a token that had graduated mid-position would have failed. Graduated-pool trades are now priced from `marketCapSol`.
+- **Live execution hardening:**
+  - each attempt gets a fresh quote; buys are never blindly retried;
+  - sells re-quote with rising slippage (15 → 25 → 40%);
+  - fills that land after the confirmation timeout are still booked;
+  - emptied token accounts are closed after a full exit, reclaiming rent. Works for SPL Token and Token-2022, and can't close a non-empty account.
+- **New entry filters (from the intel):**
+  - fees paid ≥ 0.1 SOL (from volume × 1.25%);
+  - snipers (bought in the first 10 s) still holding ≤ 20%;
+  - insiders (dev + bundle wallets) still holding ≤ 30%.
+- **Sizing agent:**
+  - $5 base, scaling to $20 with signal strength: rule score, buy pressure, momentum, smart wallets in, AI-desk conviction;
+  - copies sized ×0.6;
+  - capped at 3% of the SOL in the curve;
+  - **a $20 hard cap re-checked in `_buy`**, whatever asks for more;
+  - live SOL/USD price refreshed every 5 min.
+- **The owner's exit rules as `exit.profile: ladder`:** 2x sell half, 5x sell the rest, 0.3x stop, plus a ratchet after 3x so a big winner can't round-trip to entry. The generic −30% stop doesn't apply to this profile.
+- **Backup feed:** if PumpPortal drops, the bot switches to `wss://pumpdev.io/ws` (from the owner's bot). New entries pause while on the backup, since it may not carry trades, and it retries PumpPortal every 5 min.
+- Tests: 39 passing (+6: sell re-quote and slippage steps with `pool=auto`, no blind buy retry plus late-landing booking, a real solders-built CloseAccount transaction for Token-2022, sizing bounds and hard cap, graduated pricing, the ladder profile).
+
+### Synthetic backtests, 3 seeds × 1500 launches (logic check, not evidence)
+| Config | P&L per seed (SOL) | Note |
+|---|---|---|
+| trail exits (default) | +1.99 / +2.39 / +2.31 | |
+| ladder exits (owner's rules) | +1.31 / +1.25 / +1.74 | Holds through pullbacks, so fewer trades fit under the position cap |
+| trail, new filters off | +2.66 / +2.71 / +2.50 | The synthetic market has no insider-farmed tokens, so the filters can only cost here |
+
+**Decision:** keep `trail` as the default and the new filters on. Re-decide both on recorded real data:
+```bash
+backtest --file data/feed-*.jsonl --set exit.profile=ladder
+backtest --file data/feed-*.jsonl --set entry.max_sniper_pct=100
+```
+
+### Open decisions for owner
+- Callout bot: build the guarded version, or skip it?
+- "Survivor pass" (10 h+ tokens, Wayne's filters) as a second strategy on the DexScreener bot: yes or no?
+- Robinhood Chain: out of scope for now (no RugCheck coverage).
+
+---
+
 ## 2026-10-02 — Entry #4: One-command setup for Mac + Ubuntu, illustrated guides
 
 ### Owner input

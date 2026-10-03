@@ -58,7 +58,8 @@ def _desk(params, force: bool):
 
 
 async def _run(args, params) -> None:
-    feed = SyntheticFeed(seed=args.seed, speed=args.speed) if args.synthetic else PumpPortalFeed()
+    feed = SyntheticFeed(seed=args.seed, speed=args.speed) if args.synthetic else \
+        PumpPortalFeed(params.sniper.feed.fallback_ws_urls)
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"
