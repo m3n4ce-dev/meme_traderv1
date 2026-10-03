@@ -189,6 +189,12 @@ def validate_sniper(sn: dict) -> None:
         _num(sn, "agent.max_buy_usd", 0)
         _num(sn, "agent.max_buys_per_hour", 0)
         _num(sn, "agent.max_actions_per_min", 1)
+        _num(sn, "agent.max_deposit_sol", 0)
+    if "chat" in sn:
+        _num(sn, "chat.timeout_s", 10)
+        _num(sn, "chat.approval_timeout_s", 10)
+        if (sn["chat"].get("model") or "") not in ("", "opus", "sonnet", "haiku"):
+            raise ConfigError("sniper.chat.model must be one of: \"\", opus, sonnet, haiku")
     _num(sn, "feed.stall_s", 0, lo_open=True)
 
 

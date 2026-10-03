@@ -336,6 +336,7 @@ def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdow
         "scatter": [{"hold_s": round(c["closed"] - c["opened"], 1), "pnl_pct": round(c["pnl_pct"], 1),
                      "peak_pct": round(c.get("peak_gain_pct", 0), 1), "source": c["source"].split(":")[0],
                      "symbol": c.get("symbol", ""), "mint": c.get("mint", "")} for c in trades[-400:]],
+        "timeline": [[round(c["closed"], 1), c["source"].split(":")[0], round(c["pnl"], 6)] for c in trades[-1000:]],
         "edge": edge, "monte_carlo": mc, "gate_audit": gates, "model": model_card,
         "callouts": {"n": len(bags), "pnl_sol": _f(sum(c["pnl"] for c in bags)),
                      "avg_pnl_pct": _f(sum(c["pnl_pct"] for c in bags) / len(bags), 1) if bags else None},

@@ -13,13 +13,16 @@ DexScreener momentum bot (`meme_trader/agents/`). Read `README.md` for the overv
 - Never commit `.env`, `config/params.yaml`, `data/`, or anything with a key or wallet secret.
 
 ## Operating the running bot (MCP tools `mcp__meme-trader__*`)
-The `meme-trader` MCP server (`.mcp.json`) talks to the running bot. You are its operator, one level
+The same tools power the dashboard's Chat tab (`meme_trader/ui/chat.py` runs `claude -p` with them; actions
+wait for Approve in the browser). In a terminal, the `meme-trader` MCP server (`.mcp.json`) talks to the running bot. You are its operator, one level
 above the code: the engine trades on its own in seconds; you judge regime and risk, investigate tokens,
 and act only with a concrete reason.
 
 1. Start with `get_status`: feed health (`gap_pct`, `degraded_reason`), P&L, why entries are blocked.
    If the feed is degraded, don't trade on its data.
 2. Then `get_positions`, `get_radar`, `get_analytics` (and `get_token` for anything you'd act on).
+   For any contract address, tracked or not, `lookup_token` gives market data, holders and risk flags.
+   `add_paper_funds` tops up the paper balance, only when the owner asks.
 3. Act sparingly. Prefer pausing or lowering risk over adding it. Every action needs a specific reason,
    which is journaled and shown on the dashboard.
 4. Report what you saw, what you did, and why, in a few lines.
@@ -30,6 +33,6 @@ Facts to keep in mind (paper results, 2026-10-03; see BUILD_LOG #12-#13):
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
 
 The bot enforces the limits, not you: you can't raise sizing, positions, loss limit or stop loss above
-the owner's configured values, re-enable a strategy the owner turned off, switch to live, save settings,
-or press the kill switch. Setting changes last until restart. If a tool refuses, say so - don't look for
+the owner's configured values, re-enable a strategy the owner turned off, switch to live, save risk
+settings, or press the kill switch. Setting changes last until restart. If a tool refuses, say so - don't look for
 a way around it (e.g. editing config files or restarting the bot to change limits).

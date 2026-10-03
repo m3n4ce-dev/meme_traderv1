@@ -18,7 +18,7 @@ Setup is in [MAC_SETUP.md](MAC_SETUP.md) and [UBUNTU_SETUP.md](UBUNTU_SETUP.md).
 | Copy a profitable wallet | [11](#11-copy-a-wallet) |
 | Run it 24/7 and check from my Mac | [12](#12-run-247-on-the-mini-pc-and-check-from-the-mac) |
 | Go live with real money | [13](#13-go-live) |
-| Let Claude operate the bot | [14](#14-let-claude-operate-the-bot) |
+| Chat with Claude, look up any token | [14](#14-let-claude-operate-the-bot) |
 | Fix something that looks wrong | [15](#15-when-something-looks-wrong) |
 
 ---
@@ -164,13 +164,24 @@ Only after weeks of paper trading that you're happy with in **Analytics**. Follo
 Start with the smallest sizes.
 
 ## 14. Let Claude operate the bot
-With the bot running (service or `scripts/start.sh paper`), open Claude Code in the project folder:
+**From the dashboard (easiest).** Open the **✦ Chat** tab (or press `c`) and type. Some things to try:
+- "how are we doing?"
+- "anything worth selling?"
+- "add 10 paper SOL"
+- a quick button such as **Desk check**
+- a token's contract address on its own: you get its metrics card right away (price, market cap, liquidity, candles, buys vs sells, top holders, risk flags), and Claude's read under it.
+
+Claude Code has to be installed and logged in on this machine (run `claude` once in a terminal). The chat uses your Claude plan, not an API key; the meter at the top shows how much of your 5-hour and weekly allowance is used. Pick a lighter model (Haiku, Sonnet) in the menu to make it go further. **New chat** starts over.
+
+**Paper balance.** Ask in Chat ("add 5 paper SOL"), or use **Controls → Paper balance**. A deposit counts as starting capital, not profit. It lasts until the bot restarts, unless you tick "keep", which saves the new starting balance to `config/params.yaml`.
+
+**From a terminal.** Open Claude Code in the project folder:
 ```bash
 cd ~/meme_traderv1 && claude
 ```
-The first time, approve the `meme-trader` MCP server. Then either type `/desk-check` for a full review, or just ask: "how are we doing?", "anything worth selling?", "is this token any good? <mint>".
+The first time, approve the `meme-trader` MCP server. Then either type `/desk-check` for a full review, or just ask.
 
-Reading is automatic. Every action (pause, setting change, buy, sell, watch, note) shows you the exact call, with its reason, and waits for your OK. The bot itself enforces the limits: Claude can make things safer but never riskier than your `config/params.yaml`. It can't go live or press KILL. Its actions show in the dashboard log as AGENT lines, and setting changes last until the next restart.
+Reading is automatic. Every action shows you the exact step and its reason, and waits for your OK: pause, setting change, buy, sell, watch, deposit, note. In the dashboard that's the Approve button. You can switch "Ask before actions" off there; the bot's limits still apply. The bot itself enforces the limits: Claude can make things safer but never riskier than your `config/params.yaml`. It can't go live or press KILL. Its actions show in the dashboard log as AGENT lines, and setting changes last until the next restart.
 
 To stop agent buys entirely: `sniper.agent.can_buy: false`. To turn the tools off: `sniper.agent.enabled: false`. Restart after either change.
 
