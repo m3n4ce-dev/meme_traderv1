@@ -17,9 +17,32 @@ from .models import Order
 class Orchestrator:
     def __init__(self, params, wallet=None):
         self.p = params
-        self.pf = Portfolio.load(params.capital.starting_sol)
+        self.wallet = wallet
+        self.pf = Portfolio.load(params.capital.starting_sol, params.mode, wallet.pubkey if wallet else "")
         self.risk = RiskManager(params, self.pf)
         self.exec = Executor(params, wallet)
+        if params.mode == "live":
+            self.reconcile()
+
+    def reconcile(self) -> None:
+        """Live: the wallet is the truth. Positions no longer held are dropped, token amounts corrected,
+        and the book's SOL never exceeds what the wallet really has (extra SOL isn't auto-allocated)."""
+        w = self.wallet
+        bal = w.sol_balance()
+        if bal + 0.002 < self.pf.sol:
+            record("risk", "reconcile_sol", ledger=self.pf.sol, wallet=bal)
+            self.pf.day_realized_sol -= self.pf.sol - bal      # unexplained loss counts against today's limit
+            self.pf.sol = bal
+        for mint, pos in list(self.pf.positions.items()):
+            have = w.token_balance(mint)
+            if have <= 0:
+                record("risk", "reconcile_gone", mint=mint, symbol=pos.symbol)
+                self.pf.day_realized_sol -= pos.cost_sol
+                del self.pf.positions[mint]
+            elif have != pos.tokens:
+                record("risk", "reconcile_tokens", mint=mint, saved=pos.tokens, wallet=have)
+                pos.tokens = have
+        self.pf.save()
 
     def prices(self) -> dict[str, float]:
         if not self.pf.positions:
@@ -34,13 +57,15 @@ class Orchestrator:
     def manage_positions(self, prices: dict[str, float]) -> None:
         for mint, pos in list(self.pf.positions.items()):
             px = prices.get(mint)
-            if not px:
+            if self.pf.halted:                # the kill switch sells EVERYTHING, before any other exit logic,
+                order = Order(mint, "sell", token_amount=pos.tokens, decimals=pos.decimals, symbol=pos.symbol,
+                              ref_price_sol=px or pos.entry_price_sol,       # live executes on a fresh quote
+                              reason="kill switch" + ("" if px else " (no display price)"))
+            elif not px:
                 record("monitor", "no_price", mint=mint, symbol=pos.symbol)
                 continue
-            order = monitor.evaluate(pos, px, self.p.exits)
-            if self.pf.halted and not order:
-                order = Order(mint, "sell", token_amount=pos.tokens, decimals=pos.decimals,
-                                      symbol=pos.symbol, ref_price_sol=px, reason="kill switch")
+            else:
+                order = monitor.evaluate(pos, px, self.p.exits)
             if not order or order.token_amount <= 0:
                 continue
             record("monitor", "exit_signal", mint=mint, symbol=pos.symbol, reason=order.reason, price=px)

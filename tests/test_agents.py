@@ -108,5 +108,5 @@ def test_kill_switch():
 
 
 def test_config_validation():
-    with pytest.raises(AssertionError):
+    with pytest.raises(config.ConfigError):
         config.validate({**P, "capital": {**P["capital"], "per_trade_sol": 5}})

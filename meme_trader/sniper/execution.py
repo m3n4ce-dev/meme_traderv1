@@ -18,10 +18,15 @@ from .curve import Curve
 @dataclass
 class SniperFill:
     ok: bool
-    sol: float = 0.0       # SOL spent (buy) or received (sell), always positive
+    sol: float = 0.0       # buy: SOL spent (cost basis, excl. rent). sell: net SOL received - can be NEGATIVE
+                           # when fees exceed what a near-worthless remainder fetched
     tokens: float = 0.0    # tokens received (buy) or sold (sell), always positive
     signature: str = ""
     error: str = ""
+    rent: float = 0.0            # buy: refundable SOL locked in a newly created token account
+    rent_reclaimed: float = 0.0  # sell: SOL back from closing the emptied token account (net of its fee)
+    fees_lost: float = 0.0       # SOL burned by attempts that landed on-chain but failed
+    unknown: bool = False        # sent, but whether it landed isn't known yet (see Engine.unresolved)
 
     @property
     def price(self) -> float:
@@ -54,21 +59,53 @@ class LiveExecutor:
 
     * pool=auto: PumpPortal routes to the bonding curve or, after graduation, the PumpSwap AMM -
       a curve-only order would fail once a token migrates (intel brief §5).
-    * Every attempt asks PumpPortal for a FRESH transaction (= a re-quote). Buys are never retried
-      blindly; sells step up slippage (execution.sell_slippage_steps) because being stuck in a
-      dumping token costs more than a worse fill.
+    * The transaction PumpPortal builds is checked before we sign it: this wallet must be the fee payer,
+      and a simulation must show it can't take more of our SOL than the order allows (verify_tx).
+    * We sign locally first, so the signature is known before sending. If sending or confirming can't
+      tell us whether it landed, the fill comes back `unknown` with that signature: the engine waits
+      for the chain (resolve) instead of sending a fresh order that could fill twice.
+    * Sells step up slippage and priority (execution.sell_slippage_steps) only after an attempt
+      definitely did NOT land. Failed attempts that landed still cost fees: reported as fees_lost.
     * Fills are measured from the confirmed transaction's own pre/post balances, so trades running
-      at the same time can't pollute each other, and the ~0.002 SOL token-account rent (returned when
-      the account is closed) is kept out of the cost basis.
-    * Late landings: if confirmation times out we still look the transaction up, so a fill that
-      landed late is booked instead of becoming an untracked position.
-    * Nothing here raises: any error comes back as a failed fill.
+      at the same time can't pollute each other. The ~0.002 SOL token-account rent is reported
+      separately (refundable, not trading cost), and so is the rent reclaimed when we close it.
+    * Nothing here raises: any error comes back as a failed (or unknown) fill.
     """
     URL = "https://pumpportal.fun/api/trade-local"
 
     def __init__(self, ex, wallet):
         self.ex = ex
         self.wallet = wallet
+
+    def _check_payload(self, tx_b64: str, action: str, amount, in_sol: bool, slippage: float,
+                       priority: float) -> str:
+        """'' if the transaction may be signed, else why not. Bounds how much SOL it can move out of
+        our wallet: a buy at most its amount plus slippage, fees and rent; a sell only fees."""
+        if not getattr(self.ex, "verify_tx", True):
+            return ""
+        try:
+            change = self.wallet.simulate_sol_change(tx_b64)
+        except Exception as e:
+            return f"pre-sign check failed: {e}"[:240]
+        overhead = priority + 0.00001 + 0.0025         # base fees + one token-account rent + margin
+        limit = (float(amount) * (1 + slippage / 100) * 1.02 if action == "buy" and in_sol else 0.0) + overhead
+        if -change > limit:
+            return f"refused to sign: transaction would move {-change:.6f} SOL out (allowed {limit:.6f})"
+        return ""
+
+    def _fill_from(self, d: dict, action: str, sig: str) -> SniperFill:
+        """A transaction we found on-chain -> fill. d: Wallet.tx_deltas()."""
+        if d["failed"]:
+            return SniperFill(False, signature=sig, error="transaction failed on-chain", fees_lost=max(-d["dsol"], 0.0))
+        tokens = abs(d["dtok"]) / 1e6               # pump.fun tokens have 6 decimals
+        moved = d["dtok"] > 0 if action == "buy" else d["dtok"] < 0
+        if not moved or tokens <= 0:
+            return SniperFill(False, signature=sig, error="landed but no token change for this wallet",
+                              fees_lost=max(-d["dsol"], 0.0))
+        if action == "buy":
+            return SniperFill(True, sol=max(abs(d["dsol"]) - d["rent"], 0.0), tokens=tokens, signature=sig,
+                              rent=d["rent"])
+        return SniperFill(True, sol=d["dsol"], tokens=tokens, signature=sig)   # may be < 0: fees > proceeds
 
     def _attempt(self, mint: str, action: str, amount, in_sol: bool, slippage: float,
                  estimate_sol: float = 0.0, priority: float | None = None) -> SniperFill:
@@ -88,9 +125,21 @@ class LiveExecutor:
             })
             if r.status_code != 200:
                 return SniperFill(False, error=f"pumpportal {r.status_code}: {r.text[:200]}")
-            sig = w.sign_and_send(base64.b64encode(r.content).decode())
-        except Exception as e:                       # incl. preflight/simulation failures from sendTransaction
+            tx_b64 = base64.b64encode(r.content).decode()
+            why = self._check_payload(tx_b64, action, amount, in_sol, slippage, priority)
+            if why:
+                return SniperFill(False, error=why)
+            raw, sig = w.sign(tx_b64)
+        except Exception as e:                       # nothing was sent
             return SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        try:
+            w.send(raw)
+        except RuntimeError as e:                    # the RPC answered with an error (e.g. preflight): not sent
+            if str(e).startswith("RPC sendTransaction"):
+                return SniperFill(False, signature=sig, error=str(e)[:240])
+            return SniperFill(False, unknown=True, signature=sig, error=f"send: {e}"[:240])
+        except Exception as e:                       # timeout / connection: it may or may not be out there
+            return SniperFill(False, unknown=True, signature=sig, error=f"send: {type(e).__name__}: {e}"[:240])
         try:
             landed = confirm(sig, timeout_s=30)
         except Exception:
@@ -105,16 +154,9 @@ class LiveExecutor:
                 break
             time.sleep(1.5)
         if d is not None:
-            if d["failed"]:
-                return SniperFill(False, signature=sig, error="transaction failed on-chain")
-            tokens = abs(d["dtok"]) / 1e6           # pump.fun tokens have 6 decimals
-            moved = d["dtok"] > 0 if action == "buy" else d["dtok"] < 0
-            if not moved or tokens <= 0:
-                return SniperFill(False, signature=sig, error="landed but no token change for this wallet")
-            sol = abs(d["dsol"]) - d["rent"] if action == "buy" else max(d["dsol"], 0.0)
-            return SniperFill(True, sol=max(sol, 0.0), tokens=tokens, signature=sig)
-        if not landed:
-            return SniperFill(False, signature=sig, error="not confirmed / failed on-chain")
+            return self._fill_from(d, action, sig)
+        if not landed:                               # not confirmed and not found: we don't know yet
+            return SniperFill(False, unknown=True, signature=sig, error="not confirmed yet - outcome unknown")
         # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
         if action == "buy":
             try:
@@ -122,16 +164,24 @@ class LiveExecutor:
             except Exception:
                 tokens = 0.0
             if tokens <= 0:
-                return SniperFill(False, signature=sig, error="confirmed but token balance not visible yet")
+                return SniperFill(False, unknown=True, signature=sig,
+                                  error="confirmed but token balance not visible yet")
             return SniperFill(True, sol=float(amount), tokens=tokens, signature=sig, error="estimated")
         return SniperFill(True, sol=estimate_sol, tokens=float(amount), signature=sig, error="estimated")
 
-    def _close_if_empty(self, mint: str) -> None:
-        if getattr(self.ex, "close_empty_accounts", True):
-            try:
-                self.wallet.close_empty_token_accounts(mint)    # reclaims ~0.002 SOL rent per account
-            except Exception as e:
-                print(f"[live] close account for {mint[:6]} failed (harmless): {e}")
+    def _close_if_empty(self, mint: str) -> float:
+        """Close the emptied token account; SOL actually reclaimed (only once its close is confirmed)."""
+        if not getattr(self.ex, "close_empty_accounts", True):
+            return 0.0
+        from ..wallet import confirm
+
+        try:
+            sig, held = self.wallet.close_empty_token_accounts(mint)
+            if sig and held > 0 and confirm(sig, timeout_s=20):
+                return max(held - 0.000005, 0.0)
+        except Exception as e:
+            print(f"[live] close account for {mint[:6]} failed (harmless, rent stays locked): {e}")
+        return 0.0
 
     async def buy(self, mint: str, curve: Curve, sol: float, priority: float | None = None) -> SniperFill:
         return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct, 0.0, priority)
@@ -142,17 +192,42 @@ class LiveExecutor:
 
         def run() -> SniperFill:
             fill = SniperFill(False, error="no attempt")
+            lost = 0.0
             steps = list(self.ex.sell_slippage_steps)
             prios = [priority] * len(steps) if priority is not None else \
                 list(self.ex.sell_priority_fee_steps) + [self.ex.sell_priority_fee_steps[-1]] * len(steps)
             for slip, prio in zip(steps, prios):     # each retry: more slippage room AND more priority
                 fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate, prio)
+                lost += fill.fees_lost
+                if fill.unknown:                     # a fresh sell now could sell twice: stop and resolve
+                    break
                 if fill.ok:
                     try:
                         if self.wallet.token_balance(mint) == 0:
-                            self._close_if_empty(mint)
+                            fill.rent_reclaimed = self._close_if_empty(mint)
                     except Exception:
                         pass
-                    return fill
+                    break
+            fill.fees_lost = lost
+            return fill
+        return await asyncio.to_thread(run)
+
+    async def resolve(self, sig: str, mint: str, action: str) -> SniperFill:
+        """What happened to a sent transaction whose outcome was unknown: a fill, a failure (with its
+        fees), or still unknown (not visible on-chain yet)."""
+        def run() -> SniperFill:
+            try:
+                d = self.wallet.tx_deltas(sig, mint)
+            except Exception as e:
+                return SniperFill(False, unknown=True, signature=sig, error=f"{type(e).__name__}: {e}"[:240])
+            if d is None:
+                return SniperFill(False, unknown=True, signature=sig, error="not on-chain (yet)")
+            fill = self._fill_from(d, action, sig)
+            if fill.ok and action == "sell":
+                try:
+                    if self.wallet.token_balance(mint) == 0:
+                        fill.rent_reclaimed = self._close_if_empty(mint)
+                except Exception:
+                    pass
             return fill
         return await asyncio.to_thread(run)

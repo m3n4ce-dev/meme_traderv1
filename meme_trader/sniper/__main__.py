@@ -35,13 +35,22 @@ from .feeds import FileFeed, PumpPortalFeed, SolanaTradeFeed, SyntheticFeed, com
 
 
 def apply_overrides(params, sets: list[str]):
+    """--set key=value overrides (value parsed as YAML), then the whole config is validated again."""
     for item in sets or []:
+        if "=" not in item:
+            raise config.ConfigError(f"--set {item!r}: use key=value")
         key, val = item.split("=", 1)
         node = params["sniper"]
         *path, last = key.split(".")
         for k in path:
+            if not isinstance(node, dict) or k not in node:
+                raise config.ConfigError(f"--set {key}: unknown setting")
             node = node[k]
+        if not isinstance(node, dict) or last not in node:
+            raise config.ConfigError(f"--set {key}: unknown setting")
         node[last] = yaml.safe_load(val)
+    if sets:
+        config.validate(params)
     return params
 
 
@@ -92,27 +101,78 @@ async def _run(args, params) -> None:
         executor, mode = LiveExecutor(params.sniper.execution, wallet), "live"
     else:
         executor = PaperExecutor(params.sniper.execution)
+    full_mode = mode + ("-synthetic" if args.synthetic else "")
+    # one bot per mode per data folder, and one live bot per wallet (across checkouts): two engines
+    # sharing a state file or a wallet would trade against each other's books
+    locks = [_lock(DATA / f"run-{full_mode}.lock", f"a {full_mode} bot is already running from this folder")]
+    if mode == "live":
+        locks.append(_lock(Path.home() / ".cache" / "meme_trader" / f"wallet-{executor.wallet.pubkey}.lock",
+                           "a live bot is already trading this wallet"))
     record = None
     if not args.synthetic and not args.no_record:
         DATA.mkdir(exist_ok=True)
         record = DATA / f"feed-{time.strftime('%Y-%m-%d', time.gmtime())}.jsonl"
         _compress_old_feeds(record)
-    engine = Engine(params, feed, executor, mode=mode + ("-synthetic" if args.synthetic else ""), record_path=record,
-                    desk=_desk(params, args.desk))
+    engine = Engine(params, feed, executor, mode=full_mode, record_path=record, desk=_desk(params, args.desk))
 
-    tasks = [asyncio.create_task(engine.run())]
-    if not args.no_ui:
-        from ..ui.server import serve
+    runner = None
+    if not args.no_ui:                    # bind BEFORE trading: no controls = no engine
+        from ..ui.server import start
 
-        tasks.append(asyncio.create_task(serve(engine, args.host, args.port)))
+        try:
+            runner = await start(engine, args.host, args.port)
+        except OSError as e:
+            sys.exit(f"dashboard can't start on {args.host}:{args.port} ({e}) - nothing was traded. "
+                     "Stop the other bot, use --port, or run headless with --no-ui")
         print(f"dashboard: http://{args.host}:{args.port}")
+    main = asyncio.create_task(engine.run())
+    aux = set()
     if not args.synthetic:
         from .signals import run_telegram, run_x_stream
 
         sig = params.sniper.signals
-        tasks += [asyncio.create_task(run_telegram(sig.telegram_channels, engine.handle)),
-                  asyncio.create_task(run_x_stream(sig.x_accounts, engine.handle))]
-    await tasks[0]
+        aux = {asyncio.create_task(run_telegram(sig.telegram_channels, engine.handle), name="telegram signals"),
+               asyncio.create_task(run_x_stream(sig.x_accounts, engine.handle), name="X signals")}
+    try:
+        await _supervise(engine, main, aux)
+    finally:
+        if runner is not None:
+            await runner.cleanup()
+        for t in aux:
+            t.cancel()
+        del locks
+
+
+def _lock(path: Path, busy: str):
+    """Exclusive, non-blocking lock held for the life of the process (released automatically on exit)."""
+    import fcntl
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = path.open("a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.seek(0)
+        pid = f.read().strip() or "?"
+        f.close()
+        sys.exit(f"{busy} (pid {pid}; lock {path}). Stop it first.")
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+    return f
+
+
+async def _supervise(engine, main: asyncio.Task, aux: set) -> None:
+    """Wait for the engine; report helper tasks that die instead of letting their errors vanish."""
+    pending = {main, *aux}
+    while main in pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for t in done:
+            if t is main:
+                main.result()                       # re-raise an engine crash
+            elif not t.cancelled() and t.exception() is not None:
+                engine.say("error", f"{t.get_name()} stopped: {t.exception()!r} - trading continues without it")
 
 
 def _compress_old_feeds(current: Path) -> None:
@@ -250,8 +310,8 @@ def _train(args, params) -> None:
     source = _source(args, params)
     events = load_events(source)
     print(f"{len(events):,} events loaded; building labelled snapshots...")
-    model, info = train(events, params, args.train)
-    out = Path(args.out) if args.out else Path(params.sniper.predict.model_path)
+    model, info = train(events, params, args.train, source=source)
+    out = Path(args.out) if args.out else candidate_path(params)
     out = out if out.is_absolute() else ROOT / out
     model.save(out)
     t, tr = info["test"], info["train"]
@@ -268,21 +328,57 @@ def _train(args, params) -> None:
         for b in t["calibration"]:
             print(f"  {b['lo']:.0%}-{b['hi']:.0%}  n={b['n']:<6} {b['predicted']:.0%} -> {b['actual']:.0%}")
     print("strongest features:", ", ".join(f"{k} {w:+.2f}" for k, w in info["weights"][:8]))
-    print(f"\nsaved {out}")
+    print(f"\nsaved CANDIDATE {out} - not used by the bot until promoted (scripts/start.sh promote)")
     auc = t.get("auc") or 0
-    if auc < 0.6:
-        print("VERDICT: little skill on unseen data. Keep sniper.predict.min_p at 0 (display only).")
+    if auc < PROMOTE_MIN_AUC:
+        print("VERDICT: little skill on unseen data. Don't promote it; record more data and retrain.")
     elif auc < 0.7:
-        print("VERDICT: some skill. Use it for sizing (kelly_fraction) and display; try min_p 0.1-0.2 in a sweep first.")
+        print("VERDICT: some skill. Promote it to see P(2x) on the dashboard; keep sniper.predict.display_only: true "
+              "until a sweep/compare shows it helps.")
     else:
-        print("VERDICT: useful skill on held-out data. Sweep sniper.predict.min_p (e.g. 0,0.15,0.25,0.35) before gating on it.")
+        print("VERDICT: useful skill on held-out data. Promote it, then sweep sniper.predict.min_p (e.g. 0,0.15,0.25) "
+              "with display_only: false before letting it gate or size real trades.")
     if source.get("synthetic"):
         print("NOTE: trained on the SYNTHETIC market - fine for testing the pipeline, meaningless for real trading. "
-              "Train on your recorded data (data/feed-*) before relying on it.")
+              "It can't be promoted. Train on your recorded data (data/feed-*).")
+
+
+PROMOTE_MIN_AUC = 0.6
+
+
+def candidate_path(params) -> Path:
+    mp = Path(params.sniper.predict.model_path)
+    return mp.with_name(mp.stem + "-candidate" + mp.suffix)
+
+
+def _promote(args, params) -> None:
+    """Deploy a trained candidate: only real recorded data, only with skill on unseen launches."""
+    from ..config import ROOT
+    from .predictor import LogisticModel
+
+    src = Path(args.file_model) if args.file_model else candidate_path(params)
+    src = src if src.is_absolute() else ROOT / src
+    m = LogisticModel.load(src)
+    if m is None:
+        sys.exit(f"no usable model at {src} - run: scripts/start.sh train")
+    info = m.info or {}
+    auc = (info.get("test") or {}).get("auc") or 0
+    if info.get("source") != "recorded":
+        sys.exit(f"refused: {src.name} was trained on {info.get('source', 'unknown')} data, not your recordings")
+    if auc < PROMOTE_MIN_AUC and not args.force:
+        sys.exit(f"refused: held-out AUC {auc:.3f} < {PROMOTE_MIN_AUC} (little skill). --force to promote anyway")
+    info.update(promoted=True, promoted_at=time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()), promoted_from=src.name)
+    m.info = info
+    dst = Path(params.sniper.predict.model_path)
+    dst = dst if dst.is_absolute() else ROOT / dst
+    m.save(dst)
+    print(f"promoted {src.name} -> {dst} (held-out AUC {auc:.3f}); a running bot loads it within a minute.")
+    print("It's display-only while sniper.predict.display_only is true." if params.sniper.predict.display_only
+          else "display_only is false: it now gates and sizes entries (predict.min_p, kelly_fraction).")
 
 
 def _report(args, params) -> None:
-    from .report import equity_from_trades, load_trades, write
+    from .report import equity_from_trades, load_trades, row_mode, sessions, write
 
     sn = params.sniper
     if args.backtest:
@@ -293,10 +389,25 @@ def _report(args, params) -> None:
             f"backtest on a SYNTHETIC market ({args.synthetic} launches, seed {args.seed}) - tests logic, not profitability"
         gates, model = engine.gate_audit(), engine.model_card()
     else:
-        closed = load_trades(DATA, args.days)
-        eq = equity_from_trades(closed, sn.capital.starting_sol)
-        modes = sorted({c.get("source", "").split(":")[0] for c in closed})
-        source = f"{len(closed)} recorded trades from data/trades-*.jsonl ({', '.join(modes) or 'none'})"
+        everything = load_trades(DATA, args.days)
+        modes = sorted({row_mode(c) for c in everything})
+        mode = args.mode or (modes[0] if len(modes) == 1 else None)
+        if mode is None:                 # never merge demo, paper and live results without being asked
+            sys.exit(f"recorded trades come from several modes ({', '.join(modes)}): pick one with --mode "
+                     f"(or --mode all to combine them deliberately)")
+        closed = load_trades(DATA, args.days, mode, args.session)
+        runs = sessions(closed)
+        starts = {s for _, s, _ in runs if s}
+        start = runs[0][1] if runs and runs[0][1] else sn.capital.starting_sol
+        eq = equity_from_trades(closed, start)
+        strategies = sorted({c.get("source", "").split(":")[0] for c in closed})
+        source = (f"{len(closed)} recorded {mode} trades from data/trades-*.jsonl in {len(runs)} session(s); "
+                  f"strategies: {', '.join(strategies) or 'none'}")
+        if len(starts) > 1:
+            listed = ", ".join(f"{x:g}" for x in sorted(starts))
+            source += (f". NOTE: sessions started with different balances ({listed}"
+                       f" SOL); the equity curve adds all their P&L onto the first session's {start:g} SOL - "
+                       "use --session for one run's exact curve")
         gates, model = [], None
     out = Path(args.out) if args.out else DATA / "report.html"
     html_path, csv_path = write(closed, eq, sn.capital.starting_sol, sn.capital.max_drawdown_pct, out,
@@ -334,11 +445,15 @@ def _review(args, params) -> None:
         print("no closed trades in data/ yet - run the bot (paper is fine) first")
         return
     rv = review.ask_claude(data, params.sniper.desk.model)
+    rv["param_changes"], rv["rejected_changes"] = review.validate_changes(rv["param_changes"], dict(params["sniper"]))
     validation = None
     if args.validate and rv["param_changes"] and data["recorded_feed_files"]:
         files = data["recorded_feed_files"]
         base = asyncio.run(run_backtest(_copy.deepcopy(params), FileFeed(*files))).summary()
-        prop = apply_overrides(_copy.deepcopy(params), [f"{c['key']}={c['value']}" for c in rv["param_changes"]])
+        try:
+            prop = apply_overrides(_copy.deepcopy(params), [c["arg"] for c in rv["param_changes"]])
+        except ValueError as e:
+            sys.exit(f"proposed settings are invalid together: {e}")
         validation = {"baseline": base, "proposed": asyncio.run(run_backtest(prop, FileFeed(*files))).summary()}
     out = DATA / "reviews" / f"review-{time.strftime('%Y-%m-%d-%H%M', time.gmtime())}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -376,12 +491,17 @@ def main() -> None:
     sw.add_argument("--jobs", type=int, default=0, help="parallel processes (default: CPU cores - 1)")
     tr = sub.add_parser("train", help="fit and grade the P(2x first) model on recorded data")
     tr.add_argument("--train", type=float, default=0.7, help="share of launches used for fitting (rest grades it)")
-    tr.add_argument("--out", help="model file (default: sniper.predict.model_path)")
+    tr.add_argument("--out", help="candidate model file (default: <model_path>-candidate.json)")
+    pm = sub.add_parser("promote", help="deploy the trained candidate model (recorded data + skill required)")
+    pm.add_argument("--model", dest="file_model", help="candidate file (default: <model_path>-candidate.json)")
+    pm.add_argument("--force", action="store_true", help="promote even with low held-out skill")
     rp = sub.add_parser("report", help="shareable HTML performance report + trades CSV")
     rp.add_argument("--backtest", action="store_true", help="report a backtest instead of recorded trades")
     rp.add_argument("--days", type=int, help="recorded trades: only the last N days")
     rp.add_argument("--out", help="output HTML (default: data/report.html)")
     rp.add_argument("--title", default="Sniper performance report")
+    rp.add_argument("--mode", help="recorded trades: paper | live | paper-synthetic | unknown | all")
+    rp.add_argument("--session", help="recorded trades: only this session id (see the trades CSV)")
     cp = sub.add_parser("compare", help="A/B test setting variants across many market samples, in parallel")
     cp.add_argument("--variant", action="append", default=[], help="'name: key=value key=value' (repeat)")
     cp.add_argument("--seeds", default="1-6", help="synthetic market seeds, e.g. 1-8 or 1,3,5")
@@ -396,11 +516,14 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
-    for p in (r, b, lead, sw, tr, rp, cp, rv, sub.choices["doctor"]):
+    for p in (r, b, lead, sw, tr, rp, cp, rv, pm, sub.choices["doctor"]):
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
-    params = apply_overrides(config.load(args.config), args.set)
+    try:
+        params = apply_overrides(config.load(args.config), args.set)
+    except config.ConfigError as e:
+        sys.exit(f"config error: {e}")
     if args.cmd == "run":
         asyncio.run(_run(args, params))
     elif args.cmd == "backtest":
@@ -413,6 +536,8 @@ def main() -> None:
         _sweep(args, params)
     elif args.cmd == "train":
         _train(args, params)
+    elif args.cmd == "promote":
+        _promote(args, params)
     elif args.cmd == "report":
         _report(args, params)
     elif args.cmd == "compare":

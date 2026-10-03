@@ -148,6 +148,8 @@ sniper:
     slippage_pct: 15             # live: max buy slippage sent to PumpPortal (buys are never blindly retried)
     sell_slippage_steps: [15, 25, 40]   # live sells: re-quote with these slippages until one lands
     close_empty_accounts: true   # live: close emptied token accounts after a full exit (reclaims rent)
+    verify_tx: true              # live: simulate each PumpPortal-built transaction before signing and refuse it
+                                 # if it would move more of our SOL than the order allows (adds ~2 RPC calls)
     priority_fee_sol: 0.001      # buys (2026 norms: ~0.001-0.005 SOL; a pump.fun buy is ~250k CU)
     sell_priority_fee_steps: [0.001, 0.003, 0.008]   # sells escalate with each re-quote (dumps are congested)
 
@@ -227,16 +229,18 @@ sniper:
     stall_s: 45
     max_hold_s: 600
 
-  predict:                       # learned probability model (python -m meme_trader.sniper train ...)
-    enabled: true                # used only once a model file exists
+  predict:                       # learned probability model: `train` writes a candidate, `promote` deploys it
+    enabled: true                # used only once a PROMOTED model file exists
+    display_only: true           # true = P(2x) is shown but never changes a trade (no gate, no sizing).
+                                 # Set false only after a sweep/compare on recorded data shows it helps.
     model_path: data/model.json
     up_pct: 100                  # label: did price reach +100% (2x) ...
     down_pct: 30                 # ... before -30% ...
     horizon_s: 600               # ... within 10 minutes of the snapshot
     checkpoints_s: [15, 30, 60, 120, 180]
-    min_p: 0.0                   # entry gate on P(2x first); 0 = show only. Set after checking `train` metrics
-    kelly_fraction: 0.25         # quarter-Kelly: feeds the sizing agent's strength (never beyond the $ hard cap)
-    require_positive_ev: false   # skip entries the model says lose money after costs
+    min_p: 0.0                   # entry gate on P(2x first) (needs display_only: false)
+    kelly_fraction: 0.25         # quarter-Kelly into the sizing agent's strength (needs display_only: false)
+    require_positive_ev: false   # skip entries the model says lose money after costs (needs display_only: false)
 
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true

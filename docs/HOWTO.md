@@ -71,17 +71,18 @@ It **records the market** to `data/feed-YYYY-MM-DD.jsonl`. The model, backtests 
 ## 5. Train the P(2x) model
 After **2–3 days** of recording (more is better):
 ```bash
-scripts/start.sh train
+scripts/start.sh train      # writes a CANDIDATE model (data/model-candidate.json); the bot doesn't use it yet
+scripts/start.sh promote    # deploys it, only if trained on your recordings with held-out AUC >= 0.6
 ```
-It fits on your oldest launches, calibrates on the next slice, and **grades on the newest launches it never saw**. It prints a verdict:
+`train` fits on your oldest launches, calibrates on the next slice, and **grades on the newest launches it never saw**. The slices are purged, so no training outcome is known before the graded launches start. It prints a verdict:
 
 | Verdict | Do this |
 |---|---|
-| little skill (AUC < 0.6) | Nothing. P(2x) stays display-only. Record more and retrain. |
-| some skill (0.6–0.7) | Keep `min_p` at 0. The model still nudges sizing (quarter-Kelly). |
-| useful skill (> 0.7) | Test a gate first. See [9](#9-use-the-model-as-an-entry-filter). |
+| little skill (AUC < 0.6) | Don't promote. Record more and retrain. (`promote` refuses it anyway.) |
+| some skill (0.6–0.7) | Promote it to see P(2x) on the dashboard. Leave `predict.display_only: true`. |
+| useful skill (> 0.7) | Promote it, then test whether it helps as a filter first. See [9](#9-use-the-model-as-an-entry-filter). |
 
-A running bot picks up the new model within a minute; there's no need to restart it. **Retrain weekly**: pump.fun behaviour drifts, and research finds models trained on one period do worse on later ones.
+A running bot picks up a promoted model within a minute; there's no need to restart it. While `sniper.predict.display_only` is `true` (the default), **the model is shown but never changes a trade**: no entry gate, no sizing. A model trained on the simulated market can't be promoted at all. **Retrain weekly**: pump.fun behaviour drifts, and research finds models trained on one period do worse on later ones.
 
 ## 6. Change settings while it runs
 Open the **Controls** tab. Toggles and numbers apply instantly. Press **Save to config** to keep them after a restart; this writes `config/params.yaml`. Everything else lives in that file.
@@ -113,19 +114,24 @@ scripts/start.sh compare --variant "no_late: late.enabled=false"
 Turn it off any time with the **Graduation plays** chip, or `late.enabled: false` in the config.
 
 ## 9. Use the model as an entry filter
-Only after `train` says *useful skill*:
+Only after `train` says *useful skill*. A model can't be graded on launches it was trained on, so backtests, sweeps and compares on those days automatically run **without** it. Train on older days and test on newer ones:
 ```bash
-scripts/start.sh sweep --grid predict.min_p=0,0.15,0.25,0.35
+scripts/start.sh train --file data/feed-2026-10-0[1-4]*      # older days only
+scripts/start.sh promote
+scripts/start.sh sweep --file data/feed-2026-10-0[5-7]* --set predict.display_only=false \
+    --grid predict.min_p=0,0.15,0.25,0.35                      # newer days the model never saw
 ```
-If a value wins on the unseen data, set **Min P(2x first)** in Controls and Save.
+If a value wins on the unseen data, set `predict.display_only: false` and that `predict.min_p` in `config/params.yaml`, then restart.
 
 `predict.require_positive_ev: true` is a softer filter. It skips entries the model says lose money after fees.
 
 ## 10. Make a shareable report
 ```bash
-scripts/start.sh report                   # your paper/live trades
+scripts/start.sh report                   # your recorded trades (one mode: paper, live or demo)
+scripts/start.sh report --mode paper      # needed when you've run more than one mode
+scripts/start.sh report --session paper-20261003-053729    # one run only (session ids are in the CSV)
 ```
-This writes `data/report.html`, one self-contained page that opens anywhere, and `data/report.csv`, every trade for a spreadsheet. The page says plainly where its numbers come from. To report a backtest instead:
+This writes `data/report.html`, one self-contained page that opens anywhere, and `data/report.csv`, every trade for a spreadsheet. The page says plainly where its numbers come from. Demo, paper and live trades are tagged and never mixed unless you ask for `--mode all`. Trades recorded before tagging existed show up as `--mode unknown`. To report a backtest instead:
 ```bash
 scripts/start.sh report --backtest --file data/feed-*
 ```
@@ -164,7 +170,7 @@ Start with the smallest sizes.
 | Red **Halted** banner | The drawdown kill switch fired or KILL was pressed. Restart the bot to reset. |
 | "running · max positions" | All trading slots are full. Raise **Max open positions** or wait for exits. |
 | No buys for a long time | Look at **Why we passed** and the radar's rejected tokens, then check the gate audit in Analytics. |
-| `no model` badge | Normal until you run `scripts/start.sh train`. |
+| `no model` badge | Normal until you run `scripts/start.sh train` and then `scripts/start.sh promote`. |
 | Dashboard says disconnected | The bot stopped. Check the terminal, or `journalctl -u meme-sniper -n 50` on the mini PC. |
 
 Nothing here is financial advice. Most pump.fun tokens go to zero.

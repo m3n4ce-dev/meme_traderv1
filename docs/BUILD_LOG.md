@@ -4,6 +4,60 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #11: Second full code review (29 findings), all fixed
+
+### Owner input
+- A full read-only review of `7a26092` came back from another session: 29 findings, 8 of them P1, plus offline probe scripts. The owner chose "fix everything (A-D)" and to keep the DexScreener bot's live mode, with isolated state.
+- The probe scripts weren't run here (running code from the zip was blocked by the permission system). Each finding was checked against the source instead (R01, R05, R14, R15 and R16 by direct reading, all confirmed), and every fix got its own regression test written to the review's acceptance check.
+
+### Fixed
+| # | Finding | Fix |
+|---|---|---|
+| R01 P1 | Trade logs accepted from any program in a pump.fun transaction | `parse_logs` tracks the invoke/success stack and takes a `TradeEvent` only while pump.fun itself is executing. Bad depth, unmatched success or truncated logs reject the whole tx. **Live check: 1,354 of 1,354 real trades still accepted** |
+| R02 P1 | Order confirmation blocked the feed | Live orders run as their own tasks (per-mint serialized, cash reserved first), so other tokens' stops and dev sells keep being processed. Shutdown waits for sent orders. Backtests stay inline (deterministic) |
+| R03 P1 | Unknown outcomes treated as failures and re-sent | Signed locally first (signature known before sending). Unclear sends/confirmations return `unknown`, never retried. `Engine.unresolved` is persisted, resolved on-chain every 5 s (a late buy becomes a managed position), and released after the blockhash must have expired |
+| R04 P1 | Buys didn't reserve cash; final size not re-checked | One central `_authorize` with the final size, plus `book.reserved` (principal + fees + live rent) that every approval counts |
+| R05 P1 | Callouts skipped the daily-loss / feed-health gates | `_global_block` (halt, pause, degraded feed, daily loss) applies to every entry source. Callout cards post only after the bag fills; one callout in flight at a time |
+| R06 P1 | Ledger missed failed-tx fees, clamped negative sells, never re-read SOL | `fees_lost`, signed sell proceeds and account rent (locked/reclaimed, confirmed) all move cash. Live: wallet SOL is checked every 2 min and on restore; a shortfall lowers the ledger and counts against today's loss |
+| R07 | Restart lost creator/dev-sell/defense context | State saves each held token's launch and `dev_sold`, plus defense mode. A later Launch fills a missing launch object |
+| R08 P1 | UI bind failure left a second engine trading; no instance lock | `flock` per mode per data folder, plus per live wallet across checkouts. The dashboard binds before trading; a busy port exits with nothing traded. Helper-task failures are reported |
+| R09 | Metadata URLs could reach private services | http(s) only. Literal IPs and DNS results must be public (custom resolver, so redirects too). Manual redirects (max 3, each checked), 64 KB cap, 8 at once, string fields only |
+| R10 | SOL quote recognised by ticker | Canonical wrapped-SOL mint address + requested base mint required |
+| R11 | Failed txs made fake funding links | Failed signatures/transactions skipped. Unavailable data raises (retried later) instead of being cached as "unknown" |
+| R12 | Demo/paper/live trades mixed in reports | Trade rows carry mode, session, start balance, config hash and model id. `report` refuses mixed modes without `--mode`, has `--session`, flags differing start balances. Review uses paper/live rows only |
+| R13 | Leader discovery mis-ranked wallets | Open bags = value minus remaining cost; a win is decided on the whole round trip |
+| R14 | Replays used future information | Purged splits (training stops at the cutoff, embargo of max checkpoint + horizon for training, longest hold for sweeps). Models record their data window; replays only use a model trained before their first event. Replays start with neutral caller weights |
+| R15 | Synthetic models could deploy; "display only" still sized | `train` writes a candidate; `promote` requires recorded data + held-out AUC ≥ 0.6. Live loads promoted models only. New `predict.display_only: true` (default): the model changes no trade |
+| R16 | Unfinished label windows counted as losses | Censored (dropped) unless the recording covers the full horizon |
+| R17 | Social links dropped in training | New `Metadata` event stamped at arrival, applied the same way in training, replay and live |
+| R18 | Max drawdown forgot losses outside the chart buffer | `Book.mark` tracks the session peak and max drawdown on every tick; analytics and compare use it |
+| R19 | AI desk failures made approval easier | Errors stay in the denominator. The skeptic must answer; at least half the voting weight must respond |
+| R20 | X setup deleted other apps' rules; no error backoff | Rules tagged `meme_trader`, only ours replaced. HTTP status checked: 401/403 stop, 429 honours the reset header, others back off exponentially |
+| R21 | Failed Telegram alerts counted as sent | Only `ok` responses count; 429 honours `retry_after`; bounded retries; failures counted and printed |
+| R22 | Review commands interpolated model output | Proposals validated against real keys and types, JSON-encoded, `shlex`-quoted |
+| R23 | Sniper config never validated | `validate_sniper`: ranges, finite numbers, non-empty retry lists, cross-field rules. Runs at load, after every `--set`, and on dashboard changes (reverted if invalid). `ConfigError` instead of `assert` |
+| R24 P1 | DexScreener bot reused paper state live | State per mode and wallet (`state-paper.json`, `state-live-<wallet>.json`). A mismatched file is refused. Live reconciles tokens and SOL before trading; resuming needs only the fee reserve |
+| R25 | Legacy kill switch could sell partially or not at all | Halt is evaluated first and always sells the full balance, with or without a display price |
+| R26 | Legacy LP check could validate the wrong pool | Uses the selected pool's lock; missing data fails |
+| R27 | Dust write-offs understated the daily loss | The remaining basis is written off into `day_pnl` exactly once in `_close` |
+| R28 | Unknown price bypassed the graduation max hold | Unknown-price exits use each strategy's own limit (late, callout, generic) |
+| R29 | Minimum size overrode the liquidity cap | The cap is a hard ceiling; below a viable minimum (half the base size) it returns 0 = no trade |
+| extra | PumpPortal-built transactions were signed unseen | `Wallet.sign` checks we're the fee payer. `execution.verify_tx` simulates each transaction and refuses one that would move more SOL than the order allows |
+
+Also: `_lock` closes its file when refusing; reservations restore only for still-unresolved buys; order-task exceptions are logged; the cash check skips if the ledger moved mid-read.
+
+### Checks
+- Tests: **144 passing** (+52). The new ones in `tests/test_review_round2.py` follow the review's acceptance checks.
+- Backtest of the recorded free-feed hour: **identical results before and after** (13 trades, +0.149 SOL). The fixes change failure handling, not normal paper behaviour.
+- A 70 s paper run of the new code from a separate folder recorded launches, trades and a `metadata` event. A second copy was refused by the lock, and the demo was refused on the service's busy port before trading.
+
+### Behaviour changes to know
+- `train` no longer changes the running bot: run `promote` after it. The model is display-only until `predict.display_only: false`.
+- Backtests, sweeps and compares on the days a model was trained on run without it. To test the model as a filter, train on older days and sweep newer ones (HOWTO §9).
+- The DexScreener bot now fails tokens whose selected pool has no LP-lock data. If RugCheck's market ids don't match DexScreener's pair addresses for some pools, those tokens will be skipped (conservative by design).
+
+---
+
 ## 2026-10-03 — Entry #10: Free on-chain trade feed (PumpPortal's meter was the bottleneck)
 
 ### What happened

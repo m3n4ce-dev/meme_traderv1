@@ -7,7 +7,7 @@ from meme_trader.sniper.curve import CURVE_TOKENS, Curve
 from meme_trader.sniper.engine import Engine, reason_key
 from meme_trader.sniper.events import Launch, Trade, dumps, loads
 from meme_trader.sniper.execution import PaperExecutor
-from meme_trader.sniper.feeds import TRADE_EVENT, PumpPortalFeed, SolanaTradeFeed, SyntheticFeed
+from meme_trader.sniper.feeds import PUMP_PROGRAM, TRADE_EVENT, PumpPortalFeed, SolanaTradeFeed, SyntheticFeed
 from meme_trader.sniper.signals import extract_mints
 from meme_trader.sniper.strategy import SniperPosition, evaluate_entry, evaluate_exit
 from meme_trader.sniper.tracker import TokenState
@@ -163,9 +163,13 @@ def _trade_log(mint: bytes, sol: int, tokens: int, buy: bool, user: bytes, v_sol
     return "Program data: " + base64.b64encode(raw + bytes(250)).decode()
 
 
+def _in_pump(*lines, depth=1):
+    return [f"Program {PUMP_PROGRAM} invoke [{depth}]", *lines, f"Program {PUMP_PROGRAM} success"]
+
+
 def test_solana_logs_parse_real_trade():
     t, = SolanaTradeFeed.parse_logs({"signature": "sig", "err": None,
-                                     "logs": ["Program log: Instruction: Buy", REAL_TRADE_LOG]}, 5.0)
+                                     "logs": _in_pump("Program log: Instruction: Buy", REAL_TRADE_LOG)}, 5.0)
     assert t.mint == "3Ad4mzd7W1qSZ9pdevHudtyGKuLMJucwSciz1LbVpump"
     assert t.trader == "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
     assert (t.side, t.sol, t.tokens) == ("buy", 0.012595111, 351424.668752)
@@ -176,7 +180,7 @@ def test_solana_logs_parse_skips_noise_and_failed_tx():
     from solders.pubkey import Pubkey
     mint, user = bytes(Pubkey.from_string(MINT[:32] + "1" * 12)), bytes(range(32))
     sell = _trade_log(mint, 250_000_000, 7_000_000_000_000, False, user, 31_000_000_000, 1_030_000_000_000_000)
-    logs = ["Program data: !!not base64!", "Program data: " + "QUJD" * 30, sell]   # junk, other program's event
+    logs = _in_pump("Program data: !!not base64!", "Program data: " + "QUJD" * 30, sell)   # junk, non-trade event
     t, = SolanaTradeFeed.parse_logs({"err": None, "logs": logs}, 1.0)
     assert (t.side, t.sol, t.tokens, t.v_sol, t.v_tokens) == ("sell", 0.25, 7_000_000.0, 31.0, 1_030_000_000.0)
     assert t.trader == str(Pubkey.from_bytes(user))
