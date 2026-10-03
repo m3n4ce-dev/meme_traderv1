@@ -5,9 +5,12 @@ the MCP server in mcp_server.py today, an autonomous loop later - works one leve
 which strategies run, investigating tokens, manual buys and exits, and explaining what it did.
 
 Guardrails live HERE, in code, so no prompt can talk past them:
-* every risk limit the owner configured at start is a ceiling: the agent may lower risk freely
-  (smaller sizes, fewer positions, a tighter loss limit, strategies off, pause) but never raise it
-  beyond the configured value, and never re-enable a strategy the config had off;
+* every risk limit the owner configured is a ceiling: the agent may lower risk freely (smaller sizes,
+  fewer positions, a tighter loss limit, strategies off, pause, the risk dial down) but never raise it
+  beyond the configured value - or the level the owner set on the risk dial - and never re-enable a
+  strategy the config had off;
+* the risk dial goes UP only with the owner's approval (the dashboard chat always asks for that one, even
+  with "ask before actions" off) and never above risk.max_level;
 * it can't switch to live trading, touch the wallet, save risk settings to disk, or press the kill switch;
 * paper mode only: it can add pretend SOL to the paper balance (capped per deposit), optionally as the new
   starting balance in the config;
@@ -30,7 +33,7 @@ STRATEGY_KEYS = ("entry.enabled", "copy.enabled", "callouts.enabled", "late.enab
 SAFETY_KEYS = ("risk_adapt.enabled",)              # protective: may be turned on, off only if config had it off
 
 READ_TOOLS = ("status", "positions", "radar", "token", "lookup", "analytics", "trades", "log", "settings")
-ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit")
+ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk")
 
 
 def _get(p, key: str):
@@ -106,6 +109,7 @@ class AgentAPI:
                                           "profit_factor") if k in s},
             "by_strategy": {k: {"closed": v["closed"], "win_rate": v["win_rate"], "pnl_sol": v["realized_pnl_sol"]}
                             for k, v in s.get("by_source", {}).items()},
+            "risk_dial": {k: v for k, v in self.e.risk_info().items() if k != "levels"},
             "agent_limits": {"buys_left_this_hour": max(self.max_buys_per_hour - len(self.buys), 0),
                              "can_buy": self.can_buy, "max_buy_usd": self.max_buy_usd},
         }
@@ -162,19 +166,26 @@ class AgentAPI:
     def read_log(self, n: int = 30) -> dict:
         return {"log": list(self.e.log)[-max(1, min(int(n), 200)):][::-1]}
 
+    def _ceiling(self, key: str):
+        """Dial-scaled settings: the value at the owner's current dial level. Others: as configured."""
+        if key in self.e.risk_base:
+            return self.e.risk_values(self.e.risk_level)[key]
+        return self.start[key]
+
     def read_settings(self) -> dict:
-        limits = {k: f"<= {v}" for k, v in self.start.items() if k in CEILING_KEYS}
+        limits = {k: f"<= {self._ceiling(k)}" for k in CEILING_KEYS}
         limits.update({k: f">= {v}" for k, v in self.start.items() if k in FLOOR_KEYS})
         limits.update({k: "may turn off" + (", and back on" if v else " (config has it off)")
                        for k, v in self.start.items() if k in STRATEGY_KEYS})
         limits.update({k: "may turn on" + (", and off" if not v else " (not off)")
                        for k, v in self.start.items() if k in SAFETY_KEYS})
-        return {"settings": self.e.controls(), "agent_limits": limits}
+        return {"settings": self.e.controls(), "agent_limits": limits, "risk_dial": self.e.risk_info()}
 
     # ------------------------------------------------------------------ actions
     def _check_limit(self, key: str, value) -> None:
-        if key in CEILING_KEYS and float(value) > float(self.start[key]):
-            raise AgentError(f"{key} can't go above the configured {self.start[key]} (owner's limit)")
+        if key in CEILING_KEYS and float(value) > float(self._ceiling(key)):
+            raise AgentError(f"{key} can't go above {self._ceiling(key)} (owner's limit at risk level "
+                             f"{self.e.risk_level}); ask the owner to approve a higher risk level instead")
         if key in FLOOR_KEYS and float(value) < float(self.start[key]):
             raise AgentError(f"{key} can't go below the configured {self.start[key]} (owner's limit)")
         on = str(value).lower() in ("1", "true", "yes", "on") if not isinstance(value, bool) else value
@@ -192,7 +203,7 @@ class AgentAPI:
             self._check_limit(key, value)
         except (TypeError, ValueError) as err:
             raise AgentError(str(err)) from None
-        err = self.e.set_control(key, value)
+        err = self.e.set_control(key, value, owner=False)
         if err:
             raise AgentError(err)
         self._say(f"set {key} = {_get(self.e.p, key)} | {reason}")
@@ -292,6 +303,15 @@ class AgentAPI:
         out["note"] = ("saved: restarts begin with this balance" if keep else
                        "this run only - a restart starts from capital.starting_sol again")
         return out
+
+    async def act_risk(self, level, reason: str) -> dict:
+        reason = self._reason(reason)
+        err = self.e.set_risk(level, who="agent", reason=reason)
+        if err:
+            raise AgentError(err)
+        return {"risk_level": self.e.risk_level, "name": self.e.risk_info()["name"],
+                **{k.split(".")[1]: v for k, v in self.e.risk_values(self.e.risk_level).items()},
+                "note": "lasts until restart; the owner's dashboard dial is saved, this isn't"}
 
     async def act_note(self, text: str) -> dict:
         text = str(text or "").strip()[:500]

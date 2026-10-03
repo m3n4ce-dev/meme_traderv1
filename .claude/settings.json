@@ -12,6 +12,7 @@
       "mcp__meme-trader__get_settings"
     ],
     "ask": [
+      "mcp__meme-trader__set_risk_level",
       "mcp__meme-trader__set_setting",
       "mcp__meme-trader__pause_entries",
       "mcp__meme-trader__resume_entries",

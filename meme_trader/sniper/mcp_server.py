@@ -185,6 +185,15 @@ async def watch_token(mint: str, reason: str) -> str:
 
 
 @tool(CHANGE)
+async def set_risk_level(level: int, reason: str) -> str:
+    """Turn the risk dial: 1 Cautious (x0.5), 2 Normal (the owner's settings), 3 Bold (x1.5), 4 Aggressive (x2),
+    5 Max (x3) - it scales trade size, open positions and the daily loss limit together. Lowering is always
+    allowed. Raising always needs the owner's approval and can't exceed risk.max_level. Use it when the owner
+    asks for more or less risk; get_status shows the current level."""
+    return await _call("risk", level=level, reason=reason)
+
+
+@tool(CHANGE)
 async def add_paper_funds(sol: float, reason: str, keep_after_restart: bool = False) -> str:
     """PAPER mode only: add pretend SOL to the paper balance (counts as starting capital, not profit).
     keep_after_restart=true also saves it as the new starting balance in the config. Only when the user asks."""
