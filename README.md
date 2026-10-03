@@ -146,11 +146,13 @@ The limits live in the bot, not in the prompt:
 
 ## Screenshots
 
-| Live: money, positions, market pulse | Chat: ask, approve actions, paste a contract address |
+| Live: risk dial, positions, market pulse | Chat: ask, approve actions, paste a contract address |
 |---|---|
 | ![Live view](docs/img/live.png) | ![Chat with Claude](docs/img/chat.png) |
-| **Token detail: every gate, live** | **Analytics: what's working and what isn't** |
+| **Token detail: every gate, live** | **Analytics: P&L by strategy and exit reason** |
 | ![Token detail with gate checklist](docs/img/token-detail.png) | ![Analytics view](docs/img/analytics.png) |
+
+Screenshots are from the built-in demo (`scripts/start.sh demo`, a simulated market), so the profits in them aren't results. Real results are under [Results so far](#results-so-far).
 
 ## Configuration
 
