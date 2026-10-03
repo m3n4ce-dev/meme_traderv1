@@ -1,6 +1,9 @@
 # meme_traderv1
 
-A paper-first trading bot for **pump.fun** launches on Solana. It watches every new token as it launches, screens out rugs and insider launches, and trades two strategies: early momentum and late-curve "graduation plays". A live dashboard shows every decision as it happens.
+Paper-first memecoin trading bots for **Solana**, in two parts:
+
+- **pump.fun engine** (the main one). It watches every new pump.fun token as it launches and screens out rugs and insider launches. It trades late-curve "graduation plays" and early momentum, and can copy chosen wallets or act on calls from Telegram and X. A live dashboard shows every decision as it happens.
+- **DexScreener momentum bot.** It scans trending Solana tokens on DexScreener, any token rather than only pump.fun launches, checks them with RugCheck and a sell-back test, and trades through Jupiter.
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
@@ -45,7 +48,8 @@ What's known so far:
 - **Trades two main strategies:**
   - **Graduation plays:** strong momentum late on the bonding curve, sold before the token migrates.
   - **Early sniper:** confirms momentum first, then rides it. It doesn't try to win block-0 races against insiders.
-  - Optional: **copy trading** of chosen wallets, and **$1 callout positions**.
+  - Optional: **copy trading** of chosen wallets (mirror their buys, or use them as a signal), **Telegram/X call signals** (contract addresses posted in channels you choose), and **$1 callout positions**.
+- **Sells after graduation too.** Exits route to the bonding curve or, once a token has migrated, to its PumpSwap pool.
 - **Manages risk:**
   - a dollar hard cap per buy, a daily loss limit and a drawdown kill switch;
   - a "defense mode" that halves size after a losing run;
@@ -119,6 +123,8 @@ Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 | `ANTHROPIC_API_KEY` | Optional AI trading desk (`--desk`) and post-mortem review agent |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | Phone alerts for buys, closes and errors |
 | `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `MEME_TRADER_CONFIRM_LIVE` | Live trading only |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `X_BEARER_TOKEN` | Call signals from Telegram channels / X accounts |
+| `JUPITER_API_KEY` | DexScreener bot: realistic paper quotes + sell-back check; required for its live mode |
 | `PUMPPORTAL_API_KEY` | Only for the metered PumpPortal trade stream (`sniper.feed.trades: pumpportal`) |
 
 ## Going live
@@ -145,14 +151,27 @@ Live mode is locked behind `--live`, `MEME_TRADER_CONFIRM_LIVE=yes` and a matchi
 ```
 meme_trader/sniper/   pump.fun engine: feeds, tracker, strategies, risk, analytics, CLI
 meme_trader/ui/       dashboard server + single-page UI
-meme_trader/agents/   original DexScreener momentum bot (paper, legacy)
+meme_trader/agents/   DexScreener momentum bot: scout, safety, analyst, risk, executor, monitor
 config/               params.example.yaml (all settings, commented)
 scripts/              setup and start scripts for Mac / Ubuntu
 deploy/               systemd service
 tests/                pytest suite (92 tests)
 ```
 
-The repo also contains the original DexScreener momentum bot (`python -m meme_trader`), kept as a paper-only scaffold. The pump.fun engine above is the main strategy.
+### DexScreener momentum bot
+
+A separate, simpler bot for **any Solana token**, not only pump.fun launches:
+1. A scout pulls fresh and boosted tokens from DexScreener.
+2. Safety checks run RugCheck, holder concentration, and a buy-then-sell quote round-trip to catch tokens that can't be sold.
+3. An analyst scores momentum, risk sizes the position, and the executor trades through Jupiter.
+
+```bash
+cp config/params.example.yaml config/params.yaml   # edit values
+python -m meme_trader --once                       # one cycle
+python -m meme_trader                              # loop (paper by default)
+```
+
+Every decision is written to `data/journal-YYYY-MM-DD.jsonl`. Live mode needs `JUPITER_API_KEY`, a dedicated wallet keypair and `MEME_TRADER_CONFIRM_LIVE=yes`. It runs on live DexScreener and RugCheck data in paper mode, but it's less developed than the pump.fun engine and hasn't had an extended paper run yet.
 
 ## Development
 
