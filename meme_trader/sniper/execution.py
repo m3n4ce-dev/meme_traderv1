@@ -27,6 +27,7 @@ class SniperFill:
     rent_reclaimed: float = 0.0  # sell: SOL back from closing the emptied token account (net of its fee)
     fees_lost: float = 0.0       # SOL burned by attempts that landed on-chain but failed
     unknown: bool = False        # sent, but whether it landed isn't known yet (see Engine.unresolved)
+    timing: dict | None = None   # live: seconds to build / send / confirm, landing slot and block time
 
     @property
     def price(self) -> float:
@@ -117,6 +118,8 @@ class LiveExecutor:
 
         w = self.wallet
         priority = self.ex.priority_fee_sol if priority is None else priority
+        t0 = time.time()
+        timing: dict = {"started": t0}
         try:
             r = httpx.post(self.URL, timeout=10, data={
                 "publicKey": w.pubkey, "action": action, "mint": mint, "amount": amount,
@@ -130,10 +133,12 @@ class LiveExecutor:
             if why:
                 return SniperFill(False, error=why)
             raw, sig = w.sign(tx_b64)
+            timing["build_s"] = round(time.time() - t0, 3)
         except Exception as e:                       # nothing was sent
             return SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
         try:
             w.send(raw)
+            timing["sent"] = time.time()
         except RuntimeError as e:                    # the RPC answered with an error (e.g. preflight): not sent
             if str(e).startswith("RPC sendTransaction"):
                 return SniperFill(False, signature=sig, error=str(e)[:240])
@@ -144,6 +149,7 @@ class LiveExecutor:
             landed = confirm(sig, timeout_s=30)
         except Exception:
             landed = False
+        timing["confirm_s"] = round(time.time() - timing.get("sent", t0), 3)
         d = None
         for _ in range(4):                           # the tx can take a moment to be queryable
             try:
@@ -154,7 +160,12 @@ class LiveExecutor:
                 break
             time.sleep(1.5)
         if d is not None:
-            return self._fill_from(d, action, sig)
+            fill = self._fill_from(d, action, sig)
+            timing.update(slot=d.get("slot"), block_time=d.get("block_time"))
+            if d.get("block_time") and timing.get("sent"):   # landing measured by the chain, not our polling
+                timing["landed_after_send_s"] = round(d["block_time"] - timing["sent"], 1)
+            fill.timing = timing
+            return fill
         if not landed:                               # not confirmed and not found: we don't know yet
             return SniperFill(False, unknown=True, signature=sig, error="not confirmed yet - outcome unknown")
         # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
