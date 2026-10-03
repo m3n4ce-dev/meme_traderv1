@@ -81,6 +81,7 @@ class Book:
         self.reserved: dict[str, float] = {}               # mint -> SOL held back for an in-flight buy
         self.peak_equity = start_sol
         self.max_dd_pct = 0.0
+        self.deposits: list[tuple[float, float]] = []     # paper top-ups: (ts, SOL)
 
     @property
     def available(self) -> float:
@@ -173,6 +174,8 @@ class Engine:
         self._analytics: tuple | None = None
         self._summary_cache: tuple | None = None
         self.last_event = 0.0                              # feed health: time of the last real event
+        # per minute: [ts, launches, trades, SOL bought, SOL sold, graduations] (dashboard "market pulse")
+        self.pulse: deque = deque(maxlen=90)
         self._last_flush = 0.0
 
     # ------------------------------------------------------------------ helpers
@@ -189,6 +192,30 @@ class Engine:
 
     def equity(self) -> float:
         return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items())
+
+    def _pulse_row(self) -> list:
+        minute = int(self.now // 60) * 60
+        if not self.pulse or self.pulse[-1][0] != minute:
+            self.pulse.append([minute, 0, 0, 0.0, 0.0, 0])
+        return self.pulse[-1]
+
+    def deposit_paper(self, sol: float) -> dict:
+        """Add pretend SOL to a paper account. It counts as starting capital, not profit: the start, the peak
+        and the equity history all move up with the cash, so P&L, returns and drawdown read the same."""
+        if self.mode.startswith("live"):
+            raise ValueError("deposits are paper only - the live balance is what the wallet holds")
+        sol = float(sol)
+        if not 0 < sol <= 10_000:
+            raise ValueError("deposit must be more than 0 and at most 10000 SOL")
+        b = self.book
+        b.sol += sol
+        b.start_sol += sol
+        b.peak_equity += sol
+        b.equity_hist = deque(((t, e + sol) for t, e in b.equity_hist), maxlen=b.equity_hist.maxlen)
+        b.deposits.append((self.now, sol))
+        self._snap_cache = self._analytics = self._summary_cache = None
+        self.say("info", f"paper deposit +{sol:g} SOL: cash {b.sol:.3f} SOL, starting balance now {b.start_sol:g} SOL")
+        return {"cash_sol": round(b.sol, 6), "start_sol": round(b.start_sol, 6), "equity_sol": round(self.equity(), 6)}
 
     def _global_block(self) -> str:
         """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout)."""
@@ -396,6 +423,13 @@ class Engine:
             self.last_event = self.now
             if self.record_file:
                 self.record_file.write(dumps(e) + "\n")
+            if isinstance(e, (Trade, Migration)):
+                row = self._pulse_row()
+                if isinstance(e, Migration):
+                    row[5] += 1
+                else:
+                    row[2] += 1
+                    row[3 if e.side == "buy" else 4] += e.sol
         if isinstance(e, Launch):
             await self._on_launch(e)
         elif isinstance(e, Metadata):
@@ -435,6 +469,7 @@ class Engine:
                     s.buyers.add(e.creator)
             return
         self.stats["launches"] += 1
+        self._pulse_row()[1] += 1
         self.creators[e.creator].append(e.ts)
         self.symbols[e.symbol.upper()].append(e.ts)
         s = TokenState(e.mint, e, e.ts)
@@ -1494,6 +1529,22 @@ class Engine:
         self.say("info", f"settings saved to {path.name}")
         return ""
 
+    def save_setting(self, key: str, value, path: Path | None = None) -> None:
+        """Write one sniper.* value into config/params.yaml (other keys untouched)."""
+        import yaml
+
+        path = path or ROOT / "config" / "params.yaml"
+        data = (yaml.safe_load(path.read_text()) if path.exists() else {}) or {}
+        node = data.setdefault("sniper", {}) or {}
+        data["sniper"] = node
+        *keys, last = key.split(".")
+        for k in keys:
+            nxt = node.get(k) or {}
+            node[k] = nxt
+            node = nxt
+        node[last] = value
+        path.write_text(yaml.safe_dump(data, sort_keys=False))
+
     def token_detail(self, mint: str) -> dict | None:
         s = self.tokens.get(mint)
         if s is None:
@@ -1681,6 +1732,9 @@ class Engine:
             "strategies": {"sniper": self.p.entry.enabled, "copy": self.p.copy.enabled,
                            "callouts": self.p.callouts.enabled, "late": self.p.late.enabled},
             "tracked_tokens": len(self.tokens),
+            "pulse": [list(r) for r in self.pulse][-60:], "deposits": self.book.deposits[-20:],
+            "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
+                       "kill_dd_pct": self.p.capital.max_drawdown_pct},
             "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),
                      "degraded": bool(getattr(self.feed, "degraded", False)),
                      "degraded_reason": getattr(self.feed, "degraded_reason", ""),

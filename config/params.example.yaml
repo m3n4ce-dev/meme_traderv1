@@ -223,9 +223,19 @@ sniper:
     max_buy_usd: 0               # per agent buy; 0 = same as sizing.max_usd
     max_buys_per_hour: 6
     max_actions_per_min: 20
+    max_deposit_sol: 100         # paper only: most pretend SOL one deposit may add (the agent asks via add_paper_funds)
     # The agent may LOWER any risk setting and pause, but never raise sizing, positions, loss limit or
     # stop loss above what's configured here, re-enable a strategy that's off here, switch to live,
-    # save settings, or press the kill switch. Its actions are journaled with its reasons.
+    # save risk settings, or press the kill switch. Its actions are journaled with its reasons.
+
+  chat:                          # the dashboard's Chat tab: Claude Code (claude -p) on your Claude plan, no API key
+    enabled: true                # needs agent.enabled and Claude Code installed and logged in
+    model: ""                    # "" = your Claude Code default | opus | sonnet | haiku (also switchable in the tab)
+    ask_first: true              # every action waits for Approve / Decline in the dashboard (reads never do)
+    auto_read_ca: true           # a pasted contract address gets its metrics card AND Claude's read
+    claude_bin: ""               # path to the claude binary; "" = find it on PATH or in ~/.local/bin
+    timeout_s: 600               # longest one answer may take
+    approval_timeout_s: 600      # an unanswered approval is declined after this
 
   late:                          # "graduation play": strong late-curve momentum, out before migration
     enabled: true                # on in paper to gather evidence; check its row in Analytics > By strategy before live
