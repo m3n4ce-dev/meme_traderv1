@@ -206,7 +206,8 @@ def test_dashboard_api_and_settings_over_the_socket():
             tok = await c.get(f"/api/token/{MINT}", headers=h)
             missing = await c.get("/api/token/xyz", headers=h)
             ctl = await c.get("/api/controls", headers=h)
-            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", **h})
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", **h}, compress=15)
+            assert ws.compress == 0      # deflate declined: it broke the socket as soon as a reply was sent
             snap = json.loads((await ws.receive()).data)
             await ws.send_str("not json")
             await ws.send_json({"action": "set", "key": "entry.min_score", "value": 64})
