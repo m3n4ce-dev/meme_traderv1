@@ -131,6 +131,7 @@ class Engine:
         self._last_late_scan = -1e12
         self._snap_cache: tuple[float, dict] | None = None
         self._analytics: tuple | None = None
+        self.last_event = 0.0                              # feed health: time of the last real event
         self._last_flush = 0.0
 
     # ------------------------------------------------------------------ helpers
@@ -266,8 +267,10 @@ class Engine:
 
     async def _handle(self, e: Event) -> None:
         self.now = max(self.now, e.ts)
-        if self.record_file and not isinstance(e, Tick):
-            self.record_file.write(dumps(e) + "\n")
+        if not isinstance(e, Tick):
+            self.last_event = self.now
+            if self.record_file:
+                self.record_file.write(dumps(e) + "\n")
         if isinstance(e, Launch):
             await self._on_launch(e)
         elif isinstance(e, Trade):
@@ -1175,7 +1178,8 @@ class Engine:
         return {"trained_at": info.get("trained_at"), "label": info.get("label"), "n_train": info.get("n_train"),
                 "n_test": info.get("n_test"), "auc": t.get("auc"), "brier_skill": t.get("brier_skill"),
                 "base_rate": t.get("base_rate"), "top_decile_rate": t.get("top_decile_rate"),
-                "calibration": t.get("calibration", []), "weights": info.get("weights", [])[:12]}
+                "calibration": t.get("calibration", []), "weights": info.get("weights", [])[:12],
+                "temperature": info.get("temperature")}
 
     def analytics(self) -> dict:
         """Recomputed when a trade closes or the gate audit moves, else at most once a minute (feed time)."""
@@ -1242,6 +1246,7 @@ class Engine:
                 "mcap_sol": s.curve.market_cap_sol, "buyers": len(s.buyers), "score": s.score,
                 "notes": s.score_notes[:3], "status": status, "socials": len(s.socials),
                 "links": int(bool(L and L.twitter)) + int(bool(L and L.telegram)) + int(bool(L and L.website)),
+                "lk": [int(bool(L and L.twitter)), int(bool(L and L.telegram)), int(bool(L and L.website))],
                 "p": s.p, "bundle_pct": s.bundle_pct(), "dev_pct": s.dev_initial_pct(), "spark": s.sparkline(40),
             })
         positions, bags = [], []
@@ -1259,7 +1264,7 @@ class Engine:
                 "price": price, "gain_pct": pos.gain_pct(price), "peak_gain_pct": pos.gain_pct(pos.peak_price),
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
-                "source": pos.source, "desk": pos.desk,
+                "source": pos.source, "desk": pos.desk, "p": pos.p,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
@@ -1287,6 +1292,10 @@ class Engine:
             "strategies": {"sniper": self.p.entry.enabled, "copy": self.p.copy.enabled,
                            "callouts": self.p.callouts.enabled, "late": self.p.late.enabled},
             "tracked_tokens": len(self.tokens),
+            "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),
+                     "degraded": bool(getattr(self.feed, "degraded", False)),
+                     "connected": getattr(self.feed, "ws", True) is not None,
+                     "last_event_age_s": round(self.now - self.last_event, 1) if self.last_event else None},
         }
 
     def save_report(self, path: Path) -> None:

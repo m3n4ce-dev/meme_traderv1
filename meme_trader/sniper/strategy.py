@@ -217,7 +217,7 @@ def gate_checklist(s: TokenState, now: float, p, ctx: dict) -> list[dict]:
     age, prog = s.age(now), s.curve.progress * 100
     flow = s.net_flow_sol(now, p.flow_window_s)
     rows = [
-        ("dev hasn't sold", "hard", "sold" if s.dev_sold else "no", "no", not s.dev_sold),
+        ("dev hasn't sold", "hard", "sold" if s.dev_sold else "holding", "", not s.dev_sold),
         ("dev initial buy", "hard", f"{s.dev_initial_pct():.1f}%", f"<= {p.max_dev_buy_pct}%", s.dev_initial_pct() <= p.max_dev_buy_pct),
         ("bundled supply", "hard", f"{s.bundle_pct():.1f}%", f"<= {p.max_bundle_pct}%", s.bundle_pct() <= p.max_bundle_pct),
         ("early buyers dumped", "hard", f"{s.early_sold_ratio():.0%}", f"<= {p.max_early_sold_ratio:.0%}", s.early_sold_ratio() <= p.max_early_sold_ratio),

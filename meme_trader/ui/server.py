@@ -75,12 +75,21 @@ def make_app(engine) -> web.Application:
         allowed = {f"http://{host}", f"https://{host}"} if _local(host) else set()
         if origin not in allowed:
             return web.Response(status=403, text="forbidden origin")
-        sock = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
+        # No permessage-deflate: with it, a small reply sent between the 80 KB snapshots corrupted the
+        # compressed stream and Chromium dropped the socket (close 1002) the moment a setting was changed.
+        # The traffic stays on this machine or inside an SSH tunnel, so compression buys nothing here.
+        sock = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024, compress=False)
         await sock.prepare(request)
+        lock = asyncio.Lock()                        # one writer at a time: snapshots and replies never interleave
+
+        async def send(text: str) -> None:
+            async with lock:
+                if not sock.closed:
+                    await sock.send_str(text)
 
         async def pump():
             while not sock.closed:
-                await sock.send_str(snapshot_text())
+                await send(snapshot_text())
                 await asyncio.sleep(1)
 
         task = asyncio.create_task(pump())
@@ -96,8 +105,8 @@ def make_app(engine) -> web.Application:
                             reply = await control(cmd)
                         except Exception as e:          # report it; never drop the dashboard's socket
                             reply = {"ok": False, "text": f"{cmd.get('action')} failed: {type(e).__name__}: {e}"}
-                        if reply and not sock.closed:
-                            await sock.send_str(jsonsafe.dumps({"type": "ack", "action": cmd.get("action"), **reply}))
+                        if reply:
+                            await send(jsonsafe.dumps({"type": "ack", "action": cmd.get("action"), **reply}))
         finally:
             task.cancel()
         return sock
