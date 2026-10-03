@@ -210,8 +210,11 @@ sniper:
   feed:
     trades: solana               # solana = read trades from pump.fun's on-chain logs (no per-trade fee)
                                  # pumpportal = PumpPortal token-trade stream (0.01 SOL / 10k trades, key + funded wallet)
-    ws_url: ""                   # solana only; empty = SOLANA_WS_URL from .env, else the free public RPC
+    ws_url: ""                   # solana only: endpoint(s), comma-separated or a list, tried in order; empty =
+                                 # SOLANA_WS_URL from .env. PublicNode and the public RPC are always added as fallbacks
     commitment: confirmed        # solana only: confirmed = complete; processed is ~0.5 s sooner but can miss trades
+    max_gap_pct: 5               # watchdog: more trades missing than this (live reserve-chain check) = switch endpoint
+    stall_s: 60                  # watchdog: no pump.fun trade decoded for this long = switch endpoint
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
   late:                          # "graduation play": strong late-curve momentum, out before migration

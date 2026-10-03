@@ -4,6 +4,38 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #13: Feed watchdog with endpoint failover
+
+### Why
+The overnight debrief found the free endpoints degrade silently. PublicNode went quiet for **91 minutes** (03:12–04:43) on an open socket. Its missing-trade rate then rose from 0.7% (03h) to **32.8%** (12h). The engine only treated a closed connection as "down", so it would have traded on that data.
+
+### Built
+- `FeedQuality`: a live completeness check. Each pump.fun trade carries the curve's token reserves after it, so consecutive trades of a token must chain exactly. The share that doesn't, over the last 2,000 checks, is the gap rate.
+- `SolanaTradeFeed` watchdog. It drops the current endpoint when:
+  - no pump.fun trade has been decoded for `feed.stall_s` (60 s), even if the socket is open;
+  - the gap rate exceeds `feed.max_gap_pct` (5%).
+
+  On a fallback endpoint it retries the first one every 30 minutes.
+- Endpoints, in order: `feed.ws_url` or `SOLANA_WS_URL` (comma-separated lists allowed), then PublicNode, then the public RPC.
+- New buys stay paused while the feed is down, unmeasured (~20–30 s after each connect) or incomplete. `degraded_reason` says why, on the dashboard and in the "blocked" reason. The snapshot carries `gap_pct`.
+- AI desk `max_tokens` 2048 → 8000. Thinking is always on with Opus 5.5, and a truncated vote would fail the desk closed.
+
+### Live check (45 s)
+PublicNode measured 6.8% missing, so the feed switched to `api.mainnet-beta`, which had 0.0% missing over 2,000 checks (its data allowance had reset).
+
+### Paid flat-rate options researched (no per-message or per-MB metering)
+| Provider | Plan | Price | Notes |
+|---|---|---|---|
+| NoLimitNodes | Pro | $49/mo | WSS with logsSubscribe, "no per-message meter" |
+| RPC Fast | Focus | $45/mo | 10 WebSockets, unlimited bandwidth (free tier: 50 GB/month, ~3 days of this stream) |
+| Chainstack | Unlimited Node | ~$149/mo | flat, unmetered RPC |
+| Subglow / Solana Tracker | gRPC | $99/mo / €200/mo | Yellowstone gRPC: needs a new feed type |
+| Helius, QuickNode | | | logsSubscribe billed per MB: expensive for ~10–20 GB/day |
+
+Tests: 149 passing.
+
+---
+
 ## 2026-10-03 — Entry #12: Trade feed moved to PublicNode, at "confirmed"
 
 - After restarting onto the review fixes, the free public RPC (`api.mainnet-beta.solana.com`) refused the
