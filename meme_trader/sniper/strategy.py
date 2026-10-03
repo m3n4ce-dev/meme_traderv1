@@ -132,6 +132,7 @@ class SniperPosition:
     ladder_hit: int = 0        # ladder exit profile: steps already sold
     p: float | None = None     # model P(2x first) at entry, for live calibration in analytics
     trough_price: float = 0.0  # lowest price while held (max adverse excursion)
+    rent_sol: float = 0.0      # live: refundable token-account rent paid at entry (not part of cost)
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100

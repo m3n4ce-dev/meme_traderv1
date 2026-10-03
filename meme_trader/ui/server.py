@@ -144,8 +144,18 @@ def make_app(engine) -> web.Application:
     return app
 
 
-async def serve(engine, host: str = "127.0.0.1", port: int = 8787) -> None:
+async def start(engine, host: str = "127.0.0.1", port: int = 8787) -> web.AppRunner:
+    """Bind the dashboard now (raises OSError if the port is taken) and return its runner."""
     runner = web.AppRunner(make_app(engine))
     await runner.setup()
-    await web.TCPSite(runner, host, port).start()
+    try:
+        await web.TCPSite(runner, host, port).start()
+    except BaseException:
+        await runner.cleanup()
+        raise
+    return runner
+
+
+async def serve(engine, host: str = "127.0.0.1", port: int = 8787) -> None:
+    await start(engine, host, port)
     await asyncio.Event().wait()

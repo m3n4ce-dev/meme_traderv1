@@ -70,13 +70,26 @@ class Funding:
 
 
 @dataclass
+class Metadata:
+    """Social links fetched from a launch's metadata URI, stamped when they ARRIVED (not at launch time),
+    so replays and model training only know them from that moment, like the live bot did."""
+    mint: str
+    ts: float
+    twitter: str = ""
+    telegram: str = ""
+    website: str = ""
+    kind: str = "metadata"
+
+
+@dataclass
 class Tick:
     ts: float
     kind: str = "tick"
 
 
-Event = Launch | Trade | Migration | Social | Funding | Tick
-_KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "funding": Funding, "tick": Tick}
+Event = Launch | Trade | Migration | Social | Funding | Metadata | Tick
+_KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "funding": Funding,
+          "metadata": Metadata, "tick": Tick}
 
 
 def dumps(e: Event) -> str:

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import glob
 import json
+import math
+import re
+import shlex
 import time
 from pathlib import Path
 
@@ -60,6 +63,8 @@ def gather(days: int, sniper_params: dict) -> dict:
     trades = []
     for path in sorted(glob.glob(str(DATA / "trades-*.jsonl")))[-days:]:
         trades += [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
+    # real-market trades only: demo (synthetic) and untagged rows would distort the post-mortem
+    trades = [t for t in trades if t.get("mode") in ("paper", "live")]
     summary = json.loads((DATA / "sniper_summary.json").read_text()) if (DATA / "sniper_summary.json").exists() else {}
     cap = sniper_params.get("capital", {})
     a = compute(trades, [], cap.get("starting_sol", 1.0), cap.get("max_drawdown_pct", 40), sims=300) if trades else {}
@@ -85,6 +90,46 @@ def ask_claude(data: dict, model: str) -> dict:
     return json.loads(next(b.text for b in r.content if b.type == "text"))
 
 
+def _same_kind(current, value) -> bool:
+    if isinstance(current, bool):
+        return isinstance(value, bool)
+    if isinstance(current, (int, float)):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if current is None:
+        return value is None or isinstance(value, (bool, int, float, str))
+    return isinstance(value, type(current))
+
+
+def validate_changes(changes: list[dict], sniper: dict) -> tuple[list[dict], list[str]]:
+    """Model-proposed parameter changes are untrusted text. Keep only keys that exist in the sniper
+    config, with a value of the same kind as the current one. Each kept change gets `arg`: a single
+    `key=<json>` argument for --set, safe to shell-quote and to round-trip through apply_overrides."""
+    ok, rejected = [], []
+    for c in changes:
+        key, raw = str(c.get("key", "")), c.get("value", "")
+        parts = key.split(".")
+        node, found = sniper, bool(key)
+        if found and all(re.fullmatch(r"[a-z_][a-z0-9_]*", x) for x in parts):
+            for x in parts[:-1]:
+                node = node.get(x) if isinstance(node, dict) else None
+            found = isinstance(node, dict) and parts[-1] in node
+        else:
+            found = False
+        if not found:
+            rejected.append(f"{key!r}: not a sniper setting")
+            continue
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            rejected.append(f"{key}: value {str(raw)[:60]!r} is not valid JSON")
+            continue
+        if not _same_kind(node[parts[-1]], value):
+            rejected.append(f"{key}: {value!r} doesn't match the current {type(node[parts[-1]]).__name__} value")
+            continue
+        ok.append({**c, "value": value, "arg": f"{key}={json.dumps(value, separators=(',', ':'))}"})
+    return ok, rejected
+
+
 def render(rv: dict, validation: dict | None) -> str:
     lines = [f"# Bot review — {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}", "", rv["assessment"], ""]
     for title, key in (("What worked", "what_worked"), ("What failed", "what_failed"),
@@ -93,9 +138,11 @@ def render(rv: dict, validation: dict | None) -> str:
             lines += [f"## {title}", *[f"- {x}" for x in rv[key]], ""]
     if rv["param_changes"]:
         lines += ["## Proposed parameter changes", "", "| key | value | why |", "|---|---|---|"]
-        lines += [f"| `{c['key']}` | `{c['value']}` | {c['rationale']} |" for c in rv["param_changes"]]
-        sets = " ".join(f"--set {c['key']}={c['value']}" for c in rv["param_changes"])
+        lines += [f"| `{c['key']}` | `{json.dumps(c['value'])}` | {c['rationale']} |" for c in rv["param_changes"]]
+        sets = shlex.join([x for c in rv["param_changes"] for x in ("--set", c["arg"])])
         lines += ["", f"Try it: `python -m meme_trader.sniper backtest --file data/feed-* {sets}`", ""]
+    if rv.get("rejected_changes"):
+        lines += ["## Proposals ignored (not valid settings)", *[f"- {x}" for x in rv["rejected_changes"]], ""]
     if validation:
         b, p = validation["baseline"], validation["proposed"]
         lines += ["## Backtest on recorded feed (baseline → proposed)", "", "| metric | baseline | proposed |",

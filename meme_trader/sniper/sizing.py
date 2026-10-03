@@ -9,6 +9,7 @@ signals. Strength blends the pre-checks we can measure live:
 """
 from __future__ import annotations
 
+import math
 import os
 import time
 
@@ -73,7 +74,8 @@ def strength(rule_score: float, min_score: float, buy_sell_ratio: float, near_hi
 
 def size_usd(z, st: float, kind: str, curve_real_sol: float, sol_usd: float, mult: float = 1.0,
              defense: float = 1.0) -> tuple[float, str]:
-    """z: params.sniper.sizing. Returns (usd, why). Never exceeds z.max_usd."""
+    """z: params.sniper.sizing. Returns (usd, why). Never exceeds z.max_usd or the curve-liquidity cap;
+    0.0 means "no trade" (the cap is below the smallest order worth paying fees on: half the base size)."""
     usd = z.base_usd + (z.max_usd - z.base_usd) * st
     why = f"strength {st:.2f}"
     if kind == "copy":
@@ -86,7 +88,10 @@ def size_usd(z, st: float, kind: str, curve_real_sol: float, sol_usd: float, mul
         usd *= defense
         why += f", defense x{defense}"
     liq_cap = max(curve_real_sol, 0.0) * z.max_pct_of_curve_sol / 100 * sol_usd
-    if liq_cap and usd > liq_cap:
-        usd = max(liq_cap, min(z.base_usd, z.max_usd) * 0.5)
-        why += f", liquidity cap ${liq_cap:.0f}"
-    return round(max(min(usd, z.max_usd), 0.5), 2), why
+    min_order = min(z.base_usd, z.max_usd) * 0.5
+    if usd > liq_cap:
+        if liq_cap < min_order:
+            return 0.0, why + f", liquidity cap ${liq_cap:.2f} < minimum ${min_order:.2f}: no trade"
+        usd = liq_cap
+        why += f", liquidity cap ${liq_cap:.2f}"
+    return math.floor(min(usd, z.max_usd) * 100) / 100, why     # round down: never above either cap

@@ -74,14 +74,22 @@ class FundingResolver:
         sigs = await call("getSignaturesForAddress", [wallet, {"limit": 1000}]) or []
         if not sigs or len(sigs) >= 1000:            # unknown: no history, or too old to be a fresh insider
             return Funding(wallet, time.time())
-        tx = await call("getTransaction", [sigs[-1]["signature"],
-                                           {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
-        return Funding(wallet, time.time(), first_sol_source(tx, wallet))
+        landed = [x for x in reversed(sigs) if not x.get("err")][:3]   # oldest successful first
+        for x in landed:
+            tx = await call("getTransaction", [x["signature"],
+                                               {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+            if tx is None:                           # not retrievable right now: retry later, don't cache
+                raise RuntimeError("transaction not available yet")
+            src = first_sol_source(tx, wallet)
+            if src:
+                return Funding(wallet, time.time(), src)
+        return Funding(wallet, time.time())
 
 
 def first_sol_source(tx: dict | None, wallet: str) -> str:
-    """Sender of the SOL transfer / account creation that funded `wallet` in a jsonParsed transaction."""
-    if not tx:
+    """Sender of the SOL transfer / account creation that funded `wallet` in a jsonParsed transaction.
+    A failed transaction moved nothing, so it never counts as funding."""
+    if not tx or (tx.get("meta") or {}).get("err") is not None:
         return ""
     ixs = list(tx.get("transaction", {}).get("message", {}).get("instructions", []))
     for inner in (tx.get("meta") or {}).get("innerInstructions") or []:

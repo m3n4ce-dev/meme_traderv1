@@ -12,18 +12,20 @@ feed's clock, so recorded sessions replay deterministically in the backtester.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
-from ..config import ROOT
+from ..config import ROOT, ConfigError, validate_sniper
 from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
 from .curve import Curve
-from .events import Event, Funding, Launch, Migration, Social, Tick, Trade, dumps
+from .events import Event, Funding, Launch, Metadata, Migration, Social, Tick, Trade, dumps
+from .execution import SniperFill
 from .features import extract
 from .funding import FundingResolver, cluster_report, cohort
 from .notify import Notifier
@@ -35,6 +37,9 @@ from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_l
 from .tracker import TokenState
 
 DUST_SOL = 0.0005
+TOKEN_ACCOUNT_RENT = 0.00203928       # refundable SOL locked in each new token account (live)
+UNRESOLVED_EXPIRY_S = 150             # a Solana tx can't land once its blockhash expires (~60-90 s)
+CASH_TOLERANCE_SOL = 0.002            # ledger vs wallet SOL difference that's still just rounding/timing
 
 
 def reason_key(note: str) -> str:
@@ -61,14 +66,32 @@ CONTROLS = [
 
 
 class Book:
+    """The bot's cash ledger. `sol` is cash actually held - live, what the wallet should show for the bot's
+    budget (SOL locked as refundable token-account rent isn't counted until it's reclaimed). `reserved` is
+    cash promised to buy orders that haven't resolved yet, so concurrent approvals can't spend it twice."""
+
     def __init__(self, start_sol: float):
         self.sol = start_sol
         self.start_sol = start_sol
         self.day = ""
         self.day_pnl = 0.0
         self.closed: list[dict] = []
-        self.equity_hist: deque = deque(maxlen=2000)
+        self.equity_hist: deque = deque(maxlen=2000)       # chart only; risk stats below never forget
         self.halted = ""
+        self.reserved: dict[str, float] = {}               # mint -> SOL held back for an in-flight buy
+        self.peak_equity = start_sol
+        self.max_dd_pct = 0.0
+
+    @property
+    def available(self) -> float:
+        return self.sol - sum(self.reserved.values())
+
+    def mark(self, equity: float) -> float:
+        """Track the session's peak and worst drawdown on every update, independent of the chart buffer."""
+        self.peak_equity = max(self.peak_equity, equity)
+        dd = (1 - equity / self.peak_equity) * 100 if self.peak_equity > 0 else 0.0
+        self.max_dd_pct = max(self.max_dd_pct, dd)
+        return dd
 
 
 class Engine:
@@ -93,7 +116,18 @@ class Engine:
         self.log: deque = deque(maxlen=300)
         self.paused = False
         self.journal = log_to_journal
-        self.callers = CallerBook(DATA / "callers.json")
+        # replays start from neutral caller weights: today's learned track records are future information
+        self.callers = CallerBook(DATA / "callers.json" if log_to_journal else None)
+        self.session = f"{mode}-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
+        self.config_id = hashlib.sha1(json.dumps(params["sniper"], sort_keys=True,
+                                                 default=str).encode()).hexdigest()[:10]
+        self.order_tasks: set[asyncio.Task] = set()        # live orders run beside the feed, never in front of it
+        self.unresolved: dict[str, dict] = {}              # signature -> sent order whose outcome isn't known yet
+        self._last_resolve = 0.0
+        self._resolving = False
+        self._last_cash_check = 0.0
+        self._surplus_noted = False
+        self._callout_inflight = ""                   # mint of the callout bag being bought
         self.leaders = LeaderBook(self.p.copy.leaders, DATA / "leaders.json" if log_to_journal else None)
         self.record_path = Path(record_path) if record_path else None
         self.record_file = self._open_record(self.record_path) if self.record_path else None
@@ -124,7 +158,10 @@ class Engine:
         # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
         mp = Path(self.p.predict.model_path)
         self.model_path = mp if mp.is_absolute() else ROOT / mp
-        self.model = LogisticModel.load(self.model_path) if self.p.predict.enabled else None
+        # live: only a promoted model. Replays decide on their first event, once they know which data
+        # they cover (a model that has seen that data must not grade itself on it).
+        self.model = self._load_model(for_live=True) if self.p.predict.enabled and feed.realtime else None
+        self._model_checked_replay = feed.realtime
         self._model_mtime = self._mtime(self.model_path)
         self._last_model_check = 0.0
         self.audit: dict[str, list] = {}                   # mint -> [gate, t0, p0, peak, trough, outcome]
@@ -153,24 +190,54 @@ class Engine:
     def equity(self) -> float:
         return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items())
 
-    def entries_blocked(self, buy_sol: float | None = None) -> str:
-        c = self.p.capital
+    def _global_block(self) -> str:
+        """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout)."""
         if self.book.halted:
             return "halted: " + self.book.halted
         if self.paused:
             return "paused"
         if getattr(self.feed, "degraded", False):
             return f"on backup feed {self.feed.host} (no trade data) - entries paused"
-        if -self.book.day_pnl >= c.daily_loss_limit_sol:
+        if -self.book.day_pnl >= self.p.capital.daily_loss_limit_sol:
             return "daily loss limit"
+        return ""
+
+    def _order_overhead(self, source: str = "") -> float:
+        """SOL an order costs beyond its principal: priority + base fee, plus refundable rent for the new
+        token account when trading live. Reserved up front so it can't come out of the exit reserve."""
+        prio = self.p.callouts.priority_fee_sol if source == "callout" else self.p.execution.priority_fee_sol
+        return prio + 0.000005 + (TOKEN_ACCOUNT_RENT if self.mode.startswith("live") else 0.0)
+
+    def _cash_block(self, sol: float, source: str = "") -> str:
+        if self.book.available - (sol + self._order_overhead(source)) < self.p.capital.min_sol_reserve:
+            return "low SOL"
+        return ""
+
+    def entries_blocked(self, buy_sol: float | None = None) -> str:
+        """Preliminary check before a strategy prepares an order (the final one is _authorize, with the
+        order's real size)."""
+        c = self.p.capital
+        why = self._global_block()
+        if why:
+            return why
         trading = sum(1 for p in self.positions.values() if p.source != "callout")   # $1 callout bags don't count
-        in_flight = len(self.pending - set(self.positions))      # pending sells are already counted as positions
+        in_flight = len(self.book.reserved.keys() - set(self.positions))
         if trading + in_flight + len(self.reviewing) >= c.max_open_positions:
             return "max positions"
         need = buy_sol or (self.p.sizing.max_usd / self.sol_price.usd if self.p.sizing.enabled else c.buy_sol)
-        if self.book.sol - need < c.min_sol_reserve:
-            return "low SOL"
-        return ""
+        return self._cash_block(need)
+
+    def _authorize(self, mint: str, sol: float, source: str) -> str:
+        """Final, central go/no-go for a buy of exactly `sol`, right before cash is reserved for it."""
+        why = self._global_block()
+        if why:
+            return why
+        if source != "callout":
+            trading = sum(1 for p in self.positions.values() if p.source != "callout")
+            in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
+            if trading + in_flight + len(self.reviewing - {mint}) >= self.p.capital.max_open_positions:
+                return "max positions"
+        return self._cash_block(sol, source)
 
     def _ctx(self, s: TokenState) -> dict:
         ws = [self.leaders.weight(x.author) if x.source == "wallet" else self.callers.weight(f"{x.source}:{x.author}")
@@ -186,20 +253,45 @@ class Engine:
         except OSError:
             return 0.0
 
+    def _load_model(self, for_live: bool, replay_start: float | None = None) -> LogisticModel | None:
+        """Live: only a model `promote` approved (trained on recordings, with held-out skill).
+        Replay: only a model whose training data ended before the replay's first event, so a backtest,
+        sweep or compare never scores a model on launches it was fitted to."""
+        m = LogisticModel.load(self.model_path)
+        if m is None:
+            return None
+        info = m.info or {}
+        if for_live:
+            if not info.get("promoted") or info.get("source") != "recorded":
+                self.say("info", f"{self.model_path.name} isn't a promoted model - ignored (train, then promote)")
+                return None
+            return m
+        end = info.get("data_end_ts")
+        if end is None or replay_start is None or end >= replay_start:
+            self.say("info", f"{self.model_path.name} was trained on data overlapping this replay (or has no "
+                             "provenance) - replay runs without it")
+            return None
+        return m
+
     def _maybe_reload_model(self) -> None:
-        """`train` while the bot runs: the new model is picked up within a minute, no restart."""
+        """`promote` while the bot runs: the new model is picked up within a minute, no restart."""
         if not self.p.predict.enabled or not self.feed.realtime or self.now - self._last_model_check < 60:
             return
         self._last_model_check = self.now
         mt = self._mtime(self.model_path)
         if mt and mt != self._model_mtime:
-            m = LogisticModel.load(self.model_path)
+            self._model_mtime = mt
+            m = self._load_model(for_live=True)
             if m is not None:
-                self.model, self._model_mtime = m, mt
+                self.model = m
                 for s in self.tokens.values():
                     s.p = None                              # re-score with the new model
                 auc = (m.info or {}).get("test", {}).get("auc")
                 self.say("info", f"new prediction model loaded (held-out AUC {auc:.3f})" if auc else "new prediction model loaded")
+
+    def _model_steers(self) -> bool:
+        """Whether the model may change trades (gate/EV filter/sizing). display_only keeps it on screen only."""
+        return self.model is not None and not self.p.predict.get("display_only", True)
 
     @staticmethod
     def _open_record(path: Path):
@@ -266,6 +358,8 @@ class Engine:
         finally:
             if ticker:
                 ticker.cancel()
+            if self.order_tasks:                # let sent orders finish so their outcome is booked and saved
+                await asyncio.wait(set(self.order_tasks), timeout=120)
             if self.record_file:
                 self.record_file.close()
             self.leaders.save()
@@ -292,6 +386,10 @@ class Engine:
             traceback.print_exc()
 
     async def _handle(self, e: Event) -> None:
+        if not self._model_checked_replay:
+            self._model_checked_replay = True
+            if self.p.predict.enabled and self.model is None:     # (an injected model is the caller's choice)
+                self.model = self._load_model(for_live=False, replay_start=e.ts)
         self.now = max(self.now, e.ts)
         if not isinstance(e, Tick):
             self.last_event = self.now
@@ -299,6 +397,10 @@ class Engine:
                 self.record_file.write(dumps(e) + "\n")
         if isinstance(e, Launch):
             await self._on_launch(e)
+        elif isinstance(e, Metadata):
+            s = self.tokens.get(e.mint)
+            if s is not None and s.launch is not None:
+                s.launch.twitter, s.launch.telegram, s.launch.website = e.twitter, e.telegram, e.website
         elif isinstance(e, Trade):
             await self._on_trade(e)
         elif isinstance(e, Migration):
@@ -321,10 +423,15 @@ class Engine:
                 await self._tick()
 
     async def _on_launch(self, e: Launch) -> None:
-        if e.mint in self.tokens:          # metadata update for a known launch
+        if e.mint in self.tokens:          # metadata update for a known launch (recordings before Metadata events)
             s = self.tokens[e.mint]
             if s.launch:
                 s.launch.twitter, s.launch.telegram, s.launch.website = e.twitter, e.telegram, e.website
+            else:                          # known only from a restart/leader trade: now we know its creator
+                s.launch = e
+                if e.dev_buy_tokens > 0:
+                    s.holders.setdefault(e.creator, e.dev_buy_tokens)
+                    s.buyers.add(e.creator)
             return
         self.stats["launches"] += 1
         self.creators[e.creator].append(e.ts)
@@ -342,8 +449,9 @@ class Engine:
         md = await fetch_metadata(e.uri)
         if md:
             e.twitter, e.telegram, e.website = md.get("twitter", ""), md.get("telegram", ""), md.get("website", "")
-            if self.record_file:
-                self.record_file.write(dumps(e) + "\n")
+            if self.record_file:                 # stamped with its arrival time: replays mustn't know it earlier
+                md_event = Metadata(e.mint, self.feed.now(), e.twitter, e.telegram, e.website)
+                self.record_file.write(dumps(md_event) + "\n")
 
     async def _on_trade(self, e: Trade) -> None:
         a = self.audit.get(e.mint)
@@ -486,7 +594,7 @@ class Engine:
             s.score_notes = [f"defense mode: score {d.score:.0f} < {self.p.entry.min_score + self.p.risk_adapt.min_score_add}"]
             return
         pr = self.p.predict
-        if self.model is not None and s.p is not None:
+        if self._model_steers() and s.p is not None:
             if pr.min_p > 0 and s.p < pr.min_p:
                 s.score_notes = [f"P(2x) {s.p:.0%} < {pr.min_p:.0%}"] + s.score_notes
                 return
@@ -655,7 +763,7 @@ class Engine:
         smart = len({x.author for x in s.socials if x.source == "wallet"}) + (1 if kind == "copy" else 0)
         edge = None
         p = self._predict(s)
-        if p is not None and self.p.predict.kelly_fraction > 0:
+        if p is not None and self._model_steers() and self.p.predict.kelly_fraction > 0:
             pr = self.p.predict
             edge = max(kelly(p, pr.up_pct, pr.down_pct, self._cost_pct()), 0.0) * pr.kelly_fraction
         st, _ = strength(score, self.p.entry.min_score if kind == "sniper" else 0, nb / max(ns, 1),
@@ -716,29 +824,85 @@ class Engine:
         await self._buy(s, score, size, notes, source, leader)
 
     async def _buy(self, s: TokenState, score: float, sol: float, notes: list[str], source: str = "sniper",
-                   leader: str = "") -> None:
+                   leader: str = "", then=None) -> None:
+        """Authorize with the final size, reserve the cash, then send. Live, the order runs as its own task,
+        so the feed keeps being read (other tokens' stops and dev sells) while it confirms; backtests run it
+        inline so replays stay deterministic. `then`: coroutine function to run after a successful fill."""
         if s.mint in self.positions or s.mint in self.pending:   # never stack a second position on one mint
             return
         z = self.p.sizing
         if z.enabled and sol * self.sol_price.usd > z.max_usd + 1e-6:     # hard cap, whatever asked for more
             self.say("error", f"size ${sol * self.sol_price.usd:.2f} over hard cap ${z.max_usd} - clamped", s.mint)
             sol = round(z.max_usd / self.sol_price.usd, 4)
+        if sol <= 0:                                      # e.g. the liquidity cap says the curve is too thin
+            self.stats["skipped_no_size"] += 1
+            return
+        why = self._authorize(s.mint, sol, source)
+        if why:
+            self.stats["skipped_" + why.split(":")[0].replace(" ", "_")] += 1
+            return
+        self.book.reserved[s.mint] = sol + self._order_overhead(source)
         self.pending.add(s.mint)
+        s.decided = "entered"
+        await self._dispatch(self._run_buy(s, score, sol, notes, source, leader, then))
+
+    async def _dispatch(self, coro) -> None:
+        if self.feed.realtime:
+            task = asyncio.create_task(coro)
+            self.order_tasks.add(task)
+            task.add_done_callback(self._order_done)
+        else:
+            await coro
+
+    def _order_done(self, task: asyncio.Task) -> None:
+        self.order_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:   # never lose an order-path bug silently
+            import traceback
+
+            self.say("error", f"internal error in an order task: {task.exception()!r}")
+            traceback.print_exception(task.exception())
+
+    async def _run_buy(self, s: TokenState, score, sol, notes, source, leader, then) -> None:
         try:
             fill = await self.ex.buy(s.mint, s.curve, sol,
                                      self.p.callouts.priority_fee_sol if source == "callout" else None)
-        finally:
-            self.pending.discard(s.mint)
-        s.decided = "entered"
+        except Exception as e:                            # an executor bug must not leave cash reserved forever
+            fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        if fill.unknown:                                  # sent, but did it land? keep the cash and the mint held
+            self._book_fees_lost(fill, s)
+            self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
+                                                    "notes": list(notes), "source": source, "leader": leader})
+            self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
+                              "its cash stays reserved until the chain says", s.mint)
+            return
+        self.book.reserved.pop(s.mint, None)
+        self.pending.discard(s.mint)
+        self._apply_buy(s, fill, score, notes, source, leader)
+        if fill.ok and then is not None:
+            try:
+                await then()
+            except Exception as e:                        # e.g. posting a callout card - the buy itself stands
+                self.say("error", f"after-buy step for {s.symbol} failed: {e!r}", s.mint)
+
+    def _book_fees_lost(self, fill: SniperFill, s: TokenState) -> None:
+        """Failed transactions that landed still burned fees: real cash, and a real loss for today."""
+        if fill.fees_lost > 0:
+            self.book.sol -= fill.fees_lost
+            self.book.day_pnl -= fill.fees_lost
+            self.say("error", f"{s.symbol}: failed transaction(s) still cost {fill.fees_lost:.6f} SOL in fees", s.mint)
+
+    def _apply_buy(self, s: TokenState, fill: SniperFill, score, notes, source, leader) -> None:
+        self._book_fees_lost(fill, s)
         if not fill.ok:
             self.say("error", f"buy {s.symbol} failed: {fill.error}", s.mint)
+            self.save_state()
             return
-        self.book.sol -= fill.sol
+        self.book.sol -= fill.sol + fill.rent             # rent is cash locked in the token account until reclaimed
         self.positions[s.mint] = SniperPosition(
             mint=s.mint, symbol=s.symbol, opened_at=self.now, entry_price=fill.price, tokens=fill.tokens,
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
             peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""),
-            p=s.p, trough_price=fill.price)
+            p=s.p, trough_price=fill.price, rent_sol=fill.rent)
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         self.stats["entries"] += 1
@@ -749,9 +913,11 @@ class Engine:
 
     async def _check_exit(self, s: TokenState) -> None:
         pos = self.positions[s.mint]
-        if not s.price_known:          # restored after a restart: wait for a real price before any exit logic
-            if self.now - pos.opened_at >= self.p.exit.max_hold_s + 120:
-                await self._sell(s, pos, 1.0, "max hold time (price unknown)")
+        if not s.price_known:          # restored after a restart: wait for a real price before any exit logic,
+            limit = {"late": self.p.late.max_hold_s,              # but each strategy's time limit still holds
+                     "callout": self.p.callouts.hold_s}.get(pos.source, self.p.exit.max_hold_s)
+            if self.now - pos.opened_at >= limit:
+                await self._sell(s, pos, 1.0, f"max hold {limit:.0f}s (price unknown)")
             return
         px = s.curve.price
         pos.peak_price = max(pos.peak_price, px)
@@ -774,40 +940,119 @@ class Engine:
             await self._sell(s, pos, r[0], r[1])
 
     async def _sell(self, s: TokenState, pos: SniperPosition, frac: float, reason: str) -> None:
-        if s.mint in self.pending or self.positions.get(s.mint) is not pos:   # one sell at a time, live positions only
+        if s.mint in self.pending or self.positions.get(s.mint) is not pos:   # one order at a time, open positions only
             return
         tokens = pos.tokens if frac >= 1 else pos.tokens * frac
         self.pending.add(s.mint)
+        await self._dispatch(self._run_sell(s, pos, tokens, reason))
+
+    async def _run_sell(self, s: TokenState, pos: SniperPosition, tokens: float, reason: str) -> None:
         try:
             fill = await self.ex.sell(s.mint, s.curve, tokens,
                                       self.p.callouts.priority_fee_sol if pos.source == "callout" else None)
-        finally:
-            self.pending.discard(s.mint)
+        except Exception as e:
+            fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
+            self._book_fees_lost(fill, s)
+            self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason})
+            self.say("error", f"sell {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - no new "
+                              "sell until the chain says", s.mint)
+            return
+        self.pending.discard(s.mint)
+        self._apply_sell(s, pos, fill, reason)
+
+    def _apply_sell(self, s: TokenState, pos: SniperPosition, fill: SniperFill, reason: str) -> None:
+        self._book_fees_lost(fill, s)
         if not fill.ok:
             self.say("error", f"sell {s.symbol} failed: {fill.error}", s.mint)
+            self.save_state()
             return
-        cost_part = pos.cost_sol * fill.tokens / pos.tokens if pos.tokens else 0
-        pos.tokens -= fill.tokens
+        self.book.sol += fill.sol + fill.rent_reclaimed   # fill.sol can be negative: fees above proceeds
+        if self.positions.get(s.mint) is not pos:          # closed meanwhile (e.g. reconcile): cash is still real
+            self.save_state()
+            return
+        sold = min(fill.tokens, pos.tokens)
+        cost_part = pos.cost_sol * sold / pos.tokens if pos.tokens else 0
+        pos.tokens -= sold
         pos.cost_sol -= cost_part
         pos.proceeds_sol += fill.sol
-        pos.exits.append((self.now, reason, fill.tokens, fill.sol))
-        self.book.sol += fill.sol
+        pos.rent_sol = max(pos.rent_sol - fill.rent_reclaimed, 0.0)
+        pos.exits.append((self.now, reason, sold, fill.sol))
         self.book.day_pnl += fill.sol - cost_part
         if reason.startswith("initials"):
             pos.initials_taken = True
         elif reason.startswith("ladder ") and "x sell" in reason:
             pos.ladder_hit += 1
             pos.initials_taken = True
-        self.say("sell", f"{s.symbol} {fill.tokens / pos.initial_tokens:.0%} for {fill.sol:.3f} SOL | {reason}",
+        self.say("sell", f"{s.symbol} {sold / pos.initial_tokens:.0%} for {fill.sol:.3f} SOL | {reason}",
                  s.mint, signature=fill.signature)
         if pos.tokens * s.curve.price < DUST_SOL:
             self._close(pos, s)
         self.save_state()
 
+    def _track_unresolved(self, sig: str, order: dict) -> None:
+        self.unresolved[sig] = {**order, "sent_at": time.time()}
+        self.save_state()
+
+    async def _resolve_unresolved(self) -> None:
+        """Ask the chain about orders whose outcome was unknown. Landed: book them (a late buy becomes a
+        managed position). Still unknown after the blockhash must have expired: it never landed."""
+        resolve = getattr(self.ex, "resolve", None)
+        if resolve is None or self._resolving:
+            return
+        self._resolving = True
+        try:
+            await self._resolve_each(resolve)
+        finally:
+            self._resolving = False
+
+    async def _resolve_each(self, resolve) -> None:
+        for sig, o in list(self.unresolved.items()):
+            mint = o["mint"]
+            try:
+                fill = await resolve(sig, mint, o["side"])
+            except Exception:
+                continue
+            if fill.unknown and time.time() - o["sent_at"] < UNRESOLVED_EXPIRY_S:
+                continue
+            del self.unresolved[sig]
+            s = self.tokens.get(mint) or self.tokens.setdefault(mint, TokenState(mint, None, self.now))
+            if o["side"] == "buy":
+                self.book.reserved.pop(mint, None)
+                self.pending.discard(mint)
+                if fill.unknown:
+                    self.say("info", f"buy {s.symbol} ({sig[:8]}…) never landed - cash released", mint)
+                    self.save_state()
+                    continue
+                self._apply_buy(s, fill, o["score"], o["notes"] + ["landed late"], o["source"], o["leader"])
+                if fill.ok:
+                    await self._watch(mint)
+            else:
+                self.pending.discard(mint)
+                pos = self.positions.get(mint)
+                if fill.unknown:
+                    self.say("info", f"sell {s.symbol} ({sig[:8]}…) never landed - position kept, exits resume", mint)
+                    self.save_state()
+                    continue
+                if pos is not None:
+                    self._apply_sell(s, pos, fill, o["reason"] + " (landed late)")
+                else:
+                    self._book_fees_lost(fill, s)
+                    if fill.ok:
+                        self.book.sol += fill.sol + fill.rent_reclaimed
+                    self.save_state()
+
+    def _model_id(self) -> str:
+        info = (self.model.info or {}) if self.model else {}
+        return str(info.get("promoted_from") or info.get("trained_at") or "") if self.model else ""
+
     def _close(self, pos: SniperPosition, s: TokenState) -> None:
         if self.positions.pop(pos.mint, None) is None:
             return
         s.late_tried = True                        # no graduation-play re-buy of a token we just traded
+        if pos.cost_sol > 0:                       # unsold remainder (dust, gone from wallet) is written off -
+            self.book.day_pnl -= pos.cost_sol      # once, and today, so the daily loss limit sees all of it
+            pos.cost_sol = 0.0
         pnl = pos.proceeds_sol - pos.initial_cost_sol
         row = {
             "mint": pos.mint, "symbol": pos.symbol, "opened": pos.opened_at, "closed": self.now,
@@ -816,6 +1061,9 @@ class Engine:
             "score": pos.score, "initials": pos.initials_taken, "exit": pos.exits[-1][1] if pos.exits else "",
             "source": pos.source, "desk": pos.desk, "p": pos.p,
             "mae_pct": pos.gain_pct(pos.trough_price) if pos.trough_price else 0.0,
+            # which run produced this trade: demo, paper and live results must never be mixed up
+            "mode": self.mode, "session": self.session, "start_sol": self.book.start_sol,
+            "config": self.config_id, "model": self._model_id(),
         }
         self.book.closed.append(row)
         self.stats["wins" if pnl > 0 else "losses"] += 1
@@ -842,9 +1090,17 @@ class Engine:
         if day != self.book.day:
             self.book.day, self.book.day_pnl = day, 0.0
         eq = self.equity()
+        self.book.mark(eq)
         if self.now - self._last_equity >= 5:
             self._last_equity = self.now
             self.book.equity_hist.append((self.now, eq))
+        if self.unresolved and self.feed.realtime and not self._resolving and self.now - self._last_resolve >= 5:
+            self._last_resolve = self.now
+            await self._dispatch(self._resolve_unresolved())
+        if self.feed.realtime and self.mode.startswith("live") and self.now - self._last_cash_check >= 120 \
+                and not self.pending and not self.book.reserved:
+            self._last_cash_check = self.now
+            await self._dispatch(self.check_cash())
         dd = (1 - eq / self.book.start_sol) * 100
         if not self.book.halted and dd >= self.p.capital.max_drawdown_pct:
             self.book.halted = f"drawdown {dd:.0f}%"
@@ -946,10 +1202,20 @@ class Engine:
 
         self._last_state_save = self.now
         b = self.book
+        # enough safety context per held token that exits work the same after a restart: who the creator
+        # is (dev-sell exits, funding links) and what they've already sold
+        tokens = {}
+        for m in self.positions.keys() | {o["mint"] for o in self.unresolved.values()}:
+            s = self.tokens.get(m)
+            if s is not None:
+                tokens[m] = {"launch": asdict(s.launch) if s.launch else None, "dev_sold": s.dev_sold}
         state = {"saved_at": time.time(), "mode": self.mode,
                  "book": {"sol": b.sol, "start_sol": b.start_sol, "day": b.day, "day_pnl": b.day_pnl,
-                          "halted": b.halted, "closed": b.closed[-500:]},
+                          "halted": b.halted, "closed": b.closed[-500:], "reserved": b.reserved,
+                          "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
+                 "tokens": tokens, "unresolved": self.unresolved,
+                 "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
@@ -963,15 +1229,40 @@ class Engine:
         b = d["book"]
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
         self.book.day_pnl, self.book.halted, self.book.closed = b["day_pnl"], b["halted"], b["closed"]
+        # cash stays reserved only for buys that are still unresolved; anything else was in flight when the
+        # process died and is accounted for by the wallet reconcile below
+        open_buys = {o["mint"] for o in (d.get("unresolved") or {}).values() if o.get("side") == "buy"}
+        self.book.reserved = {m: v for m, v in (b.get("reserved") or {}).items() if m in open_buys}
+        self.book.peak_equity = b.get("peak_equity", self.book.start_sol)
+        self.book.max_dd_pct = b.get("max_dd_pct", 0.0)
+        self.defense_until = (d.get("defense") or {}).get("until", 0.0)
+        self.defense_reason = (d.get("defense") or {}).get("reason", "")
         self.callouts.called.update(d.get("called", []))
+        self.unresolved = dict(d.get("unresolved") or {})
+        saved_tokens = d.get("tokens") or {}
         now = self.feed.now()
+
+        def restore_token(m: str) -> TokenState:
+            ctx = saved_tokens.get(m) or {}
+            launch = Launch(**ctx["launch"]) if ctx.get("launch") else None
+            s = self.tokens[m] = TokenState(m, launch, now)    # price unknown until its next trade
+            if launch is not None and launch.dev_buy_tokens > 0:
+                s.holders[launch.creator] = launch.dev_buy_tokens
+            s.dev_sold = ctx.get("dev_sold", 0.0)
+            s.decided = "entered"
+            return s
         for m, pd in d["positions"].items():
             pd["exits"] = [tuple(x) for x in pd.get("exits") or []]
             self.positions[m] = SniperPosition(**pd)
-            s = self.tokens[m] = TokenState(m, None, now)       # price unknown until its next trade
-            s.decided = "entered"
+            restore_token(m)
             await self._watch(m)
-        self.say("info", f"restored {len(self.positions)} open position(s) from {self.state_path.name}")
+        for o in self.unresolved.values():                    # held until the chain says what happened
+            self.pending.add(o["mint"])
+            if o["mint"] not in self.tokens:
+                restore_token(o["mint"])
+                await self._watch(o["mint"])
+        self.say("info", f"restored {len(self.positions)} open position(s) and {len(self.unresolved)} unresolved "
+                         f"order(s) from {self.state_path.name}")
         await self.reconcile()
 
     async def reconcile(self) -> None:
@@ -986,6 +1277,8 @@ class Engine:
             self.say("error", f"wallet reconcile failed ({e}); positions kept as saved")
             return
         for m, pos in list(self.positions.items()):
+            if m in self.pending:                      # an unresolved order decides this one first
+                continue
             have = balances.get(m, 0) / 1e6
             if have <= 0:
                 pos.exits.append((self.now, "gone from wallet while offline", pos.tokens, 0.0))
@@ -995,11 +1288,41 @@ class Engine:
             elif abs(have - pos.tokens) / max(pos.tokens, 1e-9) > 0.01:
                 self.say("info", f"{pos.symbol}: wallet holds {have:,.0f} tokens, saved {pos.tokens:,.0f} - corrected")
                 pos.tokens = have
-        orphans = [m for m, raw in balances.items() if m.endswith("pump") and m not in self.positions and raw > 0]
+        orphans = [m for m, raw in balances.items()
+                   if m.endswith("pump") and m not in self.positions and m not in self.pending and raw > 0]
         if orphans:
             self.say("error", f"{len(orphans)} pump token(s) in the wallet aren't tracked (sell manually): "
                               + ", ".join(o[:6] + "…" for o in orphans[:8]))
         self.save_state()
+        await self.check_cash()
+
+    async def check_cash(self) -> None:
+        """Live: the wallet is the truth for cash. Less SOL than the ledger thinks (fees it didn't see, a
+        withdrawal) lowers the ledger and counts against today's loss limit; more (a deposit) is NOT
+        handed to the bot - its budget stays what you allocated."""
+        wallet = getattr(self.ex, "wallet", None)
+        if wallet is None:
+            return
+        expected = self.book.sol
+        try:
+            bal = await asyncio.to_thread(wallet.sol_balance)
+        except Exception as e:
+            self.say("error", f"wallet SOL check failed ({e}); ledger unchanged")
+            return
+        if self.pending or self.book.reserved or self.book.sol != expected:   # cash moved meanwhile: next time
+            return
+        gap = bal - self.book.sol
+        if gap < -CASH_TOLERANCE_SOL:
+            self.say("error", f"wallet holds {bal:.4f} SOL but the ledger expected {self.book.sol:.4f}: ledger "
+                              f"lowered by {-gap:.4f} SOL (unbooked fees or a withdrawal), counted against today's "
+                              "loss limit")
+            self.book.sol = bal
+            self.book.day_pnl += gap
+            self.save_state()
+        elif gap > CASH_TOLERANCE_SOL and not self._surplus_noted:
+            self._surplus_noted = True
+            self.say("info", f"wallet holds {gap:.4f} SOL more than the bot's ledger - extra SOL isn't given to the "
+                             "bot automatically; its budget stays what it was allocated")
 
     # ------------------------------------------------------------------ graduation plays
     async def _maybe_late(self) -> None:
@@ -1028,7 +1351,11 @@ class Engine:
     # ------------------------------------------------------------------ callouts
     async def _maybe_callout(self) -> None:
         c = self.p.callouts
-        if not c.enabled or self.book.halted or self.paused or self.now - self.callouts.last_ts < c.interval_s:
+        if self._callout_inflight and self._callout_inflight not in self.pending:
+            self._callout_inflight = ""                # its bag order resolved (filled or not)
+        # account-level stops (loss limit, feed down, halt, pause) apply to callout bags like any entry
+        if not c.enabled or self._callout_inflight or self._global_block() \
+                or self.now - self.callouts.last_ts < c.interval_s:
             return
         if self.now - self._last_callout_scan < 5:      # no candidate last scan: look again in a few seconds,
             return                                       # not on every 1 s tick over every live token
@@ -1057,22 +1384,27 @@ class Engine:
             return
         s, score = best
         usd = self.sol_price.usd
+
+        async def publish() -> None:          # the card goes out only once we really hold the bag
+            text = compose(s, self.now, usd)
+            call = Callout(s.mint, s.symbol, self.now, s.curve.market_cap_sol, s.curve.price, text, score)
+            self.callouts.add(call)
+            self.stats["callouts"] += 1
+            self.say("callout", text, s.mint)
+            if c.auto_post == "telegram" and self.feed.realtime:
+                async def post():
+                    call.posted = "telegram" if await post_telegram(text, s.mint) else ""
+                asyncio.create_task(post())
+
         held = self.positions.get(s.mint)
-        if not held or held.tokens * s.curve.price * usd < c.min_hold_usd:
-            if open_bags >= c.max_open_bags or self.book.sol - c.position_usd / usd < self.p.capital.min_sol_reserve:
-                return
-            await self._buy(s, score, round(c.position_usd / usd, 5), [f"callout bag ${c.position_usd}"], "callout")
-            if s.mint not in self.positions:
-                return
-        text = compose(s, self.now, usd)
-        call = Callout(s.mint, s.symbol, self.now, s.curve.market_cap_sol, s.curve.price, text, score)
-        self.callouts.add(call)
-        self.stats["callouts"] += 1
-        self.say("callout", text, s.mint)
-        if c.auto_post == "telegram" and self.feed.realtime:
-            async def post():
-                call.posted = "telegram" if await post_telegram(text, s.mint) else ""
-            asyncio.create_task(post())
+        if held and held.tokens * s.curve.price * usd >= c.min_hold_usd:
+            await publish()
+            return
+        if open_bags >= c.max_open_bags:
+            return
+        self._callout_inflight = s.mint
+        await self._buy(s, score, round(c.position_usd / usd, 5), [f"callout bag ${c.position_usd}"], "callout",
+                        then=publish)
 
     def mark_posted(self, mint: str) -> None:
         for c in self.callouts.calls:
@@ -1127,7 +1459,12 @@ class Engine:
         node = self.p
         for k in path:
             node = node[k]
-        node[last] = v
+        old, node[last] = node[last], v
+        try:
+            validate_sniper(self.p)                   # the whole config must still make sense together
+        except ConfigError as e:
+            node[last] = old
+            return f"{label}: {e}"
         self.say("info", f"setting changed: {label} = {v}")
         return ""
 
@@ -1215,6 +1552,9 @@ class Engine:
                 self.p.capital.max_drawdown_pct, self.gate_audit(), self.model_card())
         return key, fresh, args
 
+    def _analytics_kw(self) -> dict:
+        return {"fee_pct": self.fee, "observed_max_dd_pct": self.book.max_dd_pct}
+
     def analytics(self) -> dict:
         """Recomputed when a trade closes or the gate audit moves, else at most once a minute (feed time)."""
         from .analytics import compute
@@ -1222,7 +1562,7 @@ class Engine:
         key, fresh, args = self._analytics_args()
         if fresh:
             return self._analytics[2]
-        out = compute(*args, fee_pct=self.fee)
+        out = compute(*args, **self._analytics_kw())
         self._analytics = (key, self.now, out)
         return out
 
@@ -1234,7 +1574,7 @@ class Engine:
         if fresh:
             return self._analytics[2]
         now = self.now
-        out = await asyncio.to_thread(compute, *args, fee_pct=self.fee)
+        out = await asyncio.to_thread(compute, *args, **self._analytics_kw())
         self._analytics = (key, now, out)
         return out
 

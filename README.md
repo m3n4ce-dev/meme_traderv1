@@ -7,7 +7,7 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Tests: 92 passing](https://img.shields.io/badge/tests-92%20passing-brightgreen.svg)
+![Tests: 144 passing](https://img.shields.io/badge/tests-144%20passing-brightgreen.svg)
 ![Mode: paper by default](https://img.shields.io/badge/mode-paper%20by%20default-orange.svg)
 
 ![Live dashboard during a real-market paper run](docs/dashboard.png)
@@ -96,11 +96,12 @@ Step-by-step guides with screenshots: [Mac](docs/MAC_SETUP.md) · [Ubuntu, inclu
 | `scripts/start.sh demo` | Simulated market. Good for learning the dashboard; its P&L means nothing. |
 | `scripts/start.sh paper` | Real market, pretend money. Records the feed to `data/`. |
 | `scripts/start.sh doctor` | Checks packages, data feeds, keys and wallet. |
-| `scripts/start.sh report` | Shareable HTML report + CSV of your trades. |
+| `scripts/start.sh report` | Shareable HTML report + CSV of your trades (`--mode paper` / `live`; demo, paper and live are never mixed). |
 | `scripts/start.sh backtest` | Replays your recordings with the current settings. |
 | `scripts/start.sh sweep --grid exit.stop_loss_pct=20,30,40` | Walk-forward parameter tuning with a noise guard. |
 | `scripts/start.sh compare --variant "no_late: late.enabled=false"` | A/B test strategies across recorded days. |
-| `scripts/start.sh train` | Fits and grades the P(2×) model on your recordings. |
+| `scripts/start.sh train` | Fits and grades a candidate P(2×) model on your recordings. |
+| `scripts/start.sh promote` | Deploys the candidate, only if trained on real recordings with skill on unseen launches. It stays display-only until `predict.display_only: false`. |
 | `scripts/start.sh leaders` | Ranks wallets in your recordings worth copying. |
 | `scripts/start.sh live` | **Real money.** Locked until you complete [SETUP.md step 5](docs/SETUP.md). |
 
@@ -134,7 +135,14 @@ Don't, until paper results across several days justify it. When they do, follow 
 - use a paid RPC;
 - start small.
 
-Live mode is locked behind `--live`, `MEME_TRADER_CONFIRM_LIVE=yes` and a matching keypair. The dashboard's **KILL** button sells everything.
+Live mode is locked behind `--live`, `MEME_TRADER_CONFIRM_LIVE=yes` and a matching keypair. The dashboard's **KILL** button sells everything. Built-in safeguards:
+- each transaction is simulated before signing and refused if it would move more SOL than the order allows;
+- an order whose outcome is unclear is looked up on-chain, never blindly re-sent;
+- buys reserve their cash before they're sent;
+- the ledger is checked against the wallet's real balance;
+- only one bot can trade a wallet at a time.
+
+These have been tested against simulated failures, not yet with real money.
 
 ## Documentation
 
@@ -156,7 +164,7 @@ meme_trader/agents/   DexScreener momentum bot: scout, safety, analyst, risk, ex
 config/               params.example.yaml (all settings, commented)
 scripts/              setup and start scripts for Mac / Ubuntu
 deploy/               systemd service
-tests/                pytest suite (92 tests)
+tests/                pytest suite (144 tests)
 ```
 
 ### DexScreener momentum bot
