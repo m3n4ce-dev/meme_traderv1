@@ -23,6 +23,7 @@ from .copytrade import LeaderBook
 from .curve import Curve
 from .events import Event, Launch, Migration, Social, Tick, Trade, dumps
 from .signals import CallerBook
+from .sizing import SolPrice, size_usd, strength
 from .strategy import SniperPosition, evaluate_entry, evaluate_exit
 from .tracker import TokenState
 
@@ -74,6 +75,8 @@ class Engine:
         self._last_tick = 0.0
         self._last_equity = 0.0
         self._last_summary = 0.0
+        self.sol_price = SolPrice(self.p.sizing.sol_usd_fallback)
+        self._last_price_refresh = -1e12
 
     # ------------------------------------------------------------------ helpers
     def say(self, level: str, text: str, mint: str = "", **fields) -> None:
@@ -91,11 +94,14 @@ class Engine:
             return "halted: " + self.book.halted
         if self.paused:
             return "paused"
+        if getattr(self.feed, "degraded", False):
+            return f"on backup feed {self.feed.host} (no trade data) - entries paused"
         if -self.book.day_pnl >= c.daily_loss_limit_sol:
             return "daily loss limit"
         if len(self.positions) + len(self.pending) + len(self.reviewing) >= c.max_open_positions:
             return "max positions"
-        if self.book.sol - (buy_sol or c.buy_sol) < c.min_sol_reserve:
+        need = buy_sol or (self.p.sizing.max_usd / self.sol_price.usd if self.p.sizing.enabled else c.buy_sol)
+        if self.book.sol - need < c.min_sol_reserve:
             return "low SOL"
         return ""
 
@@ -199,7 +205,7 @@ class Engine:
             if e.v_sol and e.v_tokens:
                 s.curve = Curve(e.v_sol, e.v_tokens)
             await self._watch(e.mint)
-        s.on_trade(e, self.p.entry.bundle_window_s)
+        s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
         if lead:
             await self._on_leader_trade(s, e)
         await self._evaluate(s)
@@ -298,6 +304,21 @@ class Engine:
             return
         await self._enter(s, kind="sniper", score=d.score, buy_sol=self.p.capital.buy_sol, notes=d.notes or [])
 
+    def _size(self, s: TokenState, kind: str, score: float, buy_sol: float, desk_mult: float | None,
+              notes: list[str]) -> float:
+        """SOL to spend. With sizing on: $base..$max from signal strength, hard-capped in USD."""
+        z = self.p.sizing
+        if not z.enabled:
+            return round(buy_sol * (desk_mult or 1.0), 4)
+        w = s.window(self.now, self.p.entry.flow_window_s)
+        nb, ns = sum(1 for t in w if t[2] == "buy"), sum(1 for t in w if t[2] == "sell")
+        smart = len({x.author for x in s.socials if x.source == "wallet"}) + (1 if kind == "copy" else 0)
+        st, _ = strength(score, self.p.entry.min_score if kind == "sniper" else 0, nb / max(ns, 1),
+                         s.curve.price / s.peak_price if s.peak_price else 1.0, smart, desk_mult)
+        usd, why = size_usd(z, st, kind, s.curve.real_sol, self.sol_price.usd)
+        notes.append(f"${usd:.0f} ({why})")
+        return round(usd / self.sol_price.usd, 4)
+
     async def _enter(self, s: TokenState, kind: str, score: float, buy_sol: float, notes: list[str],
                      source: str = "sniper", leader: str = "", ref_price: float = 0.0) -> None:
         if self.desk and self.desk.enabled:
@@ -308,7 +329,7 @@ class Engine:
             else:                       # backtest: inline, so replays stay deterministic
                 await review
             return
-        await self._buy(s, score, buy_sol, notes, source, leader)
+        await self._buy(s, score, self._size(s, kind, score, buy_sol, None, notes), notes, source, leader)
 
     async def _desk_then_buy(self, s, kind, score, buy_sol, notes, source, leader, ref_price) -> None:
         from .desk import snapshot_for
@@ -332,17 +353,22 @@ class Engine:
                 s.decided = "rejected: desk passed"
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
-        size = round(buy_sol * v.size_mult, 4)
+        notes = notes + [f"desk x{v.size_mult:.2f}"]
+        size = self._size(s, kind, score, buy_sol, v.size_mult, notes)
         why = self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
             (f"price moved {moved:+.0f}% during review" if moved > self.p.desk.max_price_move_pct else "") or \
             ("dev sold" if s.dev_sold else "")
         if why:
             self.say("info", f"desk approved {s.symbol} but skipped: {why}", s.mint)
             return
-        await self._buy(s, score, size, notes + [f"desk x{v.size_mult:.2f}"], source, leader)
+        await self._buy(s, score, size, notes, source, leader)
 
     async def _buy(self, s: TokenState, score: float, sol: float, notes: list[str], source: str = "sniper",
                    leader: str = "") -> None:
+        z = self.p.sizing
+        if z.enabled and sol * self.sol_price.usd > z.max_usd + 1e-6:     # hard cap, whatever asked for more
+            self.say("error", f"size ${sol * self.sol_price.usd:.2f} over hard cap ${z.max_usd} - clamped", s.mint)
+            sol = round(z.max_usd / self.sol_price.usd, 4)
         self.pending.add(s.mint)
         try:
             fill = await self.ex.buy(s.mint, s.curve, sol)
@@ -392,6 +418,9 @@ class Engine:
         self.book.day_pnl += fill.sol - cost_part
         if reason.startswith("initials"):
             pos.initials_taken = True
+        elif reason.startswith("ladder ") and "x sell" in reason:
+            pos.ladder_hit += 1
+            pos.initials_taken = True
         self.say("sell", f"{s.symbol} {fill.tokens / pos.initial_tokens:.0%} for {fill.sol:.3f} SOL | {reason}",
                  s.mint, signature=fill.signature)
         if pos.tokens * s.curve.price < DUST_SOL:
@@ -422,6 +451,9 @@ class Engine:
         asyncio.ensure_future(self._unwatch(pos.mint))
 
     async def _tick(self) -> None:
+        if self.feed.realtime and self.p.sizing.enabled and self.now - self._last_price_refresh >= 300:
+            self._last_price_refresh = self.now
+            asyncio.create_task(self.sol_price.refresh())
         day = time.strftime("%Y-%m-%d", time.gmtime(self.now))
         if day != self.book.day:
             self.book.day, self.book.day_pnl = day, 0.0
@@ -544,6 +576,7 @@ class Engine:
             "callers": sorted(({"caller": k, "calls": v.calls, "avg_return": v.avg_return, "weight": v.weight}
                                for k, v in self.callers.stats.items()), key=lambda c: -c["calls"])[:15],
             "leaders": self.leaders.snapshot(), "desk": self.desk_stats(),
+            "sol_usd": self.sol_price.usd, "sol_usd_source": self.sol_price.source,
             "blocked": self.entries_blocked(),
         }
 

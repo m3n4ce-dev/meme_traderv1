@@ -44,6 +44,32 @@ class Wallet:
         raw = base64.b64encode(bytes(signed)).decode()
         return rpc("sendTransaction", [raw, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}])
 
+    def close_empty_token_accounts(self, mint: str) -> int:
+        """Close this wallet's zero-balance token accounts for `mint` and reclaim their rent.
+        Works for SPL Token and Token-2022 (program taken from the account's owner). The token
+        program rejects closing a non-empty account, so this can never burn tokens."""
+        from solders.hash import Hash
+        from solders.instruction import AccountMeta, Instruction
+        from solders.message import MessageV0
+        from solders.pubkey import Pubkey
+        from solders.transaction import VersionedTransaction
+
+        owner = self._kp.pubkey()
+        res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint}, {"encoding": "jsonParsed"}])
+        ixs = []
+        for a in res["value"]:
+            if int(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"]) != 0:
+                continue
+            ixs.append(Instruction(Pubkey.from_string(a["account"]["owner"]), bytes([9]),   # 9 = CloseAccount
+                                   [AccountMeta(Pubkey.from_string(a["pubkey"]), False, True),
+                                    AccountMeta(owner, False, True), AccountMeta(owner, True, False)]))
+        if not ixs:
+            return 0
+        bh = rpc("getLatestBlockhash", [{"commitment": "confirmed"}])["value"]["blockhash"]
+        tx = VersionedTransaction(MessageV0.try_compile(owner, ixs, [], Hash.from_string(bh)), [self._kp])
+        rpc("sendTransaction", [base64.b64encode(bytes(tx)).decode(), {"encoding": "base64"}])
+        return len(ixs)
+
     def sol_balance(self) -> float:
         return rpc("getBalance", [self.pubkey, {"commitment": "confirmed"}])["value"] / 1e9
 

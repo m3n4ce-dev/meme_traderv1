@@ -73,6 +73,14 @@ sniper:
     max_drawdown_pct: 30         # TBD - kill switch (sells everything, stops entries)
     min_sol_reserve: 0.03
 
+  sizing:                        # sizing agent (intel §5): $ per buy from signal strength
+    enabled: true
+    base_usd: 5                  # anything that passes the full filter stack
+    max_usd: 20                  # HARD cap per buy, enforced in code
+    copy_multiplier: 0.6         # copies are entered later than the leader -> smaller
+    max_pct_of_curve_sol: 3      # never more than this % of the SOL in the curve (price impact)
+    sol_usd_fallback: 150        # TBD - used until/if the live SOL price can't be fetched
+
   entry:
     bundle_window_s: 2           # buys this soon after create count as bundled/insider snipes
     min_age_s: 15                # TBD - wait at least this long before buying (let insiders show their hand)
@@ -91,10 +99,20 @@ sniper:
     full_marks_buyers: 20        # unique buyers in flow window for full velocity score
     full_marks_flow_sol: 5
     min_score: 55                # TBD
+    min_fees_paid_sol: 0.1       # real buyers pay fees; bundle rugs barely do (intel: 0.1 degen / 1-3 SOL later tabs)
+    sniper_window_s: 10          # buys this soon after launch count as snipes
+    max_sniper_pct: 20           # snipers still holding > this % of supply -> wait (intel: Turtle's audit)
+    max_insider_pct: 30          # dev + bundle wallets still holding > this % -> wait
     require_socials: false       # TBD - require twitter/telegram/website in metadata
     allow_unknown_launch: false  # allow entries on CAs we only saw via social signals
 
   exit:
+    profile: trail               # trail = initials at 2x + tightening trailing stop | ladder = fixed ladder below
+    ladder:                      # David's rules: 2x sell half, 5x sell rest, 0.3x stop; ratchet after 3x
+      steps: [{at_x: 2, sell_frac: 0.5}, {at_x: 5, sell_frac: 1.0}]
+      stop_x: 0.3
+      trail_after_x: 3           # once 3x was reached, never let it round-trip back to entry
+      trail_pct: 30
     initials_at_pct: 100         # TBD - at 2x, sell enough to recover cost
     initials_multiple: 1.0       # 1.0 = exactly cost; 1.2 = cost + 20%
     trail_tiers:                 # TBD - trailing stop from peak, tightens as gain grows
@@ -117,7 +135,9 @@ sniper:
     curve_fee_pct: 1.25          # pump.fun bonding-curve fee (protocol + creator)
     platform_fee_pct: 0.5        # PumpPortal local-trade API fee
     paper_latency_slippage_pct: 3   # paper: extra adverse price move between signal and landing
-    slippage_pct: 15             # live: max slippage sent to PumpPortal
+    slippage_pct: 15             # live: max buy slippage sent to PumpPortal (buys are never blindly retried)
+    sell_slippage_steps: [15, 25, 40]   # live sells: re-quote with these slippages until one lands
+    close_empty_accounts: true   # live: close emptied token accounts after a full exit (reclaims rent)
     priority_fee_sol: 0.0005     # TBD
 
   signals:
@@ -151,6 +171,9 @@ sniper:
     max_price_move_pct: 20       # skip if price ran this much while the desk deliberated
     price_in_per_mtok: 4.0       # for the cost meter on the dashboard (USD)
     price_out_per_mtok: 20.0
+
+  feed:
+    fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)
