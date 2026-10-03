@@ -206,6 +206,9 @@ sniper:
     levels: [buy, close, error]  # any of: buy, sell, close, callout, error, signal, desk, info
 
   feed:
+    trades: solana               # solana = read trades from pump.fun's on-chain logs (no per-trade fee)
+                                 # pumpportal = PumpPortal token-trade stream (0.01 SOL / 10k trades, key + funded wallet)
+    ws_url: ""                   # solana only; empty = SOLANA_WS_URL from .env, else the free public RPC
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
 
   late:                          # "graduation play": strong late-curve momentum, out before migration
