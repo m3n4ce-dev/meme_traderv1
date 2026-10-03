@@ -39,6 +39,13 @@ class Callout:
 def eligible(s, now: float, c, red_flag_ctx: dict) -> tuple[bool, float, str]:
     """c: params.sniper.callouts. Returns (ok, clickability score 0-100, reason)."""
     age, prog = s.age(now), s.curve.progress * 100
+    # cheap checks first: this runs over every live token on each scan
+    if not (c.min_age_s <= age <= c.max_age_s):
+        return False, 0, "age"
+    if not (c.min_curve_pct <= prog <= c.max_curve_pct) or s.migrated:
+        return False, 0, "curve"
+    if len(s.holders) < c.min_holders:
+        return False, 0, "holders"
     if s.dev_sold:
         return False, 0, "dev sold"
     if s.bundle_pct() > red_flag_ctx["max_bundle_pct"] or s.early_sold_ratio() > red_flag_ctx["max_early_sold_ratio"]:
@@ -47,12 +54,6 @@ def eligible(s, now: float, c, red_flag_ctx: dict) -> tuple[bool, float, str]:
         return False, 0, "serial deployer"
     if s.cluster and s.cluster["pct"] > red_flag_ctx.get("max_cluster_pct", 100):
         return False, 0, "insider cluster"
-    if not (c.min_age_s <= age <= c.max_age_s):
-        return False, 0, "age"
-    if not (c.min_curve_pct <= prog <= c.max_curve_pct) or s.migrated:
-        return False, 0, "curve"
-    if len(s.holders) < c.min_holders:
-        return False, 0, "holders"
     rate = s.buyers_in(now, 60)
     flow = s.net_flow_sol(now, 60)
     if rate < c.min_new_buyers_per_min or flow <= 0:

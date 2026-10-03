@@ -18,16 +18,20 @@ import time
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
+from ..config import ROOT
 from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
 from .curve import Curve
 from .events import Event, Funding, Launch, Migration, Social, Tick, Trade, dumps
+from .features import extract
 from .funding import FundingResolver, cluster_report, cohort
 from .notify import Notifier
+from .predictor import LogisticModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
-from .strategy import SniperPosition, evaluate_entry, evaluate_exit
+from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry, evaluate_late_exit,
+                       gate_checklist)
 from .tracker import TokenState
 
 DUST_SOL = 0.0005
@@ -36,6 +40,24 @@ DUST_SOL = 0.0005
 def reason_key(note: str) -> str:
     """'dev bought 7.1% > 6%' -> 'dev bought' (for grouping reject stats)."""
     return re.split(r"[\d(]", note, maxsplit=1)[0].strip(" :-") or note
+
+
+# Settings the dashboard may change at runtime: (key under sniper, type, min, max, label, help)
+CONTROLS = [
+    ("entry.enabled", "bool", None, None, "Sniper entries", "Early-entry sniper buys"),
+    ("copy.enabled", "bool", None, None, "Copy trading", "Mirror leader wallets"),
+    ("callouts.enabled", "bool", None, None, "Callouts", "$1 bags + callout cards"),
+    ("late.enabled", "bool", None, None, "Graduation plays", "Late-curve momentum, out before migration"),
+    ("risk_adapt.enabled", "bool", None, None, "Defense mode", "Halve size + raise the bar after a bad run"),
+    ("entry.min_score", "int", 0, 100, "Min entry score", "Rule score needed to buy"),
+    ("predict.min_p", "float", 0.0, 0.95, "Min P(2x first)", "Model gate; 0 = show only"),
+    ("capital.max_open_positions", "int", 1, 20, "Max open positions", "Trading slots (callout bags excluded)"),
+    ("sizing.base_usd", "float", 1.0, 50.0, "Base buy ($)", "Size for a minimal signal"),
+    ("sizing.max_usd", "float", 1.0, 100.0, "Max buy ($, hard cap)", "Never exceeded, whatever asks"),
+    ("capital.daily_loss_limit_sol", "float", 0.01, 100.0, "Daily loss limit (SOL)", "No new entries past this"),
+    ("exit.profile", "enum:trail,ladder", None, None, "Exit profile", "trail = initials + trailing stop"),
+    ("exit.stop_loss_pct", "float", 5.0, 90.0, "Stop loss %", "Trail profile hard stop"),
+]
 
 
 class Book:
@@ -73,7 +95,8 @@ class Engine:
         self.journal = log_to_journal
         self.callers = CallerBook(DATA / "callers.json")
         self.leaders = LeaderBook(self.p.copy.leaders, DATA / "leaders.json" if log_to_journal else None)
-        self.record_file = record_path.open("a") if record_path else None
+        self.record_path = Path(record_path) if record_path else None
+        self.record_file = self._open_record(self.record_path) if self.record_path else None
         self.now = 0.0
         self._last_tick = 0.0
         self._last_equity = 0.0
@@ -90,12 +113,25 @@ class Engine:
         self.http = None                                   # shared aiohttp session (created lazily, live only)
         self._last_funders_save = 0.0
         self._last_price_fallback = 0.0
+        self._last_callout_scan = -1e12
+        self._last_cleanup = -1e12
         # live money must survive restarts (the Ubuntu service restarts on crash)
         self.persist = mode.startswith("live") if persist is None else persist
         self.state_path = DATA / f"sniper_state_{mode.split('-')[0]}.json"
         self._last_state_save = 0.0
         self._load_funders()
         self._last_price_refresh = -1e12
+        # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
+        mp = Path(self.p.predict.model_path)
+        self.model = LogisticModel.load(mp if mp.is_absolute() else ROOT / mp) if self.p.predict.enabled else None
+        self.audit: dict[str, list] = {}                   # mint -> [gate, t0, p0, peak, trough, outcome]
+        self.gate_stats: dict[str, dict] = defaultdict(lambda: {"n": 0, "win": 0, "loss": 0, "peak_sum": 0.0})
+        self.defense_until = 0.0
+        self.defense_reason = ""
+        self._last_late_scan = -1e12
+        self._snap_cache: tuple[float, dict] | None = None
+        self._analytics: tuple | None = None
+        self._last_flush = 0.0
 
     # ------------------------------------------------------------------ helpers
     def say(self, level: str, text: str, mint: str = "", **fields) -> None:
@@ -138,8 +174,41 @@ class Engine:
                 "symbol_dupes": max(len(self.symbols.get(s.symbol.upper(), ())) - 1, 0),
                 "social_weight": max(ws) if ws else 0.0}
 
+    @staticmethod
+    def _open_record(path: Path):
+        if str(path).endswith(".gz"):
+            import gzip
+            return gzip.open(path, "at", compresslevel=5)
+        return path.open("a")
+
+    def _rotate_record(self) -> None:
+        """A 24/7 service starts a new feed-YYYY-MM-DD.jsonl at UTC midnight and gzips the finished
+        day in the background (plain text while writing, so a crash can't corrupt an archive)."""
+        m = re.fullmatch(r"feed-\d{4}-\d{2}-\d{2}(\.jsonl(?:\.gz)?)", self.record_path.name)
+        if not m:
+            return
+        new = self.record_path.with_name(f"feed-{time.strftime('%Y-%m-%d', time.gmtime(self.now))}{m.group(1)}")
+        if new == self.record_path:
+            return
+        self.record_file.close()
+        old, self.record_path = self.record_path, new
+        self.record_file = self._open_record(new)
+        self.say("info", f"recording to {new.name}")
+        if old.suffix == ".jsonl" and self.feed.realtime:
+            from .feeds import compress_file
+
+            def job(path=old):
+                try:
+                    compress_file(path)
+                except OSError as err:              # e.g. disk full: the plain file stays, nothing lost
+                    print(f"could not compress {path.name}: {err}")
+            asyncio.get_running_loop().run_in_executor(None, job)
+
     async def _watch(self, mint: str) -> None:
-        self.watch_until[mint] = self.now + (self.p.record.full_window_s if self.record_file else 1e12)
+        keep = self.p.record.full_window_s
+        if self.p.late.enabled:                    # graduation plays look at tokens up to late.max_age_s old
+            keep = max(keep, self.p.late.max_age_s)
+        self.watch_until[mint] = self.now + (keep if self.record_file else 1e12)
         await self.feed.watch([mint])
 
     async def _unwatch(self, mint: str) -> None:
@@ -248,6 +317,17 @@ class Engine:
                 self.record_file.write(dumps(e) + "\n")
 
     async def _on_trade(self, e: Trade) -> None:
+        a = self.audit.get(e.mint)
+        if a is not None:                                  # gate audit: what happened after the decision?
+            px = e.v_sol / e.v_tokens if e.pool == "pump" and e.v_tokens > 0 else (e.mcap_sol / 1e9 if e.mcap_sol else 0)
+            if px > 0:
+                a[3], a[4] = max(a[3], px), min(a[4], px)
+                if not a[5]:                               # first passage, same rule as the model's label
+                    pr = self.p.predict
+                    if px >= a[2] * (1 + pr.up_pct / 100):
+                        a[5] = "win"
+                    elif px <= a[2] * (1 - pr.down_pct / 100):
+                        a[5] = "loss"
         s = self.tokens.get(e.mint)
         known = e.trader in self.leaders.leaders            # paused leaders still matter: we follow their sells
         lead = known and self.leaders.is_leader(e.trader)
@@ -354,17 +434,36 @@ class Engine:
             await self._check_entry(s)
 
     async def _check_entry(self, s: TokenState) -> None:
+        if not self.p.entry.enabled:
+            s.decided = "sniper off"                       # callouts / graduation plays still consider it
+            return
         d = evaluate_entry(s, self.now, self.p.entry, self._ctx(s))
         s.score, s.score_notes = d.score, d.notes or []
+        if d.action != "reject" and self.model is not None:
+            p = self._predict(s)
+            s.score_notes = s.score_notes + [f"P(2x) {p:.0%}"]
         if d.action == "reject":
             s.decided = "rejected: " + d.notes[0]
             self.rejects[reason_key(d.notes[0])] += 1
-            keep = self.p.callouts.enabled and not is_red_flag(d.notes[0])   # may still be worth a callout later
+            self._audit_start(s, reason_key(d.notes[0]))
+            # may still be worth a callout or a graduation play later: keep its trades coming
+            keep = (self.p.callouts.enabled or self.p.late.enabled) and not is_red_flag(d.notes[0])
             if s.mint not in self.positions and not keep:
                 await self._unwatch(s.mint)
             return
         if d.action != "enter":
             return
+        if self._defensive() and d.score < self.p.entry.min_score + self.p.risk_adapt.min_score_add:
+            s.score_notes = [f"defense mode: score {d.score:.0f} < {self.p.entry.min_score + self.p.risk_adapt.min_score_add}"]
+            return
+        pr = self.p.predict
+        if self.model is not None and s.p is not None:
+            if pr.min_p > 0 and s.p < pr.min_p:
+                s.score_notes = [f"P(2x) {s.p:.0%} < {pr.min_p:.0%}"] + s.score_notes
+                return
+            if pr.require_positive_ev and self._ev(s.p) < 0:
+                s.score_notes = [f"negative EV ({self._ev(s.p):+.0f}%)"] + s.score_notes
+                return
         blocked = self.entries_blocked()
         if blocked:
             self.stats["skipped_" + blocked.split(":")[0].replace(" ", "_")] += 1
@@ -375,9 +474,80 @@ class Engine:
         if verdict:
             s.decided = "rejected: " + verdict
             self.rejects[reason_key(verdict)] += 1
+            self._audit_start(s, reason_key(verdict))
             self.say("info", f"{s.symbol} rejected: {verdict}", s.mint)
             return
         await self._enter(s, kind="sniper", score=d.score, buy_sol=self.p.capital.buy_sol, notes=d.notes or [])
+
+    # ------------------------------------------------------------------ model / audit / defense
+    def _cost_pct(self) -> float:
+        ex = self.p.execution
+        return 2 * (ex.curve_fee_pct + ex.platform_fee_pct + ex.paper_latency_slippage_pct)
+
+    def _predict(self, s: TokenState) -> float | None:
+        if self.model is None:
+            return None
+        if s.p is None or self.now - s.p_ts >= 3:
+            s.p = self.model.predict(extract(s, self.now, self._ctx(s)))
+            s.p_ts = self.now
+        return s.p
+
+    def _ev(self, p: float) -> float:
+        pr = self.p.predict
+        return expected_value_pct(p, pr.up_pct, pr.down_pct, self._cost_pct())
+
+    def _audit_start(self, s: TokenState, gate: str) -> None:
+        """Follow a decision for audit.window_s: had we bought at this price, would it have hit +up% before
+        -down% (the model's label)? '(bought)' rows follow our own entries, as the yardstick for the gates."""
+        if s.price_known and s.mint not in self.audit and (gate == "(bought)" or s.mint not in self.positions):
+            px = s.curve.price
+            self.audit[s.mint] = [gate, self.now, px, px, px, ""]
+
+    def _audit_settle(self, force: bool = False, final: bool = False) -> None:
+        """final (end of a backtest): count resolved audits, drop ones whose window was cut short."""
+        window = self.p.audit.window_s
+        for mint, (gate, t0, p0, peak, trough, outcome) in list(self.audit.items()):
+            if force or self.now - t0 >= window or final:
+                del self.audit[mint]
+                if final and not outcome and self.now - t0 < window:
+                    continue
+                g = self.gate_stats[gate]
+                g["n"] += 1
+                g["win"] += outcome == "win"
+                g["loss"] += outcome == "loss"
+                g["peak_sum"] += peak / p0
+
+    def gate_audit(self) -> list[dict]:
+        rows = []
+        for gate, g in self.gate_stats.items():
+            n = g["n"]
+            if n:
+                rows.append({"gate": gate, "n": n, "win_first_pct": g["win"] / n * 100,
+                             "loss_first_pct": g["loss"] / n * 100,
+                             "flat_pct": (n - g["win"] - g["loss"]) / n * 100, "avg_peak_x": g["peak_sum"] / n})
+        return sorted(rows, key=lambda r: (r["gate"] != "(bought)", -r["n"]))
+
+    def _defensive(self) -> bool:
+        return self.p.risk_adapt.enabled and self.now < self.defense_until
+
+    def _update_defense(self) -> None:
+        R = self.p.risk_adapt
+        if not R.enabled:
+            return
+        recent = [c for c in self.book.closed if c["source"] != "callout"][-R.lookback_trades:]
+        streak = 0
+        for c in reversed(recent):
+            if c["pnl"] > 0:
+                break
+            streak += 1
+        window = sum(c["pnl"] for c in recent)
+        if streak >= R.loss_streak or (len(recent) >= R.lookback_trades and window <= -R.window_loss_sol):
+            if not self._defensive():
+                why = f"{streak} losses in a row" if streak >= R.loss_streak else f"last {len(recent)} trades {window:+.3f} SOL"
+                self.defense_reason = why
+                self.say("error", f"DEFENSE MODE for {R.minutes} min ({why}): size x{R.size_mult}, "
+                                  f"min score +{R.min_score_add}")
+            self.defense_until = self.now + R.minutes * 60
 
     async def _funding_gate(self, s: TokenState) -> str:
         """'' = pass, 'wait' = lookups in flight, otherwise a rejection reason."""
@@ -454,9 +624,18 @@ class Engine:
         w = s.window(self.now, self.p.entry.flow_window_s)
         nb, ns = sum(1 for t in w if t[2] == "buy"), sum(1 for t in w if t[2] == "sell")
         smart = len({x.author for x in s.socials if x.source == "wallet"}) + (1 if kind == "copy" else 0)
+        edge = None
+        p = self._predict(s)
+        if p is not None and self.p.predict.kelly_fraction > 0:
+            pr = self.p.predict
+            edge = max(kelly(p, pr.up_pct, pr.down_pct, self._cost_pct()), 0.0) * pr.kelly_fraction
         st, _ = strength(score, self.p.entry.min_score if kind == "sniper" else 0, nb / max(ns, 1),
-                         s.curve.price / s.peak_price if s.peak_price else 1.0, smart, desk_mult)
-        usd, why = size_usd(z, st, kind, s.curve.real_sol, self.sol_price.usd)
+                         s.curve.price / s.peak_price if s.peak_price else 1.0, smart, desk_mult, edge)
+        usd, why = size_usd(z, st, kind, s.curve.real_sol, self.sol_price.usd,
+                            mult=self.p.late.buy_usd_mult if kind == "late" else 1.0,
+                            defense=self.p.risk_adapt.size_mult if self._defensive() else 1.0)
+        if p is not None:
+            why += f", P(2x) {p:.0%}"
         notes.append(f"${usd:.0f} ({why})")
         return round(usd / self.sol_price.usd, 4)
 
@@ -492,6 +671,7 @@ class Engine:
             self.rejects["desk passed"] += 1
             if kind == "sniper":
                 s.decided = "rejected: desk passed"
+                self._audit_start(s, "desk passed")
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]
@@ -528,7 +708,10 @@ class Engine:
         self.positions[s.mint] = SniperPosition(
             mint=s.mint, symbol=s.symbol, opened_at=self.now, entry_price=fill.price, tokens=fill.tokens,
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
-            peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""))
+            peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""),
+            p=s.p, trough_price=fill.price)
+        if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
+            self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         self.stats["entries"] += 1
         self.save_state()
         self.stats["entries_" + source.split(":")[0]] += 1
@@ -541,13 +724,17 @@ class Engine:
             if self.now - pos.opened_at >= self.p.exit.max_hold_s + 120:
                 await self._sell(s, pos, 1.0, "max hold time (price unknown)")
             return
+        px = s.curve.price
+        pos.peak_price = max(pos.peak_price, px)
+        pos.trough_price = min(pos.trough_price or px, px)
         if pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
-            pos.peak_price = max(pos.peak_price, s.curve.price)
             held = self.now - pos.opened_at
             r = (1.0, "dev sold") if s.dev_sold else \
                 ((1.0, "callout hold done") if held >= self.p.callouts.hold_s else None)
         elif (why := await self._cluster_watch(s)):
             r = (1.0, why)
+        elif pos.source == "late":
+            r = evaluate_late_exit(pos, s, self.now, self.p.late, self.p.exit)
         elif pos.leader and not self.p.copy.use_own_exits:
             r = None
             if s.dev_sold and self.p.exit.exit_on_dev_sell:
@@ -591,17 +778,20 @@ class Engine:
     def _close(self, pos: SniperPosition, s: TokenState) -> None:
         if self.positions.pop(pos.mint, None) is None:
             return
+        s.late_tried = True                        # no graduation-play re-buy of a token we just traded
         pnl = pos.proceeds_sol - pos.initial_cost_sol
         row = {
             "mint": pos.mint, "symbol": pos.symbol, "opened": pos.opened_at, "closed": self.now,
             "cost": pos.initial_cost_sol, "proceeds": pos.proceeds_sol, "pnl": pnl,
-            "pnl_pct": pnl / pos.initial_cost_sol * 100, "peak_gain_pct": pos.gain_pct(pos.peak_price),
+            "pnl_pct": pnl / max(pos.initial_cost_sol, 1e-12) * 100, "peak_gain_pct": pos.gain_pct(pos.peak_price),
             "score": pos.score, "initials": pos.initials_taken, "exit": pos.exits[-1][1] if pos.exits else "",
-            "source": pos.source, "desk": pos.desk,
+            "source": pos.source, "desk": pos.desk, "p": pos.p,
+            "mae_pct": pos.gain_pct(pos.trough_price) if pos.trough_price else 0.0,
         }
         self.book.closed.append(row)
         self.stats["wins" if pnl > 0 else "losses"] += 1
-        self.say("close", f"{pos.symbol} {'+' if pnl >= 0 else ''}{pnl:.3f} SOL ({pnl / pos.initial_cost_sol:+.0%}) "
+        self._update_defense()
+        self.say("close", f"{pos.symbol} {'+' if pnl >= 0 else ''}{pnl:.3f} SOL ({pnl / max(pos.initial_cost_sol, 1e-12):+.0%}) "
                           f"[{pos.source}]", pos.mint)
         if self.journal:
             DATA.mkdir(exist_ok=True)
@@ -631,10 +821,15 @@ class Engine:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
         await self._price_fallback()
-        recent_calls = {c.mint for c in self.callouts.calls if self.now - c.ts < 3660}
-        for mint in list(self.tokens):
-            s = self.tokens.get(mint)
-            if s is None or mint in self.pending or mint in self.reviewing:
+        cleanup = self.now - self._last_cleanup >= 10       # deletions only need a 10 s cadence
+        if cleanup:
+            self._last_cleanup = self.now
+            recent_calls = {c.mint for c in self.callouts.calls if self.now - c.ts < 3660}
+            keep_s = max(self.p.entry.max_age_s, self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60
+            if self.p.late.enabled:
+                keep_s = max(keep_s, self.p.late.max_age_s + 60)
+        for mint, s in list(self.tokens.items()):
+            if mint in self.pending or mint in self.reviewing:
                 continue
             if mint in self.positions:
                 if self.book.halted:
@@ -643,13 +838,18 @@ class Engine:
                     await self._check_exit(s)
             elif not s.decided:
                 await self._check_entry(s)
-            elif s.age(self.now) > max(self.p.entry.max_age_s,
-                                       self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60 \
-                    and mint not in recent_calls:          # keep pricing a call until its 1h result is in
-                del self.tokens[mint]
+            elif cleanup and self.now - s.created_ts > keep_s and mint not in recent_calls:
+                del self.tokens[mint]                       # (calls keep their token priced until the 1h result)
                 if not self.record_file:
                     await self._unwatch(mint)
+        if cleanup:
+            self._audit_settle()
         await self._maybe_callout()
+        await self._maybe_late()
+        if self.record_file and self.now - self._last_flush >= 30:
+            self._last_flush = self.now
+            self._rotate_record()
+            self.record_file.flush()
         self.callouts.settle(self.now, lambda m: self.tokens[m].curve.price if m in self.tokens else None)
         for mint, until in list(self.watch_until.items()):
             if until <= self.now and mint not in self.positions and (mint not in self.tokens or self.tokens[mint].decided):
@@ -771,11 +971,38 @@ class Engine:
                               + ", ".join(o[:6] + "…" for o in orphans[:8]))
         self.save_state()
 
+    # ------------------------------------------------------------------ graduation plays
+    async def _maybe_late(self) -> None:
+        L = self.p.late
+        if not L.enabled or self.now - self._last_late_scan < 2 or self.entries_blocked():
+            return
+        self._last_late_scan = self.now
+        en = self.p.entry
+        for s in list(self.tokens.values()):
+            if not s.decided or s.late_tried or s.mint in self.positions or s.mint in self.pending \
+                    or s.mint in self.reviewing or not s.price_known:
+                continue
+            ok, why = evaluate_late_entry(s, self.now, L, {
+                "max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
+                "creator_launches": len(self.creators.get(s.creator, ())),
+                "max_creator_launches_24h": en.max_creator_launches_24h,
+                "max_cluster_pct": en.funding.max_cluster_pct})
+            if not ok:
+                continue
+            s.late_tried = True
+            await self._enter(s, kind="late", score=max(s.score, 60.0), buy_sol=self.p.capital.buy_sol,
+                              notes=[why], source="late")
+            if self.entries_blocked():
+                break
+
     # ------------------------------------------------------------------ callouts
     async def _maybe_callout(self) -> None:
         c = self.p.callouts
         if not c.enabled or self.book.halted or self.paused or self.now - self.callouts.last_ts < c.interval_s:
             return
+        if self.now - self._last_callout_scan < 5:      # no candidate last scan: look again in a few seconds,
+            return                                       # not on every 1 s tick over every live token
+        self._last_callout_scan = self.now
         today = [x for x in self.callouts.calls if self.now - x.ts < 86400]
         if len(today) >= c.max_per_day:
             return
@@ -832,6 +1059,136 @@ class Engine:
         for mint in list(self.positions):
             await self.sell_now(mint)
 
+    def controls(self) -> list[dict]:
+        out = []
+        for key, typ, lo, hi, label, help_ in CONTROLS:
+            node = self.p
+            for k in key.split("."):
+                node = node[k]
+            out.append({"key": key, "type": typ, "min": lo, "max": hi, "label": label, "help": help_, "value": node})
+        return out
+
+    def set_control(self, key: str, value) -> str:
+        """Validate and apply one dashboard setting. Returns '' or an error message."""
+        spec = next((c for c in CONTROLS if c[0] == key), None)
+        if spec is None:
+            return f"unknown setting {key}"
+        _, typ, lo, hi, label, _ = spec
+        try:
+            if typ == "bool":
+                v = value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")
+            elif typ == "int":
+                v = int(value)
+            elif typ == "float":
+                v = float(value)
+            else:
+                v = str(value)
+                if v not in typ.split(":", 1)[1].split(","):
+                    return f"{label}: must be one of {typ.split(':', 1)[1]}"
+        except (TypeError, ValueError):
+            return f"{label}: not a valid {typ}"
+        if lo is not None and not (lo <= v <= hi):
+            return f"{label}: must be between {lo} and {hi}"
+        if key == "sizing.base_usd" and v > self.p.sizing.max_usd:
+            return "base buy can't exceed the max buy"
+        if key == "sizing.max_usd" and v < self.p.sizing.base_usd:
+            return "max buy can't be below the base buy"
+        *path, last = key.split(".")
+        node = self.p
+        for k in path:
+            node = node[k]
+        node[last] = v
+        self.say("info", f"setting changed: {label} = {v}")
+        return ""
+
+    def save_controls(self, path: Path | None = None) -> str:
+        """Write the dashboard-controllable settings into config/params.yaml (other keys untouched)."""
+        import yaml
+
+        path = path or ROOT / "config" / "params.yaml"
+        data = yaml.safe_load(path.read_text()) if path.exists() else {}
+        data = data or {}
+        sn = data.setdefault("sniper", {}) or {}
+        data["sniper"] = sn
+        for c in self.controls():
+            *keys, last = c["key"].split(".")
+            node = sn
+            for k in keys:
+                node = node.setdefault(k, {}) or {}
+            node[last] = c["value"]
+            # re-attach in case setdefault returned a fresh {} for a None value
+            parent = sn
+            for k in keys[:-1]:
+                parent = parent[k]
+            if keys:
+                parent[keys[-1]] = node
+        path.write_text(yaml.safe_dump(data, sort_keys=False))
+        self.say("info", f"settings saved to {path.name}")
+        return ""
+
+    def token_detail(self, mint: str) -> dict | None:
+        s = self.tokens.get(mint)
+        if s is None:
+            return None
+        ctx = self._ctx(s)
+        feats = extract(s, self.now, ctx)
+        p = self._predict(s) if self.model else None
+        holders = sorted(s.holders.items(), key=lambda kv: -kv[1])[:12]
+        pos = self.positions.get(mint)
+        L = s.launch
+        return {
+            "mint": mint, "symbol": s.symbol, "name": L.name if L else "", "age_s": round(s.age(self.now)),
+            "status": "held" if pos else (s.decided or "watching"), "score": s.score, "notes": s.score_notes,
+            "curve_pct": s.curve.progress * 100, "mcap_usd": s.curve.market_cap_sol * self.sol_price.usd,
+            "price": s.curve.price, "price_known": s.price_known,
+            "socials": {"twitter": L.twitter if L else "", "telegram": L.telegram if L else "",
+                        "website": L.website if L else ""},
+            "creator": s.creator, "checklist": gate_checklist(s, self.now, self.p.entry, ctx),
+            "p": p, "ev_pct": self._ev(p) if p is not None else None,
+            "drivers": self.model.drivers(feats) if self.model else [],
+            "features": {k: round(v, 4) for k, v in feats.items()},
+            "cluster": s.cluster, "desk": s.desk,
+            "holders": [{"wallet": w, "pct": t / 1e9 * 100, "dev": w == s.creator,
+                         "funder": self.funders.get(w, ("", ""))[0]} for w, t in holders],
+            "tape": [{"ts": t, "side": side, "sol": sol, "trader": tr} for t, _, side, sol, tr in list(s.trades)[-40:]][::-1],
+            "chart": s.sparkline(150),
+            "position": None if pos is None else {"source": pos.source, "entry": pos.entry_price,
+                                                  "gain_pct": pos.gain_pct(s.curve.price), "cost_sol": pos.initial_cost_sol,
+                                                  "proceeds_sol": pos.proceeds_sol, "initials": pos.initials_taken,
+                                                  "exits": pos.exits},
+            "audit": self._audit_view(mint),
+        }
+
+    def _audit_view(self, mint: str) -> dict | None:
+        a = self.audit.get(mint)
+        if a is None:
+            return None
+        gate, t0, p0, peak, trough, outcome = a
+        return {"gate": gate, "since_s": round(self.now - t0), "price0": p0, "peak_x": peak / p0,
+                "trough_x": trough / p0, "outcome": outcome or "open"}
+
+    def model_card(self) -> dict | None:
+        if not self.model:
+            return None
+        info = self.model.info or {}
+        t = info.get("test", {})
+        return {"trained_at": info.get("trained_at"), "label": info.get("label"), "n_train": info.get("n_train"),
+                "n_test": info.get("n_test"), "auc": t.get("auc"), "brier_skill": t.get("brier_skill"),
+                "base_rate": t.get("base_rate"), "top_decile_rate": t.get("top_decile_rate"),
+                "calibration": t.get("calibration", []), "weights": info.get("weights", [])[:12]}
+
+    def analytics(self) -> dict:
+        """Recomputed when a trade closes or the gate audit moves, else at most once a minute (feed time)."""
+        from .analytics import compute
+
+        key = (len(self.book.closed), sum(g["n"] for g in self.gate_stats.values()))
+        if self._analytics and self._analytics[0] == key and self.now - self._analytics[1] < 60:
+            return self._analytics[2]
+        out = compute(self.book.closed, list(self.book.equity_hist), self.book.start_sol,
+                      self.p.capital.max_drawdown_pct, self.gate_audit(), self.model_card(), fee_pct=self.fee)
+        self._analytics = (key, self.now, out)
+        return out
+
     # ------------------------------------------------------------------ reporting
     @staticmethod
     def _stats(closed: list[dict]) -> dict:
@@ -866,18 +1223,27 @@ class Engine:
                 "model": self.p.desk.model, "personas": list(self.p.desk.personas)}
 
     def snapshot(self) -> dict:
+        if self._snap_cache and self._snap_cache[0] == self.now:      # several dashboard tabs: build once per tick
+            return self._snap_cache[1]
+        snap = self._snapshot()
+        self._snap_cache = (self.now, snap)
+        return snap
+
+    def _snapshot(self) -> dict:
+        # radar: rank cheaply first, then build the expensive fields (sparklines) for the 40 shown only
+        ranked = sorted((s for s in self.tokens.values() if s.mint not in self.positions),
+                        key=lambda s: (s.decided != "" and s.mint not in self.reviewing, -s.score, s.age(self.now)))[:40]
         watching = []
-        for s in self.tokens.values():
-            if s.mint in self.positions:
-                continue
+        for s in ranked:
             status = "AI desk reviewing" if s.mint in self.reviewing else (s.decided or "watching")
+            L = s.launch
             watching.append({
                 "mint": s.mint, "symbol": s.symbol, "age": round(s.age(self.now)), "progress": s.curve.progress,
                 "mcap_sol": s.curve.market_cap_sol, "buyers": len(s.buyers), "score": s.score,
                 "notes": s.score_notes[:3], "status": status, "socials": len(s.socials),
-                "bundle_pct": s.bundle_pct(), "dev_pct": s.dev_initial_pct(), "spark": s.sparkline(40),
+                "links": int(bool(L and L.twitter)) + int(bool(L and L.telegram)) + int(bool(L and L.website)),
+                "p": s.p, "bundle_pct": s.bundle_pct(), "dev_pct": s.dev_initial_pct(), "spark": s.sparkline(40),
             })
-        watching.sort(key=lambda w: (w["status"] not in ("watching", "AI desk reviewing"), -w["score"], w["age"]))
         positions, bags = [], []
         for m, pos in self.positions.items():
             s = self.tokens.get(m)
@@ -898,7 +1264,7 @@ class Engine:
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
         return {
-            "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
+            "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "closed": self.book.closed[-50:][::-1], "rejects": self.rejects.most_common(14),
@@ -914,6 +1280,13 @@ class Engine:
             "callout_next_in": max(0, round(self.p.callouts.interval_s - (self.now - self.callouts.last_ts)))
             if self.p.callouts.enabled else None,
             "blocked": self.entries_blocked(),
+            "defense": {"on": self._defensive(), "reason": self.defense_reason,
+                        "minutes_left": max(0, round((self.defense_until - self.now) / 60))},
+            "model": None if not self.model else {"trained_at": (self.model.info or {}).get("trained_at"),
+                                                   "auc": (self.model.info or {}).get("test", {}).get("auc")},
+            "strategies": {"sniper": self.p.entry.enabled, "copy": self.p.copy.enabled,
+                           "callouts": self.p.callouts.enabled, "late": self.p.late.enabled},
+            "tracked_tokens": len(self.tokens),
         }
 
     def save_report(self, path: Path) -> None:

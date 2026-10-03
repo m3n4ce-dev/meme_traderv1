@@ -1,6 +1,6 @@
 """Walk-forward parameter sweep: tune on earlier data, prove it on later data it never saw.
 
-    python -m meme_trader.sniper sweep --file data/feed-*.jsonl \\
+    python -m meme_trader.sniper sweep --file data/feed-* --jobs 4 \\
         --grid exit.stop_loss_pct=20,30,40 --grid entry.min_score=45,55,65
 
 Launches are split by launch time: the first `train` share of tokens is the tuning set, the rest
@@ -10,6 +10,7 @@ if it also beats the current settings on the test set - otherwise it was probabl
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import itertools
 import time
@@ -17,7 +18,7 @@ import time
 import yaml
 
 from .events import Funding, Launch
-from .feeds import Feed
+from .feeds import Feed, FileFeed, SyntheticFeed
 
 
 class MemoryFeed(Feed):
@@ -30,6 +31,33 @@ class MemoryFeed(Feed):
         for e in self.ev:
             self._last = e.ts
             yield e
+
+
+def load_events(source: dict) -> list:
+    """source: {"files": [...]} or {"synthetic": n_launches, "seed": s}. Synthetic markets are
+    deterministic per seed, so worker processes can rebuild one instead of receiving it."""
+    feed = FileFeed(*source["files"]) if source.get("files") else \
+        SyntheticFeed(seed=source.get("seed"), speed=0, launches=source["synthetic"], start_ts=1_780_000_000)
+
+    async def collect():
+        return [e async for e in feed.events()]
+    return asyncio.run(collect())
+
+
+_W: dict = {}
+
+
+def _init_worker(params, source: dict, train: float) -> None:
+    """Runs once per worker process: load the events there, so no task ships a market over a pipe."""
+    tr, te = split(load_events(source), train)
+    _W.update(params=params, tr=tr, te=te)
+
+
+def _run_in_worker(sets: list[str], which: str) -> dict:
+    from .__main__ import apply_overrides, run_backtest
+
+    p = apply_overrides(copy.deepcopy(_W["params"]), sets)
+    return asyncio.run(run_backtest(p, MemoryFeed(_W[which]))).summary()
 
 
 def split(events: list, train: float) -> tuple[list, list]:
@@ -77,31 +105,51 @@ def beats(cand: float, base: float, metric: str) -> bool:
 
 
 async def sweep(params, events: list, grids: list[str], train: float = 0.6, metric: str = "pnl",
-                min_trades: int = 10, top: int = 3, log=print) -> dict:
+                min_trades: int = 10, top: int = 3, log=print, jobs: int = 1, source: dict | None = None) -> dict:
+    """jobs > 1 (needs `source`): backtests run in that many processes, one per CPU core."""
     from .__main__ import apply_overrides, run_backtest
 
     tr, te = split(events, train)
     grid = combos(grids)
     log(f"{len(grid)} combination(s); tuning on {sum(isinstance(e, Launch) for e in tr)} launches, "
-        f"testing on {sum(isinstance(e, Launch) for e in te)}")
+        f"testing on {sum(isinstance(e, Launch) for e in te)}" + (f"; {jobs} processes" if jobs > 1 else ""))
+    pool = None
+    if jobs > 1 and source:
+        from concurrent.futures import ProcessPoolExecutor
+
+        pool = ProcessPoolExecutor(max_workers=jobs, initializer=_init_worker, initargs=(params, source, train))
 
     async def run(sets: list[str], evs: list) -> dict:
+        if pool is not None:
+            return await asyncio.wrap_future(pool.submit(_run_in_worker, sets, "tr" if evs is tr else "te"))
         p = apply_overrides(copy.deepcopy(params), sets)
         return (await run_backtest(p, MemoryFeed(evs))).summary()
 
     t0 = time.time()
-    base_train = await run([], tr)
-    rows = []
-    for i, sets in enumerate(grid, 1):
-        s = await run(sets, tr)
-        rows.append({"sets": sets, "train": s, "score": score(s, metric, min_trades)})
-        log(f"  [{i}/{len(grid)}] {' '.join(sets):<60} train P&L {s['realized_pnl_sol']:+.3f}  "
-            f"PF {min(s['profit_factor'], 99):.2f}  n={s['closed']}  ({time.time() - t0:.0f}s)")
-    rows.sort(key=lambda r: r["score"], reverse=True)
-    finalists = [r for r in rows[:top] if r["score"] != float("-inf")]
-    base_test = await run([], te) if te else None
-    for r in finalists:
-        r["test"] = await run(r["sets"], te) if te else None
+    try:
+        base_train = await run([], tr)
+        rows = []
+
+        async def one(sets):
+            s = await run(sets, tr)
+            rows.append({"sets": sets, "train": s, "score": score(s, metric, min_trades)})
+            log(f"  [{len(rows)}/{len(grid)}] {' '.join(sets):<60} train P&L {s['realized_pnl_sol']:+.3f}  "
+                f"PF {min(s['profit_factor'], 99):.2f}  n={s['closed']}  ({time.time() - t0:.0f}s)")
+        if pool is not None:
+            await asyncio.gather(*(one(sets) for sets in grid))
+        else:
+            for sets in grid:
+                await one(sets)
+        rows.sort(key=lambda r: (r["score"], r["sets"]), reverse=True)     # ties broken the same way every run
+        finalists = [r for r in rows[:top] if r["score"] != float("-inf")]
+        base_test = await run([], te) if te else None
+        tests = await asyncio.gather(*(run(r["sets"], te) for r in finalists)) if te and pool is not None else \
+            [await run(r["sets"], te) if te else None for r in finalists]
+        for r, t in zip(finalists, tests):
+            r["test"] = t
+    finally:
+        if pool is not None:
+            pool.shutdown(cancel_futures=True)
     best = None
     if base_test is not None:
         better = [r for r in finalists

@@ -4,9 +4,12 @@
   python -m meme_trader.sniper run                  # live pump.fun feed, PAPER trading, dashboard on :8787
   python -m meme_trader.sniper run --synthetic      # fake market incl. simulated wallets to copy (demo)
   python -m meme_trader.sniper run --live           # REAL trades (see docs/SETUP.md)
-  python -m meme_trader.sniper backtest --file data/feed-2026-10-03.jsonl
+  python -m meme_trader.sniper backtest --file data/feed-2026-10-03.jsonl.gz
   python -m meme_trader.sniper backtest --synthetic 2000 --seed 7 --set exit.stop_loss_pct=25
-  python -m meme_trader.sniper leaders --file data/feed-*.jsonl   # find wallets worth copying
+  python -m meme_trader.sniper leaders --file data/feed-*        # find wallets worth copying
+  python -m meme_trader.sniper sweep --file data/feed-* --jobs 4 --grid exit.stop_loss_pct=20,30,40
+  python -m meme_trader.sniper train --file data/feed-*          # fit + grade the P(2x) model
+  python -m meme_trader.sniper report                            # HTML report of paper/live trades
   python -m meme_trader.sniper review --validate    # AI post-mortem + backtest of its proposals
 """
 from __future__ import annotations
@@ -19,13 +22,15 @@ import sys
 import time
 from collections import Counter, defaultdict
 
+from pathlib import Path
+
 import yaml
 
 from .. import config
 from ..journal import DATA
 from .engine import Engine
 from .execution import LiveExecutor, PaperExecutor
-from .feeds import FileFeed, PumpPortalFeed, SyntheticFeed
+from .feeds import FileFeed, PumpPortalFeed, SyntheticFeed, compress_file
 
 
 def apply_overrides(params, sets: list[str]):
@@ -85,6 +90,7 @@ async def _run(args, params) -> None:
     if not args.synthetic and not args.no_record:
         DATA.mkdir(exist_ok=True)
         record = DATA / f"feed-{time.strftime('%Y-%m-%d', time.gmtime())}.jsonl"
+        _compress_old_feeds(record)
     engine = Engine(params, feed, executor, mode=mode + ("-synthetic" if args.synthetic else ""), record_path=record,
                     desk=_desk(params, args.desk))
 
@@ -103,6 +109,23 @@ async def _run(args, params) -> None:
     await tasks[0]
 
 
+def _compress_old_feeds(current: Path) -> None:
+    """Gzip finished days left uncompressed (e.g. the service was down at midnight), in the background."""
+    import threading
+
+    old = [p for p in sorted(DATA.glob("feed-*.jsonl")) if p != current and not p.with_name(p.name + ".gz").exists()]
+
+    def job():
+        for p in old:
+            try:
+                compress_file(p)
+                print(f"compressed {p.name}")
+            except OSError as err:
+                print(f"could not compress {p.name}: {err}")
+    if old:
+        threading.Thread(target=job, daemon=True).start()
+
+
 async def run_backtest(params, feed, desk=None) -> Engine:
     engine = Engine(params, feed, PaperExecutor(params.sniper.execution), mode="backtest", log_to_journal=False,
                     desk=desk)
@@ -114,6 +137,7 @@ async def run_backtest(params, feed, desk=None) -> Engine:
         await engine._tick()
     for m in list(engine.positions):
         await engine.sell_now(m)
+    engine._audit_settle(final=True)
     return engine
 
 
@@ -193,17 +217,91 @@ def _leaders(args, params) -> None:
     print("\nRanked on the recorded feed only - re-check on fresh data before trusting a wallet.")
 
 
-def _sweep(args, params) -> None:
-    from .sweep import report, sweep
+def _source(args, params) -> dict:
+    """Where the events come from, in a form worker processes can rebuild them from."""
+    if args.file:
+        return {"files": list(args.file)}
+    _sim_leaders(params, SyntheticFeed(seed=args.seed, speed=0, launches=args.synthetic, start_ts=1_780_000_000))
+    return {"synthetic": args.synthetic, "seed": args.seed}
 
-    async def collect():
-        feed = _file_or_synth(args)
-        if isinstance(feed, SyntheticFeed):
-            _sim_leaders(params, feed)
-        return [e async for e in feed.events()]
-    events = asyncio.run(collect())
-    res = asyncio.run(sweep(params, events, args.grid, args.train, args.metric, args.min_trades, args.top))
+
+def _sweep(args, params) -> None:
+    from .sweep import load_events, report, sweep
+
+    source = _source(args, params)
+    events = load_events(source)
+    jobs = args.jobs or max(1, min((os.cpu_count() or 2) - 1, 8))
+    res = asyncio.run(sweep(params, events, args.grid, args.train, args.metric, args.min_trades, args.top,
+                            jobs=jobs, source=source))
     print(report(res, args.metric))
+
+
+def _train(args, params) -> None:
+    from ..config import ROOT
+    from .predictor import train
+    from .sweep import load_events
+
+    source = _source(args, params)
+    events = load_events(source)
+    print(f"{len(events):,} events loaded; building labelled snapshots...")
+    model, info = train(events, params, args.train)
+    out = Path(args.out) if args.out else Path(params.sniper.predict.model_path)
+    out = out if out.is_absolute() else ROOT / out
+    model.save(out)
+    t, tr = info["test"], info["train"]
+    print(f"\n=== model: P({info['label']}) ===")
+    print(f"samples   train {info['n_train']:,}  calibrate {info['n_cal']:,}  test {info['n_test']:,}  ({info['seconds']}s)")
+    if t.get("n"):
+        print(f"test      AUC {t['auc']:.3f}  Brier skill {t['brier_skill']:+.3f}  base rate {t['base_rate']:.1%}  "
+              f"top decile {t['top_decile_rate']:.1%} ({t['top_decile_lift']:.1f}x lift)")
+        raw = info["test_uncalibrated"]
+        print(f"calibration temperature {info['temperature']}  (Brier skill before {raw['brier_skill']:+.3f}, "
+              f"after {t['brier_skill']:+.3f}; T > 1 = the raw model was overconfident)")
+        print(f"train     AUC {tr['auc']:.3f}  (a big train/test gap = overfitting)")
+        print("calibration (test): predicted -> actual")
+        for b in t["calibration"]:
+            print(f"  {b['lo']:.0%}-{b['hi']:.0%}  n={b['n']:<6} {b['predicted']:.0%} -> {b['actual']:.0%}")
+    print("strongest features:", ", ".join(f"{k} {w:+.2f}" for k, w in info["weights"][:8]))
+    print(f"\nsaved {out}")
+    auc = t.get("auc") or 0
+    if auc < 0.6:
+        print("VERDICT: little skill on unseen data. Keep sniper.predict.min_p at 0 (display only).")
+    elif auc < 0.7:
+        print("VERDICT: some skill. Use it for sizing (kelly_fraction) and display; try min_p 0.1-0.2 in a sweep first.")
+    else:
+        print("VERDICT: useful skill on held-out data. Sweep sniper.predict.min_p (e.g. 0,0.15,0.25,0.35) before gating on it.")
+    if source.get("synthetic"):
+        print("NOTE: trained on the SYNTHETIC market - fine for testing the pipeline, meaningless for real trading. "
+              "Train on your recorded data (data/feed-*) before relying on it.")
+
+
+def _report(args, params) -> None:
+    from .report import equity_from_trades, load_trades, write
+
+    sn = params.sniper
+    if args.backtest:
+        engine = asyncio.run(run_backtest(params, FileFeed(*args.file) if args.file else
+                                          _synthetic_with_leaders(args, params)))
+        closed, eq = engine.book.closed, list(engine.book.equity_hist)
+        source = ("backtest of " + " ".join(Path(f).name for f in args.file)) if args.file else \
+            f"backtest on a SYNTHETIC market ({args.synthetic} launches, seed {args.seed}) - tests logic, not profitability"
+        gates, model = engine.gate_audit(), engine.model_card()
+    else:
+        closed = load_trades(DATA, args.days)
+        eq = equity_from_trades(closed, sn.capital.starting_sol)
+        modes = sorted({c.get("source", "").split(":")[0] for c in closed})
+        source = f"{len(closed)} recorded trades from data/trades-*.jsonl ({', '.join(modes) or 'none'})"
+        gates, model = [], None
+    out = Path(args.out) if args.out else DATA / "report.html"
+    html_path, csv_path = write(closed, eq, sn.capital.starting_sol, sn.capital.max_drawdown_pct, out,
+                                args.title, source, gates, model, sn.execution.curve_fee_pct + sn.execution.platform_fee_pct)
+    print(f"report: {html_path}\ntrades: {csv_path}")
+
+
+def _synthetic_with_leaders(args, params) -> SyntheticFeed:
+    feed = SyntheticFeed(seed=args.seed, speed=0, launches=args.synthetic, start_ts=1_780_000_000)
+    _sim_leaders(params, feed)
+    return feed
 
 
 def _review(args, params) -> None:
@@ -255,15 +353,24 @@ def main() -> None:
     sw.add_argument("--metric", choices=["pnl", "pf"], default="pnl")
     sw.add_argument("--min-trades", type=int, default=10)
     sw.add_argument("--top", type=int, default=3)
-    for p in (b, lead, sw):
-        p.add_argument("--file", nargs="*", help="recorded feed JSONL file(s)")
+    sw.add_argument("--jobs", type=int, default=0, help="parallel processes (default: CPU cores - 1)")
+    tr = sub.add_parser("train", help="fit and grade the P(2x first) model on recorded data")
+    tr.add_argument("--train", type=float, default=0.7, help="share of launches used for fitting (rest grades it)")
+    tr.add_argument("--out", help="model file (default: sniper.predict.model_path)")
+    rp = sub.add_parser("report", help="shareable HTML performance report + trades CSV")
+    rp.add_argument("--backtest", action="store_true", help="report a backtest instead of recorded trades")
+    rp.add_argument("--days", type=int, help="recorded trades: only the last N days")
+    rp.add_argument("--out", help="output HTML (default: data/report.html)")
+    rp.add_argument("--title", default="Sniper performance report")
+    for p in (b, lead, sw, tr, rp):
+        p.add_argument("--file", nargs="*", help="recorded feed file(s): data/feed-*")
         p.add_argument("--synthetic", type=int, default=1000, help="number of synthetic launches if no --file")
         p.add_argument("--seed", type=int, default=1)
     rv = sub.add_parser("review", help="AI post-mortem of recent trades")
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
-    for p in (r, b, lead, sw, rv, sub.choices["doctor"]):
+    for p in (r, b, lead, sw, tr, rp, rv, sub.choices["doctor"]):
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
@@ -278,6 +385,10 @@ def main() -> None:
         _review(args, params)
     elif args.cmd == "sweep":
         _sweep(args, params)
+    elif args.cmd == "train":
+        _train(args, params)
+    elif args.cmd == "report":
+        _report(args, params)
     else:
         from .doctor import run as doctor
 

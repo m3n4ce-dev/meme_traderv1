@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .features import social_strength
 from .tracker import TokenState
 
 
@@ -92,14 +93,15 @@ def evaluate_entry(s: TokenState, now: float, p, ctx: dict) -> EntryDecision:
     def cap(x: float, full: float) -> float:
         return max(0.0, min(x / full, 1.0)) if full > 0 else 0.0
 
-    has_socials = bool(s.launch and (s.launch.twitter or s.launch.telegram or s.launch.website))
+    # socials: a 833k-launch survival study found Telegram alone lifts graduation 8.9x and all three
+    # links 17.4x (arXiv 2607.02823), so links count by channel, Telegram most
     score = 100 * (
-        0.25 * cap(velocity, p.full_marks_buyers)
-        + 0.25 * cap(flow, p.full_marks_flow_sol)
+        0.225 * cap(velocity, p.full_marks_buyers)
+        + 0.225 * cap(flow, p.full_marks_flow_sol)
         + 0.15 * cap(ratio - 1, 2.0)
         + 0.15 * cap(p.max_top10_pct - top, p.max_top10_pct)
         + 0.10 * cap(near_high - 0.7, 0.3)
-        + 0.05 * has_socials
+        + 0.10 * social_strength(s)
         + 0.05 * cap(ctx.get("social_weight", 0.0), 1.0)
     )
     score = round(score, 1)
@@ -128,6 +130,8 @@ class SniperPosition:
     leader: str = ""           # leader wallet for copy positions
     desk: str = ""             # AI desk verdict summary at entry
     ladder_hit: int = 0        # ladder exit profile: steps already sold
+    p: float | None = None     # model P(2x first) at entry, for live calibration in analytics
+    trough_price: float = 0.0  # lowest price while held (max adverse excursion)
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
@@ -204,4 +208,80 @@ def _ladder_exit(pos: SniperPosition, price: float, L, fee_pct: float):
         step = steps[pos.ladder_hit]
         frac = 1.0 if step["sell_frac"] >= 1 else min(1.0, pos.initial_tokens * step["sell_frac"] / pos.tokens)
         return frac, f"ladder {step['at_x']}x sell {'rest' if frac >= 1 else f'{frac:.0%}'}"
+    return None
+
+
+def gate_checklist(s: TokenState, now: float, p, ctx: dict) -> list[dict]:
+    """Every sniper gate with its live value, limit and pass/fail - for the token detail view.
+    kind: hard = rejects for good, wait = must hold at entry. Mirrors evaluate_entry (tested to agree)."""
+    age, prog = s.age(now), s.curve.progress * 100
+    flow = s.net_flow_sol(now, p.flow_window_s)
+    rows = [
+        ("dev hasn't sold", "hard", "sold" if s.dev_sold else "no", "no", not s.dev_sold),
+        ("dev initial buy", "hard", f"{s.dev_initial_pct():.1f}%", f"<= {p.max_dev_buy_pct}%", s.dev_initial_pct() <= p.max_dev_buy_pct),
+        ("bundled supply", "hard", f"{s.bundle_pct():.1f}%", f"<= {p.max_bundle_pct}%", s.bundle_pct() <= p.max_bundle_pct),
+        ("early buyers dumped", "hard", f"{s.early_sold_ratio():.0%}", f"<= {p.max_early_sold_ratio:.0%}", s.early_sold_ratio() <= p.max_early_sold_ratio),
+        ("creator launches / 24h", "hard", str(ctx.get("creator_launches", 0)), f"<= {p.max_creator_launches_24h}", ctx.get("creator_launches", 0) <= p.max_creator_launches_24h),
+        ("same ticker / 1h", "hard", str(ctx.get("symbol_dupes", 0)), f"<= {p.max_symbol_dupes_1h}", ctx.get("symbol_dupes", 0) <= p.max_symbol_dupes_1h),
+        ("curve not too late", "hard", f"{prog:.0f}%", f"<= {p.max_curve_progress_pct}%", prog <= p.max_curve_progress_pct),
+        ("age window", "wait", f"{age:.0f}s", f"{p.min_age_s}-{p.max_age_s}s", p.min_age_s <= age <= p.max_age_s),
+        ("curve started", "wait", f"{prog:.1f}%", f">= {p.min_curve_progress_pct}%", prog >= p.min_curve_progress_pct),
+        ("unique buyers", "wait", str(len(s.buyers)), f">= {p.min_unique_buyers}", len(s.buyers) >= p.min_unique_buyers),
+        ("fees paid", "wait", f"{s.fees_paid_sol():.2f} SOL", f">= {p.min_fees_paid_sol}", s.fees_paid_sol() >= p.min_fees_paid_sol),
+        ("snipers still hold", "wait", f"{s.sniper_pct():.0f}%", f"<= {p.max_sniper_pct}%", s.sniper_pct() <= p.max_sniper_pct),
+        ("insiders still hold", "wait", f"{s.insider_pct():.0f}%", f"<= {p.max_insider_pct}%", s.insider_pct() <= p.max_insider_pct),
+        ("top 10 holders", "wait", f"{s.top_holders_pct(10):.0f}%", f"<= {p.max_top10_pct}%", s.top_holders_pct(10) <= p.max_top10_pct),
+        (f"net inflow {p.flow_window_s:.0f}s", "wait", f"{flow:.2f} SOL", f">= {p.min_net_flow_sol}", flow >= p.min_net_flow_sol),
+    ]
+    if s.cluster:
+        rows.append(("insider cluster (funding)", "hard", f"{s.cluster['pct']:.0f}%", f"<= {p.funding.max_cluster_pct}%",
+                     s.cluster["pct"] <= p.funding.max_cluster_pct))
+    return [{"gate": g, "kind": k, "value": v, "limit": lim, "ok": bool(ok)} for g, k, v, lim, ok in rows]
+
+
+# --------------------------------------------------------------------------- graduation play
+def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, str]:
+    """Late-curve momentum ("graduation play"): a token already filling its curve fast, bought for the
+    final leg and sold before migration. L: params.sniper.late. red: red-flag limits + context."""
+    prog = s.curve.progress * 100
+    if s.migrated or not (L.min_curve_pct <= prog <= L.max_curve_pct) or s.age(now) > L.max_age_s:
+        return False, "window"
+    if s.dev_sold or s.bundle_pct() > red["max_bundle_pct"] or s.early_sold_ratio() > red["max_early_sold_ratio"]:
+        return False, "red flag"
+    if red["creator_launches"] > red["max_creator_launches_24h"]:
+        return False, "serial deployer"
+    if s.cluster and s.cluster["pct"] > red["max_cluster_pct"]:
+        return False, "insider cluster"
+    w = s.window(now, L.flow_window_s)
+    nb = sum(1 for t in w if t[2] == "buy")
+    ns = sum(1 for t in w if t[2] == "sell")
+    flow = sum(t[3] if t[2] == "buy" else -t[3] for t in w)
+    buyers = len({t[4] for t in w if t[2] == "buy"})
+    near = s.curve.price / s.peak_price if s.peak_price else 0
+    if flow < L.min_net_flow_sol or buyers < L.min_buyers or nb / max(ns, 1) < L.min_buy_sell_ratio \
+            or near < L.min_near_high:
+        return False, "momentum"
+    return True, f"late play: curve {prog:.0f}%, +{flow:.1f} SOL/{L.flow_window_s}s, {buyers} buyers"
+
+
+def evaluate_late_exit(pos: SniperPosition, s: TokenState, now: float, L, x):
+    """Exit for graduation plays: out before migration, tight stop, fast stall/decay exits."""
+    price = s.curve.price
+    pos.peak_price = max(pos.peak_price, price)
+    gain = pos.gain_pct(price)
+    drop = (1 - price / pos.peak_price) * 100 if pos.peak_price else 0.0
+    held = now - pos.opened_at
+    if s.dev_sold:
+        return 1.0, "dev sold"
+    if s.migrated or s.curve.progress * 100 >= L.exit_curve_pct:
+        return 1.0, f"graduation exit (curve {s.curve.progress:.0%})"
+    if gain <= -L.stop_loss_pct:
+        return 1.0, f"late stop {gain:.0f}%"
+    if held >= L.max_hold_s:
+        return 1.0, "late max hold"
+    flow = s.net_flow_sol(now, x.decay_window_s)
+    if drop >= x.decay_min_drop_pct and flow <= -x.decay_net_outflow_sol:
+        return 1.0, f"momentum decay (outflow {flow:.2f} SOL, -{drop:.0f}%)"
+    if now - s.last_high_ts() >= L.stall_s and held >= L.stall_s:
+        return 1.0, f"late stall {L.stall_s:.0f}s"
     return None

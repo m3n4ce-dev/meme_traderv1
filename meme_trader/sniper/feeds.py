@@ -155,20 +155,63 @@ async def fetch_metadata(uri: str) -> dict:
 
 
 # --------------------------------------------------------------------------- replay
+def dedupe_feed_paths(paths) -> list[Path]:
+    """feed-X.jsonl and feed-X.jsonl.gz both present (mid-compression): keep the finished .gz only."""
+    ps = [Path(p) for p in paths]
+    names = {p.name for p in ps}
+    return [p for p in ps if not (p.suffix == ".jsonl" and p.name + ".gz" in names)]
+
+
+def compress_file(path: Path, level: int = 6) -> Path:
+    """feed-X.jsonl -> feed-X.jsonl.gz (~8-10x smaller). Written to a temp name first and the plain
+    file only removed once the archive is complete, so a crash mid-way loses nothing."""
+    import gzip
+    import shutil
+
+    out = path.with_name(path.name + ".gz")
+    tmp = path.with_name(path.name + ".gz.part")
+    with path.open("rb") as src, gzip.open(tmp, "wb", compresslevel=level) as dst:
+        shutil.copyfileobj(src, dst, 1 << 20)
+    tmp.replace(out)
+    path.unlink()
+    return out
+
+
 class FileFeed(Feed):
+    """Replays recorded feed files (.jsonl or .jsonl.gz). Tolerates the damage a crash leaves behind:
+    a half-written last line, or a .gz whose end was never written."""
     realtime = False
 
     def __init__(self, *paths: str | Path):
-        self.paths = [Path(p) for p in paths]
+        self.paths = dedupe_feed_paths(paths)
+        self.bad_lines = 0
 
     async def events(self) -> AsyncIterator[Event]:
+        import gzip
+        import zlib
+
         for p in self.paths:
-            with p.open() as f:
-                for line in f:
-                    if line.strip():
+            f = gzip.open(p, "rt") if p.suffix == ".gz" else p.open()
+            try:
+                while True:
+                    try:
+                        line = f.readline()
+                    except (EOFError, zlib.error, gzip.BadGzipFile, UnicodeDecodeError):
+                        self.bad_lines += 1             # truncated archive: keep what was readable
+                        break
+                    if not line:
+                        break
+                    if not line.strip():
+                        continue
+                    try:
                         e = loads(line)
-                        self._last = e.ts
-                        yield e
+                    except (ValueError, KeyError, TypeError):
+                        self.bad_lines += 1             # half-written line from a crash
+                        continue
+                    self._last = e.ts
+                    yield e
+            finally:
+                f.close()
 
 
 # --------------------------------------------------------------------------- synthetic
@@ -192,7 +235,7 @@ PHASES = {
 
 
 def _addr(rng: random.Random, suffix: str = "") -> str:
-    return "".join(rng.choice(B58) for _ in range(44 - len(suffix))) + suffix
+    return "".join(rng.choices(B58, k=44 - len(suffix))) + suffix
 
 
 class SyntheticFeed(Feed):
@@ -296,6 +339,7 @@ class SyntheticFeed(Feed):
                 sched.append((t0 + rng.uniform(3, 55), w, "buy", rng.uniform(0.6, 2.0)))
         sched.sort()
         leaders = set(self.leader_labels) | set(insiders)
+        pool: list[str] = []          # organic (non-dev/bundler/leader) wallets that may hold tokens
 
         def run_sched(until: float) -> None:
             while sched and sched[0][0] <= until:
@@ -329,13 +373,24 @@ class SyntheticFeed(Feed):
             while t < end and curve.progress < 1:
                 t += rng.expovariate(1 / gap)
                 run_sched(t)
-                existing = [h for h, v in holders.items()
-                            if v > 0 and h != creator and h not in bundlers and h not in leaders]
+                # organic holders pool, pruned lazily (was an O(holders) scan on every trade)
+                while pool and holders.get(pool[-1], 0) <= 0:
+                    pool.pop()
+                existing = pool
                 if rng.random() < p_buy or not existing:
-                    who = rng.choice(existing) if existing and rng.random() < 0.15 else _addr(rng)
+                    if existing and rng.random() < 0.15:
+                        who = rng.choice(existing)
+                    else:
+                        who = _addr(rng)
+                        pool.append(who)
                     trade(t, who, "buy", min(rng.lognormvariate(-1.6, 1.0), 8))
                 else:
-                    who = rng.choice(existing)
+                    i = rng.randrange(len(existing))
+                    who = existing[i]
+                    if holders.get(who, 0) <= 0:
+                        existing[i] = existing[-1]
+                        existing.pop()
+                        continue
                     trade(t, who, "sell", holders[who] * rng.choice([1, 1, 0.5, 0.3]))
             if curve.progress >= 1:
                 out.append(Migration(mint=mint, ts=t + 1))

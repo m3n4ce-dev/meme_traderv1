@@ -47,8 +47,9 @@ class SolPrice:
 
 
 def strength(rule_score: float, min_score: float, buy_sell_ratio: float, near_high: float,
-             smart_buyers: int, desk_mult: float | None) -> tuple[float, list[str]]:
-    """0..1 signal strength + the components, for the log."""
+             smart_buyers: int, desk_mult: float | None, edge: float | None = None) -> tuple[float, list[str]]:
+    """0..1 signal strength + the components, for the log. edge: fractional-Kelly bankroll share from the
+    probability model (0.05 = full marks); None when no model is loaded."""
     def clamp(x: float) -> float:
         return max(0.0, min(1.0, x))
 
@@ -62,20 +63,30 @@ def strength(rule_score: float, min_score: float, buy_sell_ratio: float, near_hi
     if desk_mult is not None:
         parts["desk"] = clamp(desk_mult - 0.5)        # desk size_mult 0.5..1.5 -> 0..1
         weights["desk"] = 0.3
+    if edge is not None:
+        parts["edge"] = clamp(edge / 0.05)
+        weights["edge"] = 0.3
     total = sum(weights.values())
     st = sum(parts[k] * w for k, w in weights.items()) / total
     return st, [f"{k} {v:.2f}" for k, v in parts.items()]
 
 
-def size_usd(z, st: float, kind: str, curve_real_sol: float, sol_usd: float) -> tuple[float, str]:
+def size_usd(z, st: float, kind: str, curve_real_sol: float, sol_usd: float, mult: float = 1.0,
+             defense: float = 1.0) -> tuple[float, str]:
     """z: params.sniper.sizing. Returns (usd, why). Never exceeds z.max_usd."""
     usd = z.base_usd + (z.max_usd - z.base_usd) * st
     why = f"strength {st:.2f}"
     if kind == "copy":
         usd *= z.copy_multiplier
         why += f", copy x{z.copy_multiplier}"
+    elif kind == "late" and mult != 1.0:
+        usd *= mult
+        why += f", late x{mult}"
+    if defense < 1.0:
+        usd *= defense
+        why += f", defense x{defense}"
     liq_cap = max(curve_real_sol, 0.0) * z.max_pct_of_curve_sol / 100 * sol_usd
     if liq_cap and usd > liq_cap:
         usd = max(liq_cap, min(z.base_usd, z.max_usd) * 0.5)
         why += f", liquidity cap ${liq_cap:.0f}"
-    return round(min(usd, z.max_usd), 2), why
+    return round(max(min(usd, z.max_usd), 0.5), 2), why
