@@ -4,6 +4,17 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #19: Owner decision: leave it running
+
+- graduation-v1 keeps collecting its holdout untouched; `research final graduation-v1` gives the verdict once there are 14 days and 150 trades (around 2026-10-17).
+- The paper bot keeps trading graduation plays only, with the realistic 2.5 s order delay, the risk dial at Normal, copy trading off and agent buys off.
+- **No version 2 for now.** The development data says graduation-v1 loses at realistic delays (#18).
+- **No paid infrastructure yet.**
+- If funds are ever needed (for example a capped live pilot to measure real landing times), they come from the wallet already funded for PumpPortal, and only with the owner's explicit go-ahead. Its address stays out of the repo.
+- README screenshots refreshed (risk dial, market pulse, P&L by strategy and exit reason), captioned as the simulated demo.
+
+---
+
 ## 2026-10-03 — Entry #18: Execution measurement: with a realistic delay, graduation-v1 loses
 
 ### Built
