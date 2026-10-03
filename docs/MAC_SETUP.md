@@ -28,7 +28,7 @@ What the setup script does:
 - It installs the bot's packages into a private folder (`.venv`), so nothing else on your Mac is touched.
 - It creates your settings file `.env` and runs the setup checker (`doctor`).
 
-When it finishes you'll see a list of `[ OK ]`, `[WARN]` and `[FAIL]` lines, like the example below. **FAIL on `PUMPPORTAL_API_KEY` is expected right now.** Step 3 fixes it.
+When it finishes you'll see a list of `[ OK ]`, `[WARN]` and `[FAIL]` lines, like the example below. `PumpPortal websocket` and `trade logs` should say `[ OK ]`; that's all paper trading needs.
 
 <details><summary>Example of the checker output (click to expand)</summary>
 
@@ -37,10 +37,10 @@ When it finishes you'll see a list of `[ OK ]`, `[WARN]` and `[FAIL]` lines, lik
 *This example was captured in a cloud test machine with no internet access to pump.fun. That's why the PumpPortal websocket / RPC rows fail there. On your Mac they'll show OK once your internet and key are in place. The Mac output looks the same.*
 </details>
 
-## 3. Get your PumpPortal key (required for the real market)
-The bot reads live pump.fun launches and trades through PumpPortal.
-1. Go to **https://pumpportal.fun** and generate an API key. PumpPortal creates the key together with a **linked wallet**. **Save both somewhere safe**, such as your password manager.
-2. From Phantom (or your main wallet), send **0.02–0.05 SOL to that linked wallet**. PumpPortal charges 0.01 SOL per 10,000 trades streamed, and takes it from this wallet.
+## 3. Market data (no key needed)
+The bot reads new launches from PumpPortal's free stream and every trade from pump.fun's own on-chain logs, over a free public Solana websocket. Nothing to sign up for.
+
+Skip the PumpPortal API key unless you switch to its metered trade stream (`sniper.feed.trades: pumpportal` in `config/params.yaml`). That costs 0.01 SOL per 10,000 trades, about 3 SOL a day with recording on, and its wallet must hold at least 0.02 SOL or the data stops.
 
 Optional:
 - **Anthropic API key** for the AI trading desk: console.anthropic.com → API Keys → Create Key.
@@ -49,7 +49,7 @@ Optional:
 ```bash
 open -e .env
 ```
-TextEdit opens. Paste your key after `PUMPPORTAL_API_KEY=` with no spaces and no quotes, then **⌘ S** to save and close the window.
+TextEdit opens. Paste each key after its name (for example `ANTHROPIC_API_KEY=`) with no spaces and no quotes, then **⌘ S** to save and close the window.
 
 ![Where the keys go](img/edit-env.png)
 
@@ -57,7 +57,7 @@ Check it worked:
 ```bash
 scripts/start.sh doctor
 ```
-`PUMPPORTAL_API_KEY` and `PumpPortal websocket` should now say `[ OK ]`.
+`PumpPortal websocket` and `trade logs` should say `[ OK ]`, plus a row for each key you added.
 
 ## 5. Start it
 **The easy way:** in Finder, open the `meme_traderv1` folder (it's in your home folder), then the `scripts` folder, then the `mac` folder. Double-click:

@@ -47,7 +47,8 @@ scripts/start.sh review      # AI post-mortem; proposals are backtested before y
 ```
 The analysis commands use your recordings (`data/feed-*`) automatically, or the simulated market if there are none yet.
 Strategy and research: [docs/STRATEGY.md](docs/STRATEGY.md). Optional env vars:
-- `PUMPPORTAL_API_KEY`: token-trade stream
+- `SOLANA_WS_URL`: Solana websocket for trade data (default: the free public RPC). Trades come from pump.fun's on-chain logs, so no paid data key is needed
+- `PUMPPORTAL_API_KEY`: only for the metered PumpPortal trade stream (`sniper.feed.trades: pumpportal`)
 - `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`: Telegram call ingestion
 - `X_BEARER_TOKEN`: X call ingestion
 - `ANTHROPIC_API_KEY`: AI trading desk (`run --desk`) and the review agent

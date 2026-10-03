@@ -55,7 +55,7 @@ say "Done. Next:"
 cat <<EOF
     Double-click in Finder (meme_traderv1/scripts/mac):
       "Start Demo.command"            simulated market, opens the dashboard
-      "Start Paper Trading.command"   real market, fake money (needs PUMPPORTAL_API_KEY in .env)
+      "Start Paper Trading.command"   real market, fake money (no keys needed)
       "Check Setup.command"           re-run the checks
     Or in Terminal: scripts/start.sh demo | paper | doctor
 EOF

@@ -31,7 +31,7 @@ from .. import config
 from ..journal import DATA
 from .engine import Engine
 from .execution import LiveExecutor, PaperExecutor
-from .feeds import FileFeed, PumpPortalFeed, SyntheticFeed, compress_file
+from .feeds import FileFeed, PumpPortalFeed, SolanaTradeFeed, SyntheticFeed, compress_file
 
 
 def apply_overrides(params, sets: list[str]):
@@ -64,8 +64,13 @@ def _desk(params, force: bool):
 
 
 async def _run(args, params) -> None:
-    feed = SyntheticFeed(seed=args.seed, speed=args.speed) if args.synthetic else \
-        PumpPortalFeed(params.sniper.feed.fallback_ws_urls)
+    f = params.sniper.feed
+    if args.synthetic:
+        feed = SyntheticFeed(seed=args.seed, speed=args.speed)
+    elif f.trades == "pumpportal":
+        feed = PumpPortalFeed(f.fallback_ws_urls)
+    else:
+        feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls)
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"

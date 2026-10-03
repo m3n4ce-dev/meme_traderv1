@@ -8,7 +8,8 @@ Go in this order. Each stage works before the next one is added. **Don't skip pa
 |---|---|---|---|---|
 | 1 | A computer that stays on: your PC/Mac for testing, a VPS for 24/7 | everything | — / ~$10–40/mo | any VPS. For live trading, pick a US-East or Frankfurt/Amsterdam region, close to Solana validators |
 | 2 | Python 3.11+ and git | everything | free | python.org |
-| 3 | **PumpPortal API key**, with its linked wallet funded with ≥ 0.02 SOL | live market data (trades, wallet streams for copy trading) | 0.01 SOL per 10,000 trades streamed | pumpportal.fun |
+| 3 | Market data: launches from PumpPortal's free stream, trades from pump.fun's on-chain logs over a Solana websocket (`sniper.feed.trades: solana`, the default) | live market data | free on the public RPC (best-effort). On a provider that bills per MB this stream is ~20 GB/day (Helius: ~12M credits/month), so set `SOLANA_WS_URL` only to a flat-rate endpoint | `SOLANA_WS_URL` in `.env` (optional) |
+| 3b | PumpPortal API key + linked wallet ≥ 0.02 SOL | only with `sniper.feed.trades: pumpportal` | 0.01 SOL per 10,000 trades. Measured 2026-10-02: ~3 SOL/day with recording on | pumpportal.fun |
 | 4 | Anthropic API key | AI trading desk + review agent (optional) | pay per use; the desk dashboard shows a running $ meter | console.anthropic.com |
 | 5 | **A dedicated bot wallet** (keypair file) | live trading only | — | `solana-keygen new` (step 5) |
 | 6 | Paid Solana RPC (Helius / Triton / QuickNode) | live trading only | free tier → ~$50/mo | helius.dev |

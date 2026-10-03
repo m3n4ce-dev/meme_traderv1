@@ -64,7 +64,7 @@ Click the token anywhere. The panel shows:
 ```bash
 scripts/start.sh paper
 ```
-This uses the real pump.fun feed with fake money. It needs `PUMPPORTAL_API_KEY` in `.env` (see [MAC_SETUP.md step 3](MAC_SETUP.md#3-get-your-pumpportal-key-required-for-the-real-market)).
+This uses the real pump.fun feed with fake money. It needs no keys: launches come from PumpPortal's free stream and trades from pump.fun's on-chain logs.
 
 It **records the market** to `data/feed-YYYY-MM-DD.jsonl`. The model, backtests and tuning all learn from these files, so let it run. Finished days are compressed to `.jsonl.gz` automatically, which is about 8–10× smaller.
 
@@ -159,7 +159,7 @@ Start with the smallest sizes.
 ## 14. When something looks wrong
 | You see | Likely cause → fix |
 |---|---|
-| Feed badge red / `stale` | No market data. Check the internet and `PUMPPORTAL_API_KEY` (`scripts/start.sh doctor`). |
+| Feed badge red / `stale` | No market data. Check the internet, then the `trade logs` row of `scripts/start.sh doctor`. If the public RPC is struggling, set `SOLANA_WS_URL` to another Solana websocket. |
 | Amber **Defense mode** banner | A losing run. It lifts by itself after the set minutes. Turn it off in Controls if you disagree. |
 | Red **Halted** banner | The drawdown kill switch fired or KILL was pressed. Restart the bot to reset. |
 | "running · max positions" | All trading slots are full. Raise **Max open positions** or wait for exits. |

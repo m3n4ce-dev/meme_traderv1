@@ -4,6 +4,44 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #10: Free on-chain trade feed (PumpPortal's meter was the bottleneck)
+
+### What happened
+- First real-market paper run (2026-10-02, 22:35–23:12 CDT). PumpPortal billed 0.01 SOL every ~4 min (23:00, 23:04, 23:08, 23:12). The 0.046 SOL in its wallet fell under the 0.02 minimum in ~75 min, and the trade stream stopped.
+- Measured volume: 1,000–2,000 streamed trades/min with recording on ≈ **3 SOL/day for data alone**, against $5–20 positions.
+- Paper result while it could see: 7 trades, +0.136 SOL on 1 SOL. That's almost all one graduation play (BOOBIES +208%). The sniper made 1 trade (−17%). Far too few trades to mean anything.
+
+### Analysis (recorded feed, 50k trades)
+- Top 10 tokens = 58% of trades; top 100 = 90%. The bill is driven by the popular tokens, which are exactly what the strategies want to watch.
+- 82% of trades came from tokens the sniper rejects on launch facts alone (dev buy 62%, serial deployer 16%, copycat 13%). But graduation plays skip those gates, and the one big winner was a copycat ticker, so a launch-time filter would have dropped it.
+- Best cheap policy found (launch prefilter for the sniper + subscribe graduation candidates only at ≥45% curve): still ~34% of the volume (~1 SOL/day). Per-trade billing can't be fixed by being choosy.
+
+### Built: `SolanaTradeFeed` (`sniper.feed.trades: solana`, now the default)
+- Launches and migrations from PumpPortal's **free** streams (keyless). Trades from the pump.fun program's own logs (`logsSubscribe`, Anchor `TradeEvent`) over a Solana websocket: `SOLANA_WS_URL`, default the free public RPC.
+- Decoding verified on mainnet: on standard curves, every trade's reserve change matched its amounts (1,392/1,392). Curves with non-standard virtual reserves (v_sol − real_sol ≠ 30) don't chain; the bot's curve model doesn't fit them on any feed.
+- **Early-trade replay:** 16% of launches had trades (the insider bundle) before PumpPortal announced the launch. Unwatched trades are held 15 s and replayed on `watch()`, restamped to arrival time. The creator's launch buy is dropped because the Launch already carries it.
+- If trade logs stall for 30 s, the feed reconnects and reports `degraded`, which pauses entries (same rule as the backup launch feed).
+- `doctor` gets a `trade logs` row; `PUMPPORTAL_API_KEY` is only required with `trades: pumpportal`.
+- Deliberately **not** derived from `SOLANA_RPC_URL`: the stream is ~20 GB/day, ~12M Helius credits/month on per-MB billing.
+
+### Measured (same machine; different hours, so volume isn't comparable)
+| | PumpPortal (22:35–23:10) | Solana logs (00:28–00:33) |
+|---|---|---|
+| Launches with trade data | 58% | 84% |
+| Median first-trade delay after launch | 0.9 s | 0.1 s |
+| Trades missing/out of order (reserve chain check) | **20.6%** | **0.0%** (1 of 3,946) |
+| Cost | ~3 SOL/day | $0 |
+
+The PumpPortal recording has holes, so treat backtests on it with care.
+
+### Ops
+- The P8 now runs the bot as a **user-level** systemd service (`~/.config/systemd/user/meme-sniper.service`, linger on). It needs no sudo, starts at boot, and restarts on crash (tested: back in 10 s). `systemctl --user status meme-sniper`, `journalctl --user -u meme-sniper -f`.
+- Demo leftovers were moved out of `data/` to `demo-leftovers/` so simulated trades don't mix into real analytics.
+
+Tests: 92 passing (+4).
+
+---
+
 ## 2026-10-03 — Entry #9: Prediction model, graduation plays, analytics, new dashboard, A/B at scale
 
 ### Owner input

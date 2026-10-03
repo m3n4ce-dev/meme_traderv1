@@ -38,7 +38,7 @@ This is the real output from a fresh Ubuntu 24.04 machine:
 
 ![setup output](img/ubuntu-setup-output.png)
 
-*Captured on a cloud test machine with no access to pump.fun, which is why the PumpPortal websocket and RPC rows fail there. At home they show OK. `PUMPPORTAL_API_KEY` stays FAIL until step 3.*
+*Captured on a cloud test machine with no access to pump.fun, which is why the PumpPortal websocket and RPC rows fail there. At home they show OK. *
 
 ## 3. Add your keys
 If you already set up the Mac, just copy its `.env` across. Run this **on the Mac**:
@@ -57,7 +57,7 @@ Check:
 ```bash
 scripts/start.sh doctor
 ```
-For real-market paper trading, `PUMPPORTAL_API_KEY` and `PumpPortal websocket` must say `[ OK ]`. See [MAC_SETUP.md step 3](MAC_SETUP.md#3-get-your-pumpportal-key-required-for-the-real-market) for how to get the key.
+For real-market paper trading, `PumpPortal websocket` and `trade logs` must say `[ OK ]`. No key is needed: the PumpPortal key is only for the optional metered trade stream (`sniper.feed.trades: pumpportal`).
 
 ## 4. Try it by hand first
 ```bash
