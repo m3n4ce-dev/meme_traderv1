@@ -80,9 +80,11 @@ class Executor:
         tx = jupiter.swap_tx(quote, w.pubkey, self.e.priority_fee_lamports)
         sig = w.sign_and_send(tx)
         record("executor", "sent", signature=sig, side=order.side, mint=order.mint)
-        if not confirm(sig):
-            return Fill(order, False, signature=sig, error="not confirmed / failed on-chain")
+        landed = confirm(sig)
         sol_delta = w.sol_balance() - sol_before          # includes network + priority fees
         tok_delta = w.token_balance(order.mint) - tok_before
+        moved = tok_delta > 0 if order.side == "buy" else tok_delta < 0
+        if not landed and not moved:                     # a late landing still moved tokens -> book it
+            return Fill(order, False, signature=sig, error="not confirmed / failed on-chain")
         price = abs(sol_delta) / (abs(tok_delta) / 10 ** order.decimals) if tok_delta else 0.0
         return Fill(order, True, sol_delta=sol_delta, token_delta=tok_delta, price_sol=price, signature=sig)

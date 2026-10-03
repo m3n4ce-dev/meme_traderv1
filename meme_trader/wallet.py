@@ -77,7 +77,8 @@ class Wallet:
         """mint -> raw balance for every non-empty token account (SPL Token + Token-2022)."""
         out: dict[str, int] = {}
         for program in ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"):
-            res = rpc("getTokenAccountsByOwner", [self.pubkey, {"programId": program}, {"encoding": "jsonParsed"}])
+            res = rpc("getTokenAccountsByOwner", [self.pubkey, {"programId": program},
+                                                  {"encoding": "jsonParsed", "commitment": "confirmed"}])
             for a in res["value"]:
                 info = a["account"]["data"]["parsed"]["info"]
                 amt = int(info["tokenAmount"]["amount"])
@@ -85,8 +86,30 @@ class Wallet:
                     out[info["mint"]] = out.get(info["mint"], 0) + amt
         return out
 
+    def tx_deltas(self, signature: str, mint: str) -> dict | None:
+        """What a confirmed transaction did to THIS wallet, read from the transaction itself (so other
+        trades running at the same time can't pollute it): SOL change, raw token change for `mint`,
+        rent paid for a newly created token account, and whether the tx failed. None = not visible yet."""
+        tx = rpc("getTransaction", [signature, {"encoding": "jsonParsed", "commitment": "confirmed",
+                                                "maxSupportedTransactionVersion": 0}])
+        if not tx:
+            return None
+        meta = tx.get("meta") or {}
+        keys = [k["pubkey"] if isinstance(k, dict) else k for k in tx["transaction"]["message"]["accountKeys"]]
+        me = keys.index(self.pubkey) if self.pubkey in keys else 0
+        dsol = (meta["postBalances"][me] - meta["preBalances"][me]) / 1e9
+
+        def amounts(rows):
+            return {r["accountIndex"]: int(r["uiTokenAmount"]["amount"]) for r in rows or []
+                    if r.get("mint") == mint and r.get("owner") == self.pubkey}
+        pre, post = amounts(meta.get("preTokenBalances")), amounts(meta.get("postTokenBalances"))
+        dtok = sum(post.values()) - sum(pre.values())
+        rent = sum(meta["postBalances"][i] - meta["preBalances"][i] for i in post if i not in pre) / 1e9
+        return {"dsol": dsol, "dtok": dtok, "rent": max(rent, 0.0), "failed": meta.get("err") is not None}
+
     def token_balance(self, mint: str) -> int:
-        res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint}, {"encoding": "jsonParsed"}])
+        res = rpc("getTokenAccountsByOwner", [self.pubkey, {"mint": mint},
+                                              {"encoding": "jsonParsed", "commitment": "confirmed"}])
         return sum(int(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"]) for a in res["value"])
 
 

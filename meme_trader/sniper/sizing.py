@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import time
 
-SOL_MINT = "So11111111111111111111111111111111111111112"
+from ..models import SOL_MINT
 
 
 class SolPrice:

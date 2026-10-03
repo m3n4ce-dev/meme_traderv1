@@ -72,7 +72,11 @@ async def _run(args, params) -> None:
 
         wallet = Wallet(params.wallet.pubkey)
         bal = wallet.sol_balance()
-        if bal < params.sniper.capital.starting_sol:
+        resuming = (DATA / "sniper_state_live.json").exists()
+        if resuming:      # after a restart part of the budget is in open positions - only require fee money
+            if bal < params.sniper.capital.min_sol_reserve:
+                sys.exit(f"wallet holds {bal:.4f} SOL - not even the fee reserve")
+        elif bal < params.sniper.capital.starting_sol:
             sys.exit(f"wallet holds {bal:.4f} SOL < sniper.capital.starting_sol")
         executor, mode = LiveExecutor(params.sniper.execution, wallet), "live"
     else:

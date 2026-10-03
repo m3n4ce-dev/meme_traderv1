@@ -107,10 +107,13 @@ class PumpPortalFeed(Feed):
                             break                       # on a backup: go try the primary again
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             continue
-                        e = self.parse(json.loads(msg.data), time.time())
+                        try:
+                            e = self.parse(json.loads(msg.data), time.time())
+                        except (ValueError, TypeError, KeyError, AttributeError):
+                            continue                    # one malformed message must not stop the feed
                         if e:
                             yield e
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
                 print(f"[feed] {self.host} disconnected: {err!r}; retrying in {backoff}s")
             self.ws = None
             self.url_idx = (self.url_idx + 1) % len(self.urls)
@@ -130,7 +133,8 @@ class PumpPortalFeed(Feed):
             return Trade(mint=d["mint"], ts=now, trader=d.get("traderPublicKey", ""), side=tx,
                          sol=float(d.get("solAmount") or 0), tokens=float(d.get("tokenAmount") or 0),
                          v_sol=float(d.get("vSolInBondingCurve") or 0), v_tokens=float(d.get("vTokensInBondingCurve") or 0),
-                         new_balance=float(d.get("newTokenBalance", -1)), signature=d.get("signature", ""),
+                         new_balance=float(d["newTokenBalance"]) if d.get("newTokenBalance") is not None else -1.0,
+                         signature=d.get("signature", ""),
                          pool=d.get("pool") or "pump", mcap_sol=float(d.get("marketCapSol") or 0))
         if tx == "migrate":
             return Migration(mint=d["mint"], ts=now)

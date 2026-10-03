@@ -85,7 +85,11 @@ class Engine:
         self.funders: dict[str, tuple[str, str]] = {}     # wallet -> (funder, funder_type)
         self.fanout: Counter = Counter()                   # funder -> wallets it funded (exchange detection)
         self.resolver = FundingResolver(f.backend, f.max_lookups_per_min)
-        self.funding_started: dict[str, float] = {}
+        self.funding_started: dict[str, tuple[float, frozenset]] = {}
+        self._tick_lock = asyncio.Lock()
+        self.http = None                                   # shared aiohttp session (created lazily, live only)
+        self._last_funders_save = 0.0
+        self._last_price_fallback = 0.0
         # live money must survive restarts (the Ubuntu service restarts on crash)
         self.persist = mode.startswith("live") if persist is None else persist
         self.state_path = DATA / f"sniper_state_{mode.split('-')[0]}.json"
@@ -119,7 +123,8 @@ class Engine:
         if -self.book.day_pnl >= c.daily_loss_limit_sol:
             return "daily loss limit"
         trading = sum(1 for p in self.positions.values() if p.source != "callout")   # $1 callout bags don't count
-        if trading + len(self.pending) + len(self.reviewing) >= c.max_open_positions:
+        in_flight = len(self.pending - set(self.positions))      # pending sells are already counted as positions
+        if trading + in_flight + len(self.reviewing) >= c.max_open_positions:
             return "max positions"
         need = buy_sol or (self.p.sizing.max_usd / self.sol_price.usd if self.p.sizing.enabled else c.buy_sol)
         if self.book.sol - need < c.min_sol_reserve:
@@ -169,7 +174,11 @@ class Engine:
                 self.record_file.close()
             self.leaders.save()
             self._save_funders()
+            if self.journal:
+                self.callers.save()
             self.save_state()
+            if self.http is not None and not self.http.closed:
+                await self.http.close()
 
     async def _ticker(self) -> None:
         while True:
@@ -177,6 +186,16 @@ class Engine:
             await self.handle(Tick(self.feed.now()))
 
     async def handle(self, e: Event) -> None:
+        try:
+            await self._handle(e)
+        except Exception as err:   # live: one bad event/tick must never stop trading or exit handling
+            if not self.feed.realtime:
+                raise             # backtests/tests: surface bugs
+            import traceback
+            self.say("error", f"internal error on {getattr(e, 'kind', '?')}: {err!r}")
+            traceback.print_exc()
+
+    async def _handle(self, e: Event) -> None:
         self.now = max(self.now, e.ts)
         if self.record_file and not isinstance(e, Tick):
             self.record_file.write(dumps(e) + "\n")
@@ -195,9 +214,13 @@ class Engine:
             if e.wallet not in self.funders and e.funder:
                 self.fanout[e.funder] += 1
             self.funders[e.wallet] = (e.funder, e.funder_type)
-        if self.now - self._last_tick >= 1:
+            if len(self.funders) > 300_000:               # bounded memory on a 24/7 feed (oldest first)
+                for w in list(self.funders)[:50_000]:
+                    del self.funders[w]
+        if self.now - self._last_tick >= 1 and not self._tick_lock.locked():
             self._last_tick = self.now
-            await self._tick()
+            async with self._tick_lock:                   # a slow live sell must not let ticks overlap
+                await self._tick()
 
     async def _on_launch(self, e: Launch) -> None:
         if e.mint in self.tokens:          # metadata update for a known launch
@@ -226,7 +249,8 @@ class Engine:
 
     async def _on_trade(self, e: Trade) -> None:
         s = self.tokens.get(e.mint)
-        lead = e.trader in self.leaders.leaders and self.leaders.is_leader(e.trader)
+        known = e.trader in self.leaders.leaders            # paused leaders still matter: we follow their sells
+        lead = known and self.leaders.is_leader(e.trader)
         if s is None:
             if not lead:
                 return
@@ -235,7 +259,11 @@ class Engine:
                 s.curve = Curve(e.v_sol, e.v_tokens)
             await self._watch(e.mint)
         s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
-        if lead:
+        if s.unpriced_calls and s.price_known:            # calls on a CA we hadn't priced yet
+            for caller, ts in s.unpriced_calls:
+                self.callers.on_call(caller, e.mint, ts, s.curve.price)
+            s.unpriced_calls.clear()
+        if known:
             await self._on_leader_trade(s, e)
         await self._evaluate(s)
 
@@ -248,7 +276,10 @@ class Engine:
         if s is None:
             return
         s.socials.append(e)
-        self.callers.on_call(f"{e.source}:{e.author}", e.mint, e.ts, s.curve.price)
+        if s.price_known:
+            self.callers.on_call(f"{e.source}:{e.author}", e.mint, e.ts, s.curve.price)
+        else:                                              # don't score the caller against a placeholder price
+            s.unpriced_calls.append((f"{e.source}:{e.author}", e.ts))
         self.say("signal", f"{e.source} @{e.author} called {s.symbol}", e.mint)
         await self._evaluate(s)
 
@@ -263,6 +294,8 @@ class Engine:
             if pos and pos.leader == e.trader and c.follow_sells and e.mint not in self.pending:
                 all_out = frac * 100 >= c.sell_all_when_leader_sold_pct
                 await self._sell(s, pos, 1.0 if all_out else frac, f"leader {label} sold {frac:.0%}")
+            return
+        if not self.leaders.is_leader(e.trader):           # paused: follow sells only
             return
         self.say("signal", f"wallet {label} bought {s.symbol} for {e.sol:.2f} SOL", e.mint)
         if lead.mode == "signal":
@@ -354,10 +387,11 @@ class Engine:
         wallets = cohort(s, f.cohort_size)
         missing = [w for w in wallets + ([s.creator] if s.creator else []) if w not in self.funders]
         if missing and self.resolver.available and self.feed.realtime:
-            started = self.funding_started.get(s.mint)
-            if started is None:
-                self.funding_started[s.mint] = self.now
-                asyncio.create_task(self._resolve_funders(missing))
+            started, asked = self.funding_started.get(s.mint, (0.0, frozenset()))
+            new = [w for w in missing if w not in asked]
+            if new:                                       # new cohort wallets since the last batch
+                self.funding_started[s.mint] = (self.now, asked | frozenset(new))
+                asyncio.create_task(self._resolve_funders(new))
                 return "wait"
             if self.now - started < f.max_wait_s:
                 return "wait"
@@ -404,8 +438,9 @@ class Engine:
     async def _resolve_funders(self, wallets: list[str]) -> None:
         import aiohttp
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            results = await asyncio.gather(*(self.resolver.lookup(session, w) for w in wallets))
+        if self.http is None or self.http.closed:
+            self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
+        results = await asyncio.gather(*(self.resolver.lookup(self.http, w) for w in wallets))
         for r in results:
             if r is not None:
                 await self.handle(r)              # cached + recorded so backtests replay the same graph
@@ -466,11 +501,15 @@ class Engine:
             ("dev sold" if s.dev_sold else "")
         if why:
             self.say("info", f"desk approved {s.symbol} but skipped: {why}", s.mint)
+            if kind == "sniper" and not why.startswith(("max positions", "paused", "low SOL")):
+                s.decided = "skipped: " + why          # don't pay for a fresh desk review every tick
             return
         await self._buy(s, score, size, notes, source, leader)
 
     async def _buy(self, s: TokenState, score: float, sol: float, notes: list[str], source: str = "sniper",
                    leader: str = "") -> None:
+        if s.mint in self.positions or s.mint in self.pending:   # never stack a second position on one mint
+            return
         z = self.p.sizing
         if z.enabled and sol * self.sol_price.usd > z.max_usd + 1e-6:     # hard cap, whatever asked for more
             self.say("error", f"size ${sol * self.sol_price.usd:.2f} over hard cap ${z.max_usd} - clamped", s.mint)
@@ -498,6 +537,8 @@ class Engine:
     async def _check_exit(self, s: TokenState) -> None:
         pos = self.positions[s.mint]
         if not s.price_known:          # restored after a restart: wait for a real price before any exit logic
+            if self.now - pos.opened_at >= self.p.exit.max_hold_s + 120:
+                await self._sell(s, pos, 1.0, "max hold time (price unknown)")
             return
         if pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
             pos.peak_price = max(pos.peak_price, s.curve.price)
@@ -516,6 +557,8 @@ class Engine:
             await self._sell(s, pos, r[0], r[1])
 
     async def _sell(self, s: TokenState, pos: SniperPosition, frac: float, reason: str) -> None:
+        if s.mint in self.pending or self.positions.get(s.mint) is not pos:   # one sell at a time, live positions only
+            return
         tokens = pos.tokens if frac >= 1 else pos.tokens * frac
         self.pending.add(s.mint)
         try:
@@ -544,7 +587,8 @@ class Engine:
         self.save_state()
 
     def _close(self, pos: SniperPosition, s: TokenState) -> None:
-        del self.positions[pos.mint]
+        if self.positions.pop(pos.mint, None) is None:
+            return
         pnl = pos.proceeds_sol - pos.initial_cost_sol
         row = {
             "mint": pos.mint, "symbol": pos.symbol, "opened": pos.opened_at, "closed": self.now,
@@ -584,9 +628,11 @@ class Engine:
         if not self.book.halted and dd >= self.p.capital.max_drawdown_pct:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
+        await self._price_fallback()
+        recent_calls = {c.mint for c in self.callouts.calls if self.now - c.ts < 3660}
         for mint in list(self.tokens):
-            s = self.tokens[mint]
-            if mint in self.pending or mint in self.reviewing:
+            s = self.tokens.get(mint)
+            if s is None or mint in self.pending or mint in self.reviewing:
                 continue
             if mint in self.positions:
                 if self.book.halted:
@@ -596,7 +642,8 @@ class Engine:
             elif not s.decided:
                 await self._check_entry(s)
             elif s.age(self.now) > max(self.p.entry.max_age_s,
-                                       self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60:
+                                       self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60 \
+                    and mint not in recent_calls:          # keep pricing a call until its 1h result is in
                 del self.tokens[mint]
                 if not self.record_file:
                     await self._unwatch(mint)
@@ -616,10 +663,48 @@ class Engine:
         if self.journal and self.now - self._last_summary >= 60:
             self._last_summary = self.now
             DATA.mkdir(exist_ok=True)
-            self._save_funders()
+            self.callers.save()
+            if self.now - self._last_funders_save >= 600:
+                self._last_funders_save = self.now
+                if self.feed.realtime:
+                    await asyncio.to_thread(self._save_funders)
+                else:
+                    self._save_funders()
             (DATA / "sniper_summary.json").write_text(json.dumps(
                 {"ts": self.now, "summary": self.summary(), "rejects": dict(self.rejects),
                  "leaders": self.leaders.snapshot(), "desk": self.desk_stats()}, default=str, indent=1))
+
+    async def _price_fallback(self) -> None:
+        """Held tokens with no price (just restored) or no trade for 90s (quiet / migrated outside our stream):
+        fetch a price from DexScreener every 15s so exits and equity keep working."""
+        if not self.feed.realtime or self.now - self._last_price_fallback < 15:
+            return
+        stale = [m for m, p in self.positions.items()
+                 if m in self.tokens and (not self.tokens[m].price_known or self.now - self.tokens[m].last_trade_ts > 90)]
+        if not stale:
+            return
+        self._last_price_fallback = self.now
+        from .curve import FINAL_V_TOKENS, INITIAL_V_SOL, INITIAL_V_TOKENS
+        from ..clients import dexscreener
+
+        try:
+            pairs = await asyncio.to_thread(dexscreener.best_pair_by_mint, stale)
+        except Exception:
+            return
+        k = INITIAL_V_SOL * INITIAL_V_TOKENS
+        for m, pair in pairs.items():
+            px = float(pair.get("priceNative") or 0)
+            s = self.tokens.get(m)
+            if px <= 0 or s is None:
+                continue
+            if pair.get("dexId") == "pumpfun":                   # still on the curve: exact reserves from k
+                s.curve = Curve((k * px) ** 0.5, (k / px) ** 0.5)
+            else:                                               # graduated: price only
+                s.migrated = True
+                s.curve = Curve(px * FINAL_V_TOKENS, FINAL_V_TOKENS)
+            s.price_known = True
+            s.peak_price = max(s.peak_price, px)
+            s.last_trade_ts = self.now
 
     # ------------------------------------------------------------------ persistence (live)
     def save_state(self) -> None:
@@ -699,6 +784,9 @@ class Engine:
                 continue
             if not s.decided:       # the sniper decides first - a $1 bag must never block a real entry
                 continue
+            held = self.positions.get(s.mint)
+            if held and held.tokens * s.curve.price * self.sol_price.usd < c.min_hold_usd:
+                continue            # holding a sub-$1 remainder: can't call it without stacking a second position
             ok, score, _ = eligible(s, self.now, c, {
                 "max_bundle_pct": self.p.entry.max_bundle_pct, "max_early_sold_ratio": self.p.entry.max_early_sold_ratio,
                 "creator_launches": len(self.creators.get(s.creator, ())),
