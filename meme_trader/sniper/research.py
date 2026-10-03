@@ -5,6 +5,7 @@
     python -m meme_trader.sniper research freeze graduation-v1    lock the rules; only LATER data is the holdout
     python -m meme_trader.sniper research final graduation-v1     the holdout, judged once by the policy's gates
     python -m meme_trader.sniper research log                     every experiment run so far
+    python -m meme_trader.sniper research latency                 how fast prices move in the window (execution)
 
 A policy (research/policies/<name>.yaml) is a strategy's thesis, its exact settings (applied on top of
 config/params.example.yaml - never your local params.yaml, so results are reproducible) and pass/fail
@@ -49,6 +50,8 @@ POLICY_DIR = ROOT / "research" / "policies"
 NOT_HASHED = ("feed", "agent", "chat", "notify")
 SLIPPAGES = (0.0, 1.5, 5.0, 8.0)
 SCAN_INTERVALS = (1.0, 3.0)          # timing sensitivity: when the scanner happens to look
+DELAYS = (0.0, 1.0, 2.0, 3.0, 5.0)   # execution: seconds from deciding to landing, priced on the curve
+LANDING_S = 1.0                      # assumed time for a transaction to land after we decide (until measured live)
 SIZES_USD = (5, 10, 50, 100, 250)
 ABLATIONS = {
     "no net-flow filter": ["late.min_net_flow_sol=-1000000"],
@@ -277,9 +280,11 @@ def _run_variant(job: tuple) -> dict:
     params = policy_params(pol, extra)
     eng = asyncio.run(run_backtest(params, MemoryFeed(_W["events"])))
     trades = [{k: c.get(k) for k in ("mint", "symbol", "opened", "closed", "cost", "pnl", "pnl_pct", "exit",
-                                     "peak_gain_pct", "source")} for c in eng.book.closed]
+                                     "peak_gain_pct", "source", "entry_vs_signal_pct", "exit_vs_signal_pct",
+                                     "failed_fees_sol")} for c in eng.book.closed]
     return {"label": label, "extra": extra, "trades": trades, "hash": policy_hash(params),
-            "sol_usd": eng.sol_price.usd, "launches": eng.stats["launches"]}
+            "sol_usd": eng.sol_price.usd, "launches": eng.stats["launches"],
+            "failed_buys": eng.stats["failed_buys"], "failed_sell_attempts": eng.stats["failed_sell_attempts"]}
 
 
 def run_variants(pol: dict, events: list, jobs_list: list[tuple], jobs: int = 0) -> dict[str, dict]:
@@ -353,6 +358,23 @@ def random_baseline(rule_pnl: float, n: int, pool: list[dict], sims: int = 4000,
             "rule_percentile": round(sum(x < rule_pnl for x in tot) / sims, 3)}
 
 
+def _median(xs: list[float]) -> float | None:
+    xs = sorted(x for x in xs if x is not None)
+    return round(xs[len(xs) // 2], 2) if xs else None
+
+
+def _interp(points: list[tuple[float, float]], x: float) -> float | None:
+    pts = sorted(points)
+    if not pts:
+        return None
+    if x <= pts[0][0]:
+        return pts[0][1]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x0 <= x <= x1:
+            return round(y0 + (y1 - y0) * (x - x0) / (x1 - x0), 4)
+    return pts[-1][1]
+
+
 def breakeven_slippage(points: list[tuple[float, float]]) -> float | None:
     """Per-side slippage % at which net P&L crosses zero (linear between measured points)."""
     pts = sorted(points)
@@ -379,6 +401,8 @@ def evaluate(pol: dict, events: list, quality: dict, quick: bool = False, jobs: 
                                      f"capital.daily_loss_limit_sol={u / usd0 * float(cap['daily_loss_limit_sol'])}"])
                for u in SIZES_USD if u != usd0]
         jl += [(f"scan every {i:g}s", pol, [f"late.scan_interval_s={i}"]) for i in SCAN_INTERVALS]
+        jl += [(f"delay {d:g}s", pol, [f"execution.paper_delay_s={d}", "execution.paper_latency_slippage_pct=0"])
+               for d in DELAYS]
         jl += [("baseline: no momentum filter", pol, ["late.entry_mode=window"])]
         jl += [(f"ablation: {k}", pol, v) for k, v in ABLATIONS.items()]
     res = run_variants(pol, events, jl, jobs)
@@ -421,6 +445,22 @@ def evaluate(pol: dict, events: list, quality: dict, quick: bool = False, jobs: 
                                          "return_on_cost_pct": b["return_on_cost_pct"]} for u, b in sorted(size)}
         out["timing"] = {"every 2s (policy)": r["pnl_sol"], **{k.removeprefix("scan ").replace("every", "every"):
                          basic(x["trades"])["pnl_sol"] for k, x in res.items() if k.startswith("scan every")}}
+        rows = []
+        for d in DELAYS:
+            x = res[f"delay {d:g}s"]
+            b = basic(x["trades"])
+            ent = [t["entry_vs_signal_pct"] for t in x["trades"] if t.get("entry_vs_signal_pct") is not None]
+            ext = [t["exit_vs_signal_pct"] for t in x["trades"] if t.get("exit_vs_signal_pct") is not None]
+            rows.append({"delay_s": d, "trades": b["trades"], "pnl_sol": b["pnl_sol"],
+                         "return_on_cost_pct": b["return_on_cost_pct"], "failed_buys": x["failed_buys"],
+                         "failed_sell_attempts": x["failed_sell_attempts"],
+                         "entry_vs_signal_pct": _median(ent), "exit_vs_signal_pct": _median(ext)})
+        lag = (quality or {}).get("lag_p50_s")
+        est_delay = round((lag if lag is not None else 1.5) + LANDING_S, 1)
+        out["execution"] = {"by_delay": rows, "feed_lag_p50_s": lag, "assumed_landing_s": LANDING_S,
+                            "estimated_delay_s": est_delay,
+                            "pnl_at_estimated_delay_sol": _interp([(r["delay_s"], r["pnl_sol"]) for r in rows],
+                                                                  est_delay)}
         win = res["baseline: no momentum filter"]["trades"]
         out["baseline_no_filter"] = basic(win)
         out["random_entry"] = random_baseline(r["pnl_sol"], r["trades"], win)
@@ -530,11 +570,12 @@ def min_progress(pol: dict) -> float:
 
 def cmd_eval(name: str, files: list[str] | None = None, quick: bool = False, jobs: int = 0) -> dict:
     pol = load_policy(name)
-    _check_frozen_hash(pol)
+    sig = _check_frozen_hash(pol)
     start, end = _span_for(pol, holdout=False)
     paths = feed_files(files)
     events, st = load_events(paths, start, end, min_progress_pct=min_progress(pol))
     rep = evaluate(pol, events, quality_summary(st), quick=quick, jobs=jobs)
+    rep["signature"] = sig
     rep["variants_tried_on_this_data"] = variants_tried([p.name for p in paths]) + 1
     log_experiment({"kind": "eval", "policy": pol["name"], "files": [p.name for p in paths], "quick": quick,
                     "hashes": [rep["hash"]], "result": rep["result"], "uncertainty": rep.get("uncertainty")})
@@ -574,6 +615,78 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
     return rep
 
 
+# ------------------------------------------------------------------ execution: how fast prices move
+def price_moves(files: list[Path], lo_pct: float = 55, hi_pct: float = 85, horizons=(0.5, 1, 2, 3, 5),
+                every: int = 1, slippage_pct: float = 15.0) -> dict:
+    """For trades on curves lo-hi% full (the graduation window): how much the price moved over the next
+    h seconds of OUR clock. A buy that lands h seconds after the decision pays roughly that move, and fails
+    if it's beyond the slippage limit. Also split out moments of momentum (price up >= 5% over the previous
+    10 s), when the strategy buys. Mayhem tokens (the agent trades them) are left out: their curves move
+    differently and the strategy doesn't trade them."""
+    from collections import deque as _dq
+
+    from .tracker import MAYHEM_AGENT
+
+    series: dict[str, list] = defaultdict(list)
+    mayhem: set[str] = set()
+    lags = []
+    for path in files:
+        for line in _lines(path):
+            if '"kind":"trade"' not in line:
+                continue
+            try:
+                t = loads(line)
+            except (ValueError, KeyError, TypeError):
+                continue
+            if t.trader == MAYHEM_AGENT:
+                mayhem.add(t.mint)
+            if t.pool != "pump" or t.v_tokens <= 0 or t.v_sol <= 0:
+                continue
+            series[t.mint].append((t.ts, t.v_sol / t.v_tokens, _progress(t.v_tokens)))
+            if t.chain_ts:
+                lags.append(t.ts - t.chain_ts)
+    moves = {h: [] for h in horizons}
+    mom = {h: [] for h in horizons}
+    n = 0
+    for mint, pts in series.items():
+        if mint in mayhem:
+            continue
+        pts.sort()
+        j = {h: 0 for h in horizons}
+        back = _dq()
+        for i, (ts, px, prog) in enumerate(pts):
+            back.append((ts, px))
+            while back and back[0][0] < ts - 10:
+                back.popleft()
+            if not (lo_pct <= prog <= hi_pct) or i % every:
+                continue
+            n += 1
+            hot = back[0][1] > 0 and px / back[0][1] >= 1.05
+            for h in horizons:
+                k = max(j[h], i)
+                while k + 1 < len(pts) and pts[k + 1][0] <= ts + h:
+                    k += 1
+                j[h] = k
+                m = (pts[k][1] / px - 1) * 100
+                moves[h].append(m)
+                if hot:
+                    mom[h].append(m)
+
+    def q(xs, p):
+        xs = sorted(xs)
+        return round(xs[int(p * (len(xs) - 1))], 2) if xs else None
+    lags.sort()
+    def over(xs):
+        return round(100 * sum(x > slippage_pct for x in xs) / len(xs), 1) if xs else None
+    return {"samples": n, "window": f"{lo_pct:g}-{hi_pct:g}% curve", "mayhem_tokens_skipped": len(mayhem),
+            "slippage_pct": slippage_pct,
+            "feed_lag_s": {"p50": q(lags, .5), "p90": q(lags, .9), "p99": q(lags, .99)} if lags else None,
+            "all": {f"{h:g}s": {"p50": q(moves[h], .5), "p75": q(moves[h], .75), "p90": q(moves[h], .9),
+                                "p99": q(moves[h], .99), "over_slippage_pct": over(moves[h])} for h in horizons},
+            "momentum": {f"{h:g}s": {"n": len(mom[h]), "p50": q(mom[h], .5), "p75": q(mom[h], .75),
+                                     "p90": q(mom[h], .9), "over_slippage_pct": over(mom[h])} for h in horizons}}
+
+
 # ------------------------------------------------------------------ printing
 def _fmt_sol(x) -> str:
     return "–" if x is None else f"{x:+.4f}"
@@ -581,7 +694,9 @@ def _fmt_sol(x) -> str:
 
 def print_report(rep: dict) -> None:
     d, r = rep["data"], rep["result"]
-    print(f"\n=== {rep['policy']}  (hash {rep['hash']}{', FROZEN' if rep['frozen'] else ''}) ===")
+    ident = (f"FROZEN, signature {rep.get('signature')}" if rep["frozen"] and rep.get("signature")
+             else f"hash {rep['hash']}")
+    print(f"\n=== {rep['policy']}  ({ident}) ===")
     print(f"data: {', '.join(d['files'])} | {d['span_hours']} h | {d['launches']} launches, {d['trades']} trades "
           f"({d['non_organic_pct']}% non-organic)")
     lag = f"lag p50 {d['lag_p50_s']}s / p99 {d['lag_p99_s']}s" if d["lag_p50_s"] is not None else "no chain times"
@@ -611,6 +726,19 @@ def print_report(rep: dict) -> None:
                                      for k, v in rep["size_curve"].items()))
         print("TIMING   candidate scan " + "  ".join(f"{k}: {v:+.3f}" for k, v in rep["timing"].items())
               + "  (a real edge shouldn't care much when the scanner looks)")
+        ex = rep.get("execution")
+        if ex:
+            print("DELAY    decide -> land, priced on the curve, failed orders counted (no extra slippage haircut):")
+            for r in ex["by_delay"]:
+                print(f"         {r['delay_s']:>3g}s: {r['trades']:>4} trades {r['pnl_sol']:+.4f} SOL "
+                      f"({r['return_on_cost_pct']}% on cost) | median fill vs signal: buy {r['entry_vs_signal_pct']}% "
+                      f"sell {r['exit_vs_signal_pct']}% | failed buys {r['failed_buys']}, failed sells "
+                      f"{r['failed_sell_attempts']}")
+            lag = ex["feed_lag_p50_s"]
+            seen = f"{lag}s measured" if lag is not None else "~1.5s assumed"
+            print(f"         estimated real delay {ex['estimated_delay_s']}s (feed lag "
+                  f"{seen} + ~{ex['assumed_landing_s']:g}s to land)"
+                  f" -> about {ex['pnl_at_estimated_delay_sol']:+.4f} SOL")
         b = rep["baseline_no_filter"]
         print(f"BASELINE no momentum filter: {b['trades']} trades {b['pnl_sol']:+.4f} SOL "
               f"({b['return_on_cost_pct']}% on cost)")
@@ -651,6 +779,21 @@ def main(args) -> None:
             print(rep["progress"])
         else:
             print_report(rep)
+    elif args.rcmd == "latency":
+        r = price_moves(feed_files(args.file))
+        lag = r["feed_lag_s"]
+        print(f"{r['samples']} trades in the {r['window']} window "
+              f"({r['mayhem_tokens_skipped']} Mayhem tokens left out). "
+              "Feed lag behind the chain: "
+              + (f"p50 {lag['p50']}s, p90 {lag['p90']}s, p99 {lag['p99']}s" if lag else "not recorded (older data)"))
+        print(f"price move after h seconds (%); '>{r['slippage_pct']:g}%' = a buy landing then would fail "
+              f"its slippage limit")
+        print("        all trades                                     | after momentum (+5% in 10 s, when buys happen)")
+        for h, a in r["all"].items():
+            m = r["momentum"][h]
+            print(f"  {h:>4}: p50 {a['p50']:+6.2f} p75 {a['p75']:+6.2f} p90 {a['p90']:+6.2f} >{r['slippage_pct']:g}%: "
+                  f"{a['over_slippage_pct']:>4}% | n={m['n']}: p50 {m['p50']:+6.2f} p75 {m['p75']:+6.2f} "
+                  f"p90 {m['p90']:+6.2f} >{r['slippage_pct']:g}%: {m['over_slippage_pct']:>4}%")
     elif args.rcmd == "log":
         for e in experiments()[-40:]:
             r = e.get("result") or {}
@@ -675,4 +818,6 @@ def add_parser(sub) -> None:
             p.add_argument("--quick", action="store_true", help="the policy only, no variants")
             p.add_argument("--json", help="also write the report here")
     rsub.add_parser("log", help="every experiment so far")
+    lt = rsub.add_parser("latency", help="how fast prices move in the graduation window (execution delay)")
+    lt.add_argument("--file", nargs="+")
 

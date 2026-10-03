@@ -23,7 +23,7 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 - the costs are net and measured;
 - there are baselines and day-level uncertainty.
 
-The first candidate, `graduation-v1`, is collecting its holdout. On 16 h of development data it made +1.55 SOL at $20 a trade (+7.8% on cost). But it was −0.72 SOL without its 10 best trades, and checking for candidates one second later removed most of the profit (BUILD_LOG #16).
+The first candidate, `graduation-v1`, is collecting its holdout. On 16 h of development data it made +1.55 SOL at $20 a trade with instant fills. With orders landing 1–3 s after the decision, at the price they find (today's realistic delay), it **lost** 0.4–1.0 SOL instead: it misses most of its biggest winners, which run away before a delayed buy lands (BUILD_LOG #16, #18). The paper bot now models that delay.
 
 Earlier paper sessions are below for history. They used tiny samples, and partly a feed later measured to run 12 s behind the chain.
 

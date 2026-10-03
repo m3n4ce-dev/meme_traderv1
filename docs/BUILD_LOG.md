@@ -4,6 +4,51 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-03 — Entry #18: Execution measurement: with a realistic delay, graduation-v1 loses
+
+### Built
+- **`execution.paper_delay_s`:**
+  - a paper order now lands that many seconds after the decision, at the curve price then;
+  - a buy fails past `slippage_pct` (15%) and still pays its fee;
+  - a sell that lands below its floor fails (fee paid) and is re-sent through `sell_slippage_steps` / `sell_priority_fee_steps`, like the live executor;
+  - this works the same in the live paper bot and in replays (an order queue settled on the engine clock);
+  - 0 keeps the old instant fill.
+- **Every closed trade records:**
+  - `entry_vs_signal_pct` / `exit_vs_signal_pct` (all-in fill vs the price when we decided);
+  - `entry_delay_s` / `exit_delay_s`;
+  - `failed_fees_sol`.
+
+  In live mode they're measured. Live fills also carry their timing: seconds to build / send / confirm, plus the landing slot and block time from `getTransaction`. The decision slot is journaled next to it, so a pilot can measure landing in slots.
+- **`research latency`:** how far prices move within h seconds in the 55–85% window, overall and right after momentum, and how often a buy landing then would fail its slippage limit.
+- **`research eval`:** adds a delay curve (0/1/2/3/5 s, no extra haircut) and an estimate at the expected real delay (measured feed lag + ~1 s to land).
+
+### Measured (16.3 h before the freeze; Mayhem tokens left out)
+| After | median move | p75 | p90 | buy would fail (>15%) | after momentum: p90 / fail |
+|---|---|---|---|---|---|
+| 1 s | 0.00% | +1.8% | +7.2% | 3.6% | +9.4% / 5.3% |
+| 2 s | 0.00% | +3.4% | +10.3% | 6.0% | +12.5% / 7.8% |
+| 3 s | +0.01% | +4.5% | +12.6% | 7.9% | +15.1% / 10.1% |
+
+### graduation-v1 with orders landing later (same data, no extra slippage haircut)
+| Delay | Trades | Net SOL | On cost | Failed buys / sell attempts |
+|---|---|---|---|---|
+| 0 s | 201 | **+2.70** | +13.0% | 0 / 0 |
+| 1 s | 178 | **−0.40** | −2.4% | 23 / 25 |
+| 2 s | 66 | −1.01 (daily loss limit) | −16.6% | 20 / 18 |
+| 3 s | 88 | −0.95 | −12.7% | 31 / 20 |
+| 5 s | 76 | −0.99 | −15.9% | 31 / 17 |
+
+**Mechanism:** with a 1 s delay the strategy misses **7 of its 15 best instant-fill winners** (+1.68 SOL between them). Those buys fail because the price runs past the slippage limit first, while losses stay the same (−3.17 vs −2.91 SOL). The edge exists only with near-instant execution: the runners it needs are exactly the ones a delayed order can't catch.
+
+**Realistic delay today:** the public RPC feed runs 1–2 s behind the chain, plus ~1 s for PumpPortal to build the transaction and for it to land, so 2–3 s in total.
+
+### Consequences
+- The live paper bot now uses `paper_delay_s: 2.5` with no extra haircut, so its paper P&L shows what live execution would get.
+- graduation-v1 stays frozen and keeps collecting its holdout; its final report will include this delay curve.
+- Development data points to the strategy failing at any delay this setup can achieve. A v2 would have to work with a 2–3 s delay, or execution would have to get well under a second (a paid low-latency feed, building transactions directly, Jito). Each needs its own cost-vs-benefit measurement.
+
+---
+
 ## 2026-10-03 — Entry #17: Risk dial, self-updating dashboard, locked policy settings
 
 ### Owner input

@@ -203,6 +203,9 @@ async def run_backtest(params, feed, desk=None) -> Engine:
         await engine._tick()
     for m in list(engine.positions):
         await engine.sell_now(m)
+    while engine.deferred:                     # paper orders still in flight at the end of the data
+        engine.now = max(engine.now, engine.deferred[0][0])
+        await engine._settle_deferred()
     engine._audit_settle(final=True)
     return engine
 
