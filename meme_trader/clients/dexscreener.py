@@ -22,13 +22,20 @@ def pairs_for(mints: list[str]) -> list[dict]:
     return out
 
 
+WSOL_MINT = "So11111111111111111111111111111111111111112"
+
+
 def best_pair_by_mint(mints: list[str]) -> dict[str, dict]:
-    """Most liquid SOL-quoted pair per mint."""
+    """Most liquid SOL-quoted pair per requested mint. The quote is identified by the canonical wrapped-SOL
+    mint address - anyone can create a token whose symbol is "SOL"."""
+    wanted = set(mints)
     best: dict[str, dict] = {}
     for p in pairs_for(mints):
-        if p.get("quoteToken", {}).get("symbol") not in ("SOL", "WSOL"):
+        if p.get("chainId", "solana") != "solana" or (p.get("quoteToken") or {}).get("address") != WSOL_MINT:
             continue
-        mint = p["baseToken"]["address"]
+        mint = (p.get("baseToken") or {}).get("address")
+        if mint not in wanted:
+            continue
         liq = (p.get("liquidity") or {}).get("usd") or 0
         if mint not in best or liq > ((best[mint].get("liquidity") or {}).get("usd") or 0):
             best[mint] = p

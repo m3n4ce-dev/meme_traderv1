@@ -211,7 +211,11 @@ class SolanaTradeFeed(Feed):
 
     @staticmethod
     def parse_logs(value: dict, now: float) -> list[Trade]:
-        """Trades from one logsSubscribe notification value ({signature, err, logs})."""
+        """Trades from one logsSubscribe notification value ({signature, err, logs}).
+
+        `mentions` matches whole transactions, so any program in one can log bytes that look like a
+        TradeEvent. An event only counts while pump.fun itself is the executing program, tracked through
+        the runtime's invoke/success/failed lines; a stack that doesn't add up rejects the whole tx."""
         import base64
         import struct
 
@@ -220,13 +224,30 @@ class SolanaTradeFeed(Feed):
         if value.get("err"):
             return []                                   # failed transactions moved nothing
         out = []
+        stack: list[str] = []
         for line in value.get("logs") or ():
+            if line.startswith("Program ") and not line.startswith(("Program log:", "Program data:",
+                                                                      "Program return:")):
+                parts = line.split()
+                if len(parts) >= 4 and parts[2] == "invoke":
+                    if parts[3] != f"[{len(stack) + 1}]":
+                        return []                       # depth doesn't match what we've seen: untrustworthy
+                    stack.append(parts[1])
+                elif len(parts) >= 3 and (parts[2] == "success" or parts[2].startswith("failed")):
+                    if not stack or stack[-1] != parts[1]:
+                        return []
+                    stack.pop()
+                continue                                # "consumed N of M compute units" etc.
+            if line.startswith("Log truncated"):
+                return []                               # the rest of the stack is unknown
             if not line.startswith("Program data: "):
                 continue
+            if not stack or stack[-1] != PUMP_PROGRAM:
+                continue                                # emitted by some other program
             try:
                 raw = base64.b64decode(line[14:])
             except ValueError:
-                continue                                # other programs log arbitrary data
+                continue
             if raw[:8] != TRADE_EVENT or len(raw) < 129:
                 continue
             sol, tokens = struct.unpack_from("<QQ", raw, 40)
@@ -290,17 +311,98 @@ class SolanaTradeFeed(Feed):
                 t.cancel()
 
 
+METADATA_MAX_BYTES = 64 * 1024
+_metadata_slots: asyncio.Semaphore | None = None
+
+
+def _public_ip(host: str) -> bool:
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        return False
+
+
+def _allowed_url(url: str) -> bool:
+    """http(s) with a host name, or a literal IP only if it's public (aiohttp skips the resolver for
+    literal IPs, so those are checked here)."""
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(url)
+        host = u.hostname
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https") or not host:
+        return False
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True                                     # a name: the resolver checks what it points to
+    return _public_ip(host)
+
+
+class _PublicOnlyResolver:
+    """aiohttp resolver that refuses names resolving to loopback, private, link-local or other non-public
+    addresses. Runs for every connection, so redirects and DNS re-resolution can't reach them either."""
+
+    def __init__(self):
+        from aiohttp.resolver import DefaultResolver
+
+        self._inner = DefaultResolver()
+
+    async def resolve(self, host, port=0, family=0):
+        addrs = [a for a in await self._inner.resolve(host, port, family) if _public_ip(a["host"])]
+        if not addrs:
+            raise OSError(f"{host} has no public address")
+        return addrs
+
+    async def close(self):
+        await self._inner.close()
+
+
 async def fetch_metadata(uri: str) -> dict:
-    """Token metadata JSON (twitter/telegram/website). Best effort, 3s budget."""
+    """Token metadata JSON (twitter/telegram/website). Best effort, 3 s budget.
+
+    The URI is written by the token's creator, so it's treated as hostile: http(s) only, public
+    addresses only (checked at connect time, redirects included), at most 3 redirects, a 64 KB body
+    cap, 8 fetches at once, and only short string fields come back."""
+    global _metadata_slots
+    from urllib.parse import urljoin
+
     import aiohttp
 
-    if not uri:
+    if not isinstance(uri, str) or not _allowed_url(uri):
         return {}
+    if _metadata_slots is None:
+        _metadata_slots = asyncio.Semaphore(8)
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as s, s.get(uri) as r:
-            return await r.json(content_type=None)
+        async with _metadata_slots:
+            conn = aiohttp.TCPConnector(resolver=_PublicOnlyResolver(), limit=2)
+            async with aiohttp.ClientSession(connector=conn, timeout=aiohttp.ClientTimeout(total=3)) as s:
+                url, body = uri, None
+                for _ in range(4):                      # the request + at most 3 redirects, each one checked
+                    async with s.get(url, allow_redirects=False) as r:
+                        if r.status in (301, 302, 303, 307, 308):
+                            url = urljoin(url, r.headers.get("Location", ""))
+                            if not _allowed_url(url):
+                                return {}
+                            continue
+                        if r.status != 200 or (r.content_length or 0) > METADATA_MAX_BYTES:
+                            return {}
+                        body = await r.content.read(METADATA_MAX_BYTES + 1)
+                        break
+                if body is None or len(body) > METADATA_MAX_BYTES:
+                    return {}
+        d = json.loads(body)
     except Exception:
         return {}
+    if not isinstance(d, dict):
+        return {}
+    return {k: d[k][:200] for k in ("twitter", "telegram", "website") if isinstance(d.get(k), str)}
 
 
 # --------------------------------------------------------------------------- replay

@@ -29,9 +29,17 @@ class FakeWallet:
         self.closed = 0
         self.current = None
 
-    def sign_and_send(self, tx_b64):
+    simulated_sol_change = 0.0
+
+    def sign(self, tx_b64):
         self.current = self.attempts.pop(0)
+        return "raw", "sig"
+
+    def send(self, raw):
         return "sig"
+
+    def simulate_sol_change(self, tx_b64):
+        return self.simulated_sol_change
 
     def tx_deltas(self, sig, mint):
         return self.current[0]
@@ -41,6 +49,7 @@ class FakeWallet:
 
     def close_empty_token_accounts(self, mint):
         self.closed += 1
+        return "close-sig", 0.00203928
 
 
 @pytest.fixture
@@ -59,32 +68,38 @@ def _confirm_from(w):
 
 
 def test_sell_requotes_with_rising_slippage_and_reclaims_rent(fake_net, monkeypatch):
+    failed = {"dsol": -0.001005, "dtok": 0, "rent": 0.0, "failed": True}      # landed, failed: definitely not sold
     sold = {"dsol": 0.2, "dtok": -5_000_000, "rent": 0.0, "failed": False}
-    w = FakeWallet([(None, False), (sold, True)], balance_after=0)
+    w = FakeWallet([(failed, False), (sold, True)], balance_after=0)
     monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w).sell(MINT, None, 5.0))
     assert fill.ok and fill.tokens == pytest.approx(5.0) and fill.sol == pytest.approx(0.2)
+    assert fill.fees_lost == pytest.approx(0.001005)              # the failed attempt still cost fees
     assert [d["slippage"] for d in fake_net] == [15, 25]          # re-quoted, not blindly retried
     assert all(d["pool"] == "auto" for d in fake_net)             # routes to PumpSwap after graduation
-    assert w.closed == 1
+    assert w.closed == 1 and fill.rent_reclaimed == pytest.approx(0.00203928 - 0.000005)
 
 
 def test_buy_not_retried_late_landing_booked_and_rent_kept_out_of_cost(fake_net, monkeypatch):
     w = FakeWallet([(None, False)])
     monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w).buy(MINT, None, 0.1))
-    assert not fill.ok and len(fake_net) == 1                    # one attempt only
+    assert not fill.ok and fill.unknown and fill.signature == "sig" and len(fake_net) == 1   # one attempt only
 
     bought = {"dsol": -0.10204, "dtok": 7_000_000, "rent": 0.00204, "failed": False}
     w2 = FakeWallet([(bought, False)])                            # confirm timed out, but it landed
     monkeypatch.setattr("meme_trader.wallet.confirm", _confirm_from(w2))
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w2).buy(MINT, None, 0.1))
     assert fill.ok and fill.tokens == pytest.approx(7.0) and fill.sol == pytest.approx(0.1)
+    assert fill.rent == pytest.approx(0.00204)                    # reported separately: refundable, not cost
 
 
 def test_live_errors_become_failed_fills_not_crashes(fake_net, monkeypatch):
     class Boom(FakeWallet):
-        def sign_and_send(self, tx_b64):
+        def sign(self, tx_b64):
+            return "raw", "sig"
+
+        def send(self, raw):
             raise RuntimeError("RPC sendTransaction: slippage exceeded (preflight)")
     w = Boom([])
     fill = asyncio.run(LiveExecutor(P.sniper.execution, w).sell(MINT, None, 5.0))
@@ -112,15 +127,15 @@ def test_close_empty_token_accounts_builds_close_instruction(monkeypatch):
 
     def rpc(method, params):
         if method == "getTokenAccountsByOwner":
-            acct = lambda pk, amt: {"pubkey": pk, "account": {"owner": token2022, "data": {"parsed": {"info": {
-                "tokenAmount": {"amount": str(amt)}}}}}}
+            acct = lambda pk, amt: {"pubkey": pk, "account": {"owner": token2022, "lamports": 2039280, "data": {
+                "parsed": {"info": {"tokenAmount": {"amount": str(amt)}}}}}}
             return {"value": [acct(empty, 0), acct(full, 5)]}
         if method == "getLatestBlockhash":
             return {"value": {"blockhash": "11111111111111111111111111111111"}}
         sent.append(params[0])
         return "sig"
     monkeypatch.setattr(wmod, "rpc", rpc)
-    assert w.close_empty_token_accounts(MINT) == 1              # the non-empty account is left alone
+    assert w.close_empty_token_accounts(MINT) == ("sig", pytest.approx(0.00203928))   # only the empty one
     tx = VersionedTransaction.from_bytes(base64.b64decode(sent[0]))
     ix = tx.message.instructions[0]
     keys = tx.message.account_keys

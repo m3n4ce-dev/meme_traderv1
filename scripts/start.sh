@@ -5,7 +5,7 @@
 #   scripts/start.sh paper --desk         ...with the AI trading desk (needs ANTHROPIC_API_KEY)
 #   scripts/start.sh live                 REAL money (needs everything in docs/SETUP.md step 5)
 #   scripts/start.sh train | backtest | sweep | compare | leaders    (use your recordings in data/ by default)
-#   scripts/start.sh report | review | doctor                        (extra args are passed through)
+#   scripts/start.sh report | review | doctor | promote              (extra args are passed through)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -x .venv/bin/python ] || { echo "Run the setup script first (scripts/setup_mac.sh or scripts/setup_ubuntu.sh)"; exit 1; }
@@ -41,10 +41,11 @@ case "$MODE" in
             echo "Using your recordings: $(ls data/feed-* | wc -l | tr -d ' ') file(s) in data/"
             "$PY" -m meme_trader.sniper "$MODE" "$@" --file data/feed-*
           else
-            [ "$src" = 0 ] && echo "No recordings in data/ yet (run: scripts/start.sh paper) - using the SIMULATED market."
+            [ "$src" = 0 ] && echo "No recordings in data/ yet (run: scripts/start.sh paper) - using the SIMULATED market." \
+              && [ "$MODE" = train ] && echo "(a model trained on it is saved as a candidate only and can't be promoted)"
             "$PY" -m meme_trader.sniper "$MODE" "$@"
           fi ;;
-  doctor|review|report)
+  doctor|review|report|promote)
           "$PY" -m meme_trader.sniper "$MODE" "$@" ;;
   *)      sed -n '2,8p' "$0"; exit 1 ;;
 esac

@@ -65,7 +65,7 @@ def run_one(params, sets: list[str], sample: dict) -> dict:
     eng = asyncio.run(run_backtest(p, feed))
     s = eng.summary()
     return {"pnl": s["realized_pnl_sol"], "pf": s["profit_factor"], "win": s["win_rate"], "n": s["closed"],
-            "dd": _max_dd(eng.book.equity_hist), "seconds": time.time() - t0,
+            "dd": max(eng.book.max_dd_pct, _max_dd(eng.book.equity_hist)), "seconds": time.time() - t0,
             "by_source": {k: v["realized_pnl_sol"] for k, v in s["by_source"].items()}}
 
 

@@ -54,11 +54,12 @@ class CallerStats:
 class CallerBook:
     """Tracks each caller's track record. Persisted to data/callers.json."""
 
-    def __init__(self, path: Path, horizon_s: float = 300):
+    def __init__(self, path: Path | None, horizon_s: float = 300):
+        """path None = in-memory only (replays: every caller starts neutral, nothing learned today leaks in)."""
         self.path = path
         self.horizon = horizon_s
         self.stats: dict[str, CallerStats] = {}
-        if path.exists():
+        if path is not None and path.exists():
             for k, v in json.loads(path.read_text()).items():
                 self.stats[k] = CallerStats(v["calls"], v["avg_return"])
 
@@ -83,6 +84,8 @@ class CallerBook:
         return self.stats.get(caller, CallerStats()).weight
 
     def save(self) -> None:
+        if self.path is None:
+            return
         self.path.parent.mkdir(exist_ok=True)
         self.path.write_text(json.dumps({k: {"calls": v.calls, "avg_return": v.avg_return}
                                          for k, v in self.stats.items()}, indent=1))
@@ -109,6 +112,47 @@ async def run_telegram(channels: list, emit: Emit) -> None:
     await client.run_until_disconnected()
 
 
+X_RULE_TAG = "meme_trader"
+
+
+class XStreamFatal(Exception):
+    """Credentials/permissions problem: retrying won't help."""
+
+
+def x_retry_delay(status: int, headers, attempt: int) -> float:
+    """Seconds to wait before reconnecting after an HTTP error from the X stream."""
+    if status == 429:
+        try:
+            reset = float(headers.get("x-rate-limit-reset", 0))
+        except (TypeError, ValueError):
+            reset = 0
+        if reset > time.time():
+            return min(reset - time.time() + 1, 900)
+        return min(60 * 2 ** attempt, 900)
+    return min(5 * 2 ** attempt, 320)
+
+
+async def sync_x_rules(s, base: str, accounts: list) -> None:
+    """Replace only this bot's (tagged) rules. Rules other apps keep on the same X project survive."""
+    async with s.get(f"{base}/rules") as r:
+        if r.status in (401, 403):
+            raise XStreamFatal(f"X rules: HTTP {r.status} (check X_BEARER_TOKEN and its access level)")
+        if r.status != 200:
+            raise RuntimeError(f"X rules: HTTP {r.status}")
+        mine = [x["id"] for x in (await r.json()).get("data", []) if x.get("tag") == X_RULE_TAG]
+    if mine:
+        async with s.post(f"{base}/rules", json={"delete": {"ids": mine}}) as r:
+            if r.status not in (200, 201):
+                raise RuntimeError(f"X rules delete: HTTP {r.status}")
+    rules = [{"value": " OR ".join(f"from:{a}" for a in accounts[i:i + 20]), "tag": X_RULE_TAG}
+             for i in range(0, len(accounts), 20)]
+    async with s.post(f"{base}/rules", json={"add": rules}) as r:
+        if r.status in (401, 403):
+            raise XStreamFatal(f"X rules add: HTTP {r.status}")
+        if r.status not in (200, 201):
+            raise RuntimeError(f"X rules add: HTTP {r.status}")
+
+
 async def run_x_stream(accounts: list, emit: Emit) -> None:
     token = os.environ.get("X_BEARER_TOKEN")
     if not (accounts and token):
@@ -117,28 +161,50 @@ async def run_x_stream(accounts: list, emit: Emit) -> None:
 
     base = "https://api.x.com/2/tweets/search/stream"
     headers = {"Authorization": f"Bearer {token}"}
+    attempt = 0
     async with aiohttp.ClientSession(headers=headers) as s:
-        # replace rules with one OR-rule per 20 accounts (rule length limit)
-        async with s.get(f"{base}/rules") as r:
-            old = [x["id"] for x in (await r.json()).get("data", [])]
-        if old:
-            await s.post(f"{base}/rules", json={"delete": {"ids": old}})
-        rules = [{"value": " OR ".join(f"from:{a}" for a in accounts[i:i + 20])}
-                 for i in range(0, len(accounts), 20)]
-        await s.post(f"{base}/rules", json={"add": rules})
         while True:
+            try:
+                await sync_x_rules(s, base, accounts)
+                break
+            except XStreamFatal as e:
+                print(f"[x] {e} - X signals disabled")
+                return
+            except Exception as e:
+                delay = min(15 * 2 ** attempt, 600)
+                attempt += 1
+                print(f"[x] rule setup failed ({e!r}); retrying in {delay:.0f}s")
+                await asyncio.sleep(delay)
+        attempt = 0
+        while True:
+            delay = 15.0
             try:
                 async with s.get(base, params={"expansions": "author_id", "user.fields": "username"},
                                  timeout=aiohttp.ClientTimeout(total=None, sock_read=90)) as r:
+                    if r.status in (401, 403):
+                        print(f"[x] stream: HTTP {r.status} - X signals disabled (check X_BEARER_TOKEN)")
+                        return
+                    if r.status != 200:
+                        delay = x_retry_delay(r.status, r.headers, attempt)
+                        attempt += 1
+                        print(f"[x] stream: HTTP {r.status}; reconnecting in {delay:.0f}s")
+                        await asyncio.sleep(delay)
+                        continue
+                    attempt = 0
                     async for line in r.content:
                         if not line.strip():
                             continue
                         d = json.loads(line)
+                        if "errors" in d and "data" not in d:
+                            print(f"[x] stream error message: {str(d['errors'])[:200]}")
+                            continue
                         users = {u["id"]: u["username"] for u in d.get("includes", {}).get("users", [])}
                         tw = d.get("data", {})
                         for mint in extract_mints(tw.get("text", "")):
                             await emit(Social(mint=mint, ts=time.time(), source="x",
                                               author=users.get(tw.get("author_id"), "?"), text=tw.get("text", "")[:280]))
             except Exception as e:
-                print(f"[x] stream error {e!r}; reconnecting in 15s")
-                await asyncio.sleep(15)
+                delay = min(15 * 2 ** attempt, 600)
+                attempt += 1
+                print(f"[x] stream error {e!r}; reconnecting in {delay:.0f}s")
+            await asyncio.sleep(delay)

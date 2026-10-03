@@ -157,9 +157,15 @@ def test_running_engine_hot_reloads_a_retrained_model(tmp_path, monkeypatch):
     assert eng.model is None
     X, y = _separable(200)
     m = LogisticModel.fit(X, y)
-    m.info = {"test": {"auc": 0.71}}
+    m.info = {"test": {"auc": 0.71}, "source": "recorded"}       # trained, but never promoted
     m.save(tmp_path / "model.json")
     os.utime(tmp_path / "model.json", (1, 1_900_000_000))
     eng.now = 1_000.0
+    eng._maybe_reload_model()
+    assert eng.model is None and "isn't a promoted model" in eng.log[-1]["text"]
+    m.info["promoted"] = True
+    m.save(tmp_path / "model.json")
+    os.utime(tmp_path / "model.json", (1, 1_900_000_100))
+    eng.now = 2_000.0
     eng._maybe_reload_model()
     assert eng.model is not None and "0.710" in eng.log[-1]["text"]

@@ -229,7 +229,7 @@ def write(closed: list[dict], equity_hist: list, start_sol: float, max_dd_pct: f
     out.write_text(render(a, title, source))
     csv_path = out.with_suffix(".csv")
     cols = ["opened", "closed", "symbol", "mint", "source", "cost", "proceeds", "pnl", "pnl_pct", "peak_gain_pct",
-            "mae_pct", "score", "p", "initials", "exit"]
+            "mae_pct", "score", "p", "initials", "exit", "mode", "session", "config", "model"]
     with csv_path.open("w", newline="") as f:
         wr = csv.writer(f)
         wr.writerow(["opened_utc", "closed_utc"] + cols[2:])
@@ -239,7 +239,15 @@ def write(closed: list[dict], equity_hist: list, start_sol: float, max_dd_pct: f
     return out, csv_path
 
 
-def load_trades(data_dir: Path, days: int | None = None) -> list[dict]:
+def row_mode(c: dict) -> str:
+    """paper / live / paper-synthetic (demo) ... Rows written before trades were tagged are 'unknown':
+    they can't be told apart, so they're never mixed into paper or live results."""
+    return c.get("mode") or "unknown"
+
+
+def load_trades(data_dir: Path, days: int | None = None, mode: str | None = None,
+                session: str | None = None) -> list[dict]:
+    """Recorded closed trades, optionally only one mode ('all' = every mode) and/or one session."""
     files = sorted(data_dir.glob("trades-*.jsonl"))
     if days:
         files = files[-days:]
@@ -250,7 +258,20 @@ def load_trades(data_dir: Path, days: int | None = None) -> list[dict]:
                 rows.append(json.loads(line))
             except ValueError:
                 continue
+    if mode and mode != "all":
+        rows = [c for c in rows if row_mode(c) == mode]
+    if session:
+        rows = [c for c in rows if c.get("session") == session]
     return sorted(rows, key=lambda c: c["closed"])
+
+
+def sessions(closed: list[dict]) -> list[tuple[str, float, int]]:
+    """(session, its starting balance, trades) in order of first trade."""
+    out: dict[str, list] = {}
+    for c in closed:
+        k = c.get("session") or "untagged"
+        out.setdefault(k, [c.get("start_sol"), 0])[1] += 1
+    return [(k, v[0], v[1]) for k, v in out.items()]
 
 
 def equity_from_trades(closed: list[dict], start_sol: float) -> list[tuple[float, float]]:

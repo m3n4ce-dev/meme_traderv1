@@ -4,9 +4,10 @@
         --grid exit.stop_loss_pct=20,30,40 --grid entry.min_score=45,55,65
 
 Launches are split by launch time: the first `train` share of tokens is the tuning set, the rest
-is the test set (funding events go to both). Every grid combination runs on the tuning set; the
-best few, plus the current settings, are then run on the test set. A change is only recommended
-if it also beats the current settings on the test set - otherwise it was probably noise.
+is the test set. The split is purged: tuning data stops at the cutoff, and tokens launched within
+the longest holding time before it belong to neither side (see split()). Every grid combination
+runs on the tuning set; the best few, plus the current settings, are then run on the test set. A change
+is only recommended if it also beats the current settings on the test set - otherwise it was probably noise.
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ _W: dict = {}
 
 def _init_worker(params, source: dict, train: float) -> None:
     """Runs once per worker process: load the events there, so no task ships a market over a pipe."""
-    tr, te = split(load_events(source), train)
+    tr, te = split(load_events(source), train, embargo_for(params))
     _W.update(params=params, tr=tr, te=te)
 
 
@@ -60,23 +61,42 @@ def _run_in_worker(sets: list[str], which: str) -> dict:
     return asyncio.run(run_backtest(p, MemoryFeed(_W[which]))).summary()
 
 
-def split(events: list, train: float) -> tuple[list, list]:
+def split(events: list, train: float, embargo_s: float = 0.0) -> tuple[list, list]:
+    """Chronological split by launch time, purged so the training side can't see the future:
+    * training data stops at the cutoff (later trades of earlier tokens are dropped, not kept);
+    * tokens launched within `embargo_s` before the cutoff go to neither side, so every training
+      outcome that takes up to `embargo_s` to resolve is complete before the first test launch;
+    * funding lookups go to training only if they happened before the cutoff (the test side, replayed
+      in time order, may use all of them)."""
     events = sorted(events, key=lambda e: e.ts)
     launches = [e for e in events if isinstance(e, Launch)]
     if len(launches) < 2:
         return events, []
     cutoff = launches[int(len(launches) * train)].ts
-    side: dict[str, bool] = {e.mint: e.ts < cutoff for e in launches}
+    side: dict[str, str] = {}
+    for e in launches:
+        if e.mint not in side:
+            side[e.mint] = "test" if e.ts >= cutoff else ("train" if e.ts < cutoff - embargo_s else "purged")
     tr, te = [], []
     for e in events:
         if isinstance(e, Funding):
-            tr.append(e)
+            if e.ts < cutoff:
+                tr.append(e)
             te.append(e)
             continue
         mint = getattr(e, "mint", None)
-        in_train = side.get(mint, e.ts < cutoff)
-        (tr if in_train else te).append(e)
+        where = side.get(mint, "train" if e.ts < cutoff - embargo_s else ("test" if e.ts >= cutoff else "purged"))
+        if where == "train" and e.ts < cutoff:
+            tr.append(e)
+        elif where == "test":
+            te.append(e)
     return tr, te
+
+
+def embargo_for(params) -> float:
+    """How long a strategy outcome takes to resolve: the longest a position can be held."""
+    sn = params.sniper
+    return float(max(sn.exit.max_hold_s, sn.late.max_age_s + sn.late.max_hold_s, sn.callouts.hold_s))
 
 
 def combos(grids: list[str], cap: int = 200) -> list[list[str]]:
@@ -109,7 +129,7 @@ async def sweep(params, events: list, grids: list[str], train: float = 0.6, metr
     """jobs > 1 (needs `source`): backtests run in that many processes, one per CPU core."""
     from .__main__ import apply_overrides, run_backtest
 
-    tr, te = split(events, train)
+    tr, te = split(events, train, embargo_for(params))
     grid = combos(grids)
     log(f"{len(grid)} combination(s); tuning on {sum(isinstance(e, Launch) for e in tr)} launches, "
         f"testing on {sum(isinstance(e, Launch) for e in te)}" + (f"; {jobs} processes" if jobs > 1 else ""))

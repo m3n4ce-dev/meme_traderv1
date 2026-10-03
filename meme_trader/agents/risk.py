@@ -1,5 +1,6 @@
 """Risk manager agent: sizing, exposure limits, daily loss limit, drawdown kill switch.
-Owns the portfolio state (persisted to data/state.json)."""
+Owns the portfolio state, persisted per mode and wallet (data/state-paper.json, data/state-live-<wallet>.json)
+so simulated cash and positions can never be loaded into real-money trading."""
 from __future__ import annotations
 
 import dataclasses
@@ -9,7 +10,11 @@ import time
 from ..journal import DATA
 from ..models import Candidate, Fill, Order, Position, Signal
 
-STATE = DATA / "state.json"
+LEGACY_STATE = DATA / "state.json"        # untagged file from before 2026-10-03: paper only
+
+
+def state_path(mode: str, wallet: str = ""):
+    return DATA / ("state-paper.json" if mode != "live" else f"state-live-{wallet[:8]}.json")
 
 
 def _today() -> str:
@@ -25,20 +30,36 @@ class Portfolio:
     day_realized_sol: float = 0.0
     cooldown_until: dict[str, float] = dataclasses.field(default_factory=dict)
     halted: str = ""            # non-empty = kill switch tripped, reason
+    mode: str = "paper"         # which book this is: paper and live never share one
+    wallet: str = ""            # live: the wallet this book belongs to
 
     def equity(self, prices: dict[str, float]) -> float:
         return self.sol + sum(p.tokens / 10 ** p.decimals * prices.get(m, p.entry_price_sol)
                               for m, p in self.positions.items())
 
+    @property
+    def path(self):
+        return state_path(self.mode, self.wallet)
+
     def save(self) -> None:
         DATA.mkdir(exist_ok=True)
-        STATE.write_text(json.dumps(dataclasses.asdict(self), indent=2))
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(dataclasses.asdict(self), indent=2))
+        tmp.replace(self.path)
 
     @classmethod
-    def load(cls, starting_sol: float) -> "Portfolio":
-        if not STATE.exists():
-            return cls(sol=starting_sol, start_sol=starting_sol)
-        d = json.loads(STATE.read_text())
+    def load(cls, starting_sol: float, mode: str = "paper", wallet: str = "") -> "Portfolio":
+        path = state_path(mode, wallet)
+        if not path.exists() and mode == "paper" and LEGACY_STATE.exists():
+            path = LEGACY_STATE                     # old untagged state has only ever been paper
+        if not path.exists():
+            return cls(sol=starting_sol, start_sol=starting_sol, mode=mode, wallet=wallet)
+        d = json.loads(path.read_text())
+        d.setdefault("mode", "paper")
+        d.setdefault("wallet", "")
+        if d["mode"] != mode or (mode == "live" and d["wallet"] != wallet):
+            raise RuntimeError(f"{path.name} belongs to {d['mode']} {d['wallet'] or ''} - refusing to use it for "
+                               f"{mode} {wallet}")
         d["positions"] = {m: Position(**p) for m, p in d["positions"].items()}
         return cls(**d)
 
