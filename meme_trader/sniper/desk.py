@@ -132,7 +132,7 @@ class Desk:
         try:
             r = await self.client.beta.messages.create(
                 model=self.p.model,
-                max_tokens=2048,
+                max_tokens=8000,                 # thinking is always on: room so a vote is never cut off
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
                 system=[{"type": "text", "text": PERSONAS[persona] + RUBRIC, "cache_control": {"type": "ephemeral"}}],
