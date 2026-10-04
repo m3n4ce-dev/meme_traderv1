@@ -87,7 +87,7 @@ scripts/start.sh promote    # deploys it, only if trained on your recordings wit
 A running bot picks up a promoted model within a minute; there's no need to restart it. While `sniper.predict.display_only` is `true` (the default), **the model is shown but never changes a trade**: no entry gate, no sizing. A model trained on the simulated market can't be promoted at all. **Retrain weekly**: pump.fun behaviour drifts, and research finds models trained on one period do worse on later ones.
 
 ## 6. Change settings while it runs
-Open the **Controls** tab. Toggles and numbers apply instantly. Press **Save to config** to keep them after a restart; this writes `config/params.yaml`. Everything else lives in that file.
+Open the **Controls** tab. Toggles and numbers apply instantly. Press **Save to config** to keep them after a restart; this writes `config/params.yaml`. **All settings**, further down, has every other setting (search it, or tick "Only changed"), each with its default and a one-line explanation. Lists, endpoints and keys still live in the config file.
 
 The dollar **hard cap** (`Max buy`) is enforced in code. Nothing can buy more, whatever it asks for.
 

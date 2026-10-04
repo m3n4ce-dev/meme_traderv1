@@ -4,6 +4,17 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #20: All settings on the dashboard, and a chat buddy
+
+- **Controls → All settings:** every other scalar setting (about 110: graduation plays, execution, sizing, exits, entry gates, copy, callouts, defense mode) can be changed live, with search, an "only changed" filter, its default, and the help text from `params.example.yaml`. **Save to config** writes the ones changed this run.
+  - Lists, endpoints, keys and paths stay in the config file.
+  - Owner only: the AI agent can still change just the curated settings, within its ceilings.
+  - The frozen research test is unaffected: `research final` replays the policy's locked settings, not the live ones.
+  - The settings that had no comment in `params.example.yaml` now have one.
+- **Chat buddy:** a small animated character at the top of the Chat sidebar that shows what Claude is doing (thinking, working a tool, writing, waiting for your Approve, done, error), cheers or winces when a trade closes, sleeps if Claude Code isn't installed, and gives a tip when clicked.
+
+---
+
 ## 2026-10-03 — Entry #19: Owner decision: leave it running
 
 - graduation-v1 keeps collecting its holdout untouched; `research final graduation-v1` gives the verdict once there are 14 days and 150 trades (around 2026-10-17).
