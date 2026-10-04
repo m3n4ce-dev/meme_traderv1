@@ -464,3 +464,38 @@ def test_a_broken_desk_rests_itself_after_three_failed_reviews(monkeypatch):
     assert not e.desk.enabled and not e.p.desk.enabled and "workspace" in e.desk_error
     assert any("put to rest" in l["text"] for l in e.log)
     assert e.desk_view()["desk"]["error"]
+
+
+def test_waking_the_desk_clears_stale_votes_and_a_new_key_rebuilds_it(monkeypatch, tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    built = []
+
+    class FakeDesk:
+        def __init__(self, p):
+            built.append(os.environ.get("ANTHROPIC_API_KEY"))
+            self.p, self.client, self.enabled, self.calls = p, object(), True, 0
+
+        def cost_usd(self):
+            return 0.0
+    monkeypatch.setattr("meme_trader.sniper.desk.Desk", FakeDesk)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-" + "a" * 90)
+    e = engine()
+    e.desk_reviews.append({"ts": 1, "votes": [{"persona": "veteran", "error": "AuthenticationError: invalid x-api-key"}]})
+    assert e.set_desk(True) == "" and not e.desk_reviews
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.receive_json()
+            await ws.send_json({"action": "key_set", "name": "ANTHROPIC_API_KEY", "value": "sk-ant-api03-" + "b" * 90})
+            while (m := await ws.receive_json())["type"] != "ack":
+                pass
+            await ws.close()
+            return m
+    m = asyncio.run(go())
+    assert m["ok"] and "restarted with it" in m["text"] and built[-1].endswith("b" * 90) and e.desk.enabled
+    os.environ.pop("ANTHROPIC_API_KEY", None)
