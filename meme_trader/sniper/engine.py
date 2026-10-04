@@ -34,7 +34,7 @@ from .predictor import LogisticModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry, evaluate_late_exit,
-                       exit_watch, gate_checklist, late_checklist)
+                       evaluate_manual_exit, exit_watch, gate_checklist, initials_fraction, late_checklist)
 from .tracker import TokenState
 
 DUST_SOL = 0.0005
@@ -75,7 +75,7 @@ CONTROLS = [
 # Every other scalar setting in these sections can be changed live from the dashboard's "All settings" (owner
 # only: the AI agent keeps to CONTROLS and its ceilings). Lists, endpoints, keys and paths are config-file only.
 ADVANCED_SECTIONS = ("capital", "sizing", "entry", "exit", "late", "callouts", "copy", "execution", "risk_adapt",
-                     "predict", "signals")
+                     "predict", "signals", "manual")
 ADVANCED_SKIP = {"capital.starting_sol", "predict.enabled", "predict.model_path", "predict.checkpoints_s",
                  "sizing.enabled", "copy.use_own_exits"}
 ADVANCED_ENUMS = {"late.entry_mode": ("rule", "window")}
@@ -166,6 +166,10 @@ class Engine:
         self._last_think = 0.0
         self.desk_reviews: deque = deque(maxlen=20)
         self.desk_failures = 0                                   # reviews in a row where no persona answered
+        self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
+        from .memory import Memory
+
+        self.memory = Memory(DATA / "memory.json" if feed.realtime else None)   # what you've fed the desk
         self.desk_error = ""
         self.paused = False
         self.journal = log_to_journal
@@ -274,11 +278,12 @@ class Engine:
         self.say("info", f"paper deposit +{sol:g} SOL: cash {b.sol:.3f} SOL, starting balance now {b.start_sol:g} SOL")
         return {"cash_sol": round(b.sol, 6), "start_sol": round(b.start_sol, 6), "equity_sol": round(self.equity(), 6)}
 
-    def _global_block(self) -> str:
-        """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout)."""
+    def _global_block(self, manual: bool = False) -> str:
+        """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout). Your own
+        manual trades skip only "paused", which is about the bot's automatic entries."""
         if self.book.halted:
             return "halted: " + self.book.halted
-        if self.paused:
+        if self.paused and not manual:
             return "paused"
         if getattr(self.feed, "degraded", False):
             why = getattr(self.feed, "degraded_reason", "") or f"on backup feed {self.feed.host} (no trade data)"
@@ -316,10 +321,10 @@ class Engine:
 
     def _authorize(self, mint: str, sol: float, source: str) -> str:
         """Final, central go/no-go for a buy of exactly `sol`, right before cash is reserved for it."""
-        why = self._global_block()
+        why = self._global_block(manual=source == "manual")
         if why:
             return why
-        if source != "callout":
+        if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
             if trading + in_flight + len(self.reviewing - {mint}) >= self.p.capital.max_open_positions:
@@ -906,6 +911,10 @@ class Engine:
             extra = {"leader": {"label": self.leaders.label(leader), "copied_trades": st.copied,
                                 "copied_pnl_sol": round(st.copied_pnl, 3), "observed_closed": st.closed,
                                 "observed_realized_sol": round(st.realized_sol, 2)}}
+        saved = [{"title": n.get("title", ""), "your_note": n.get("note", ""), "summary": n.get("summary", "")[:300]}
+                 for n in self.memory.for_mint(s.mint)]
+        if saved:
+            extra = {**extra, "owner_notes": saved}
         try:
             v = await self.desk.review(snapshot_for(s, self.now, kind, extra))
         finally:
@@ -952,7 +961,11 @@ class Engine:
         if s.mint in self.positions or s.mint in self.pending:   # never stack a second position on one mint
             return
         z = self.p.sizing
-        if z.enabled and sol * self.sol_price.usd > z.max_usd + 1e-6:     # hard cap, whatever asked for more
+        if source == "manual":
+            if sol > self._manual_cfg().max_sol + 1e-9:
+                self.say("error", f"manual size {sol} SOL over manual.max_sol - refused", s.mint)
+                return
+        elif z.enabled and sol * self.sol_price.usd > z.max_usd + 1e-6:     # hard cap, whatever asked for more
             self.say("error", f"size ${sol * self.sol_price.usd:.2f} over hard cap ${z.max_usd} - clamped", s.mint)
             sol = round(z.max_usd / self.sol_price.usd, 4)
         if sol <= 0:                                      # e.g. the liquidity cap says the curve is too thin
@@ -1133,7 +1146,14 @@ class Engine:
         px = s.curve.price
         pos.peak_price = max(pos.peak_price, px)
         pos.trough_price = min(pos.trough_price or px, px)
-        if pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
+        if pos.source == "manual":         # yours: only the exits you set, plus leaving the curve
+            mc = self._manual_cfg()
+            r = evaluate_manual_exit(pos, s, {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
+                                              "tp_frac": mc.take_profit_frac, "trail": mc.trail_pct,
+                                              "sell_on_graduation": mc.sell_on_graduation, **(pos.manual or {})})
+            if r and r[1].startswith("manual take profit"):
+                pos.manual = {**(pos.manual or {}), "tp_done": True}      # once per position
+        elif pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
             held = self.now - pos.opened_at
             r = (1.0, "dev sold") if s.dev_sold else \
                 ((1.0, "callout hold done") if held >= self.p.callouts.hold_s else None)
@@ -1366,6 +1386,7 @@ class Engine:
             self._maybe_reload_model()
         await self._maybe_callout()
         await self._maybe_late()
+        await self._manual_queue_tick()
         if self.feed.realtime and self.now - self._last_think >= 2:
             self._last_think = self.now
             self._late_think()
@@ -1776,6 +1797,117 @@ class Engine:
                 c.posted = c.posted or "manual"
 
     # ------------------------------------------------------------------ controls (UI)
+    # ------------------------------------------------------------------ manual trading (the owner, from the dashboard)
+    def _manual_cfg(self):
+        from ..config import Params
+
+        d = {"max_sol": 2.0, "presets_sol": [0.05, 0.1, 0.25, 0.5, 1.0], "ape_sol": 0.5, "stop_loss_pct": 0,
+             "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_graduation": True, "queue_s": 60}
+        return Params({**d, **(self.p.get("manual") or {})})
+
+    async def manual_buy(self, mint: str, sol: float) -> str:
+        """Your buy: '' when sent (or queued for the coin's first priced trade), else why not."""
+        from .tracker import TokenState
+
+        mc = self._manual_cfg()
+        try:
+            sol = round(float(sol), 6)
+        except (TypeError, ValueError):
+            return "amount must be a number"
+        if not 0 < sol <= mc.max_sol:
+            return f"amount must be more than 0 and at most {mc.max_sol:g} SOL (manual.max_sol)"
+        mint = str(mint or "").strip()
+        if not 32 <= len(mint) <= 44:
+            return "that isn't a contract address"
+        if mint in self.positions or mint in self.pending:
+            return "already holding it (or an order is in flight): sell first, or use the sell buttons"
+        s = self.tokens.get(mint)
+        if s is None:
+            s = self.tokens[mint] = TokenState(mint, None, self.now)
+            await self._watch(mint)
+        if s.migrated:
+            return "it has graduated off the bonding curve: this bot trades the curve only"
+        why = self._authorize(mint, sol, "manual")
+        if why:
+            return why
+        if not s.price_known:
+            self.manual_queue[mint] = (sol, self.now)
+            self.say("info", f"manual buy {sol:g} SOL of {s.symbol or mint[:6]} queued: waiting for its first trade "
+                             f"to show a price ({mc.queue_s:.0f}s)", mint)
+            return ""
+        if s.dev_sold:
+            self.say("info", f"note: {s.symbol}'s creator has sold; buying anyway because you asked", mint)
+        s.late_tried = True                               # the bot's own strategies leave your coin alone
+        await self._buy(s, 50.0, sol, [f"manual {sol:g} SOL"], source="manual")
+        return ""
+
+    async def _manual_queue_tick(self) -> None:
+        if not self.manual_queue:
+            return
+        limit = self._manual_cfg().queue_s
+        for mint, (sol, at) in list(self.manual_queue.items()):
+            s = self.tokens.get(mint)
+            if s is not None and s.price_known:
+                del self.manual_queue[mint]
+                why = await self.manual_buy(mint, sol)
+                if why:
+                    self.say("error", f"queued manual buy of {s.symbol or mint[:6]} not sent: {why}", mint)
+            elif self.now - at > limit:
+                del self.manual_queue[mint]
+                self.say("info", f"queued manual buy of {mint[:6]}… dropped: no trade in {limit:.0f}s "
+                                 "(not on the pump.fun curve, or very quiet)", mint)
+
+    async def manual_sell(self, mint: str, fraction: float) -> str:
+        pos, s = self.positions.get(mint), self.tokens.get(mint)
+        if pos is None or s is None:
+            return "no open position in that coin"
+        if mint in self.pending:
+            return "an order for that coin is already in flight"
+        try:
+            frac = float(fraction)
+        except (TypeError, ValueError):
+            return "fraction must be a number"
+        if not 0 < frac <= 1:
+            return "fraction must be more than 0 and at most 1"
+        if not s.price_known:
+            return "no live price for it yet"
+        await self._sell(s, pos, frac, "manual sell" if frac >= 1 else f"manual sell {frac:.0%}")
+        return ""
+
+    async def take_initials(self, mint: str) -> str:
+        """Sell just enough to get the initial cost back; the rest rides for free."""
+        pos, s = self.positions.get(mint), self.tokens.get(mint)
+        if pos is None or s is None or not s.price_known:
+            return "no open position with a live price"
+        frac = initials_fraction(pos, s.curve.price, self.fee + self.p.execution.paper_latency_slippage_pct)
+        if frac is None:
+            return "not enough profit to take initials (it would mean selling the whole bag): use Exit instead"
+        if mint in self.pending:
+            return "an order for that coin is already in flight"
+        await self._sell(s, pos, min(frac * 1.02, 1.0), "manual: initials")     # 2% margin for the fill
+        pos.initials_taken = True
+        return ""
+
+    def set_manual_exits(self, mint: str, sl=None, tp=None, tp_frac=None, trail=None) -> str:
+        pos = self.positions.get(mint)
+        if pos is None:
+            return "no open position in that coin"
+        m = dict(pos.manual or {})
+        for k, v, hi in (("sl", sl, 99), ("tp", tp, 10000), ("tp_frac", tp_frac, 1), ("trail", trail, 99)):
+            if v is None or v == "":
+                continue
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return f"{k} must be a number"
+            if not 0 <= v <= hi:
+                return f"{k} must be between 0 and {hi}"
+            m[k] = v
+        if tp is not None:
+            m["tp_done"] = False
+        pos.manual = m
+        return ""
+
     async def sell_now(self, mint: str) -> None:
         if mint in self.positions and mint in self.tokens:
             await self._sell(self.tokens[mint], self.positions[mint], 1.0, "manual sell")
@@ -2136,7 +2268,7 @@ class Engine:
                 "price": price, "gain_pct": pos.gain_pct(price), "peak_gain_pct": pos.gain_pct(pos.peak_price),
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
-                "source": pos.source, "desk": pos.desk, "p": pos.p,
+                "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
@@ -2144,6 +2276,7 @@ class Engine:
             "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
+            "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},
             "closed": self.book.closed[-50:][::-1], "rejects": self.rejects.most_common(14),
             "equity_hist": list(self.book.equity_hist)[-400:], "log": list(self.log)[-80:][::-1],
             "callers": sorted(({"caller": k, "calls": v.calls, "avg_return": v.avg_return, "weight": v.weight}
