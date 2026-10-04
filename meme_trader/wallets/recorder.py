@@ -50,6 +50,34 @@ def _write_json(path: Path, obj) -> None:
     tmp.replace(path)
 
 
+def read_control(data_dir: Path = DATA) -> dict:
+    """data/wallets/control.json, written by the dashboard: {paused, pause_until, quiet: {start, end} | None}.
+    Quiet hours are local time; a window like 23:00-06:00 wraps midnight."""
+    p = Path(data_dir) / "control.json"
+    try:
+        c = json.loads(p.read_text()) if p.exists() else {}
+    except ValueError:
+        c = {}
+    return {"paused": bool(c.get("paused")), "pause_until": c.get("pause_until"), "quiet": c.get("quiet")}
+
+
+def control_state(c: dict, now: float | None = None) -> tuple[bool, str]:
+    """(recording?, why not)."""
+    now = now or time.time()
+    if c.get("paused"):
+        return False, "paused"
+    if c.get("pause_until") and now < c["pause_until"]:
+        return False, f"paused until {datetime.fromtimestamp(c['pause_until']):%H:%M}"
+    q = c.get("quiet")
+    if q and q.get("start") and q.get("end"):
+        t = datetime.fromtimestamp(now).strftime("%H:%M")
+        a, b = q["start"], q["end"]
+        inside = (a <= t < b) if a <= b else (t >= a or t < b)
+        if inside:
+            return False, f"quiet hours {a}-{b}"
+    return True, ""
+
+
 def latest_liq(rec: dict) -> float:
     return (rec.get("liq") or [[0, 0]])[-1][1] or 0.0
 
@@ -70,6 +98,9 @@ class Recorder:
         self.day_rows = collections.Counter()
         self.sol_usd: float | None = None                # from DexScreener pairs; prices stream rows in USD
         self.stream_bytes = collections.Counter()        # per UTC day: what the full stream downloads
+        self.control = read_control(self.dir)
+        self.active, self.pause_reason = control_state(self.control)
+        self._pause_started = None if self.active else time.time()
 
     # ------------------------------------------------------------------ pool bookkeeping
     def _err(self, where: str, e) -> None:
@@ -146,6 +177,9 @@ class Recorder:
     async def discover_loop(self, s: aiohttp.ClientSession) -> None:
         while True:
             t0 = time.time()
+            if not self.active:
+                await asyncio.sleep(10)
+                continue
             try:
                 await self.discover(s)
             except Exception as e:                       # noqa: BLE001 - keep recording through anything
@@ -189,7 +223,8 @@ class Recorder:
     async def meta_loop(self, s: aiohttp.ClientSession) -> None:
         while True:
             try:
-                await self.refresh_meta(s)
+                if self.active:
+                    await self.refresh_meta(s)
             except Exception as e:                       # noqa: BLE001
                 self._err("meta", e)
             await asyncio.sleep(20)
@@ -259,6 +294,9 @@ class Recorder:
     async def poll_loop(self, s: aiohttp.ClientSession) -> None:
         while True:
             now = time.time()
+            if not self.active:
+                await asyncio.sleep(5)
+                continue
             pool, due = self.next_due(now)
             if pool is None or due > now:
                 await asyncio.sleep(min(5.0, max(0.5, due - now)) if pool else 5.0)
@@ -288,7 +326,7 @@ class Recorder:
         cdir.mkdir(exist_ok=True)
         while True:
             await asyncio.sleep(self.cfg.candles_every_s)
-            pool = self.candle_due(time.time())
+            pool = self.candle_due(time.time()) if self.active else None
             if not pool:
                 continue
             try:
@@ -326,23 +364,44 @@ class Recorder:
                 "pools_eligible": len(elig), "pools_polled": sum(1 for r in elig if r.get("polls")),
                 "overdue": self.overdue(now), "gt_calls_last_hour": self.gt.per_hour(), "rows_this_run": self.st["rows"],
                 "rows_by_day": dict(self.day_rows), "gaps": self.st["gaps"], "polls": self.st["polls"],
-                "discovery": self.st["discovery"], "sol_usd": self.sol_usd,
+                "discovery": self.st["discovery"], "sol_usd": self.sol_usd, "active": self.active,
+                "pause_reason": self.pause_reason, "paused_since": self._pause_started, "control": self.control,
                 "stream_gb_by_day": {d: round(b / 1e9, 2) for d, b in self.stream_bytes.items()},
                 "errors": list(self.errors)[-10:]}
 
+    def apply_control(self, now: float | None = None) -> None:
+        """Re-read control.json; log each pause (start, end, why) to pauses.jsonl so the study knows the gaps."""
+        now = now or time.time()
+        self.control = read_control(self.dir)
+        active, why = control_state(self.control, now)
+        if active != self.active:
+            if not active:
+                self._pause_started = now
+                log.info("recording paused: %s", why)
+            else:
+                with (self.dir / "pauses.jsonl").open("a") as f:
+                    f.write(json.dumps({"start": self._pause_started, "end": now, "why": self.pause_reason}) + "\n")
+                log.info("recording resumed after %.0f min", (now - (self._pause_started or now)) / 60)
+                self._pause_started = None
+        self.active, self.pause_reason = active, why
+
     async def housekeeping(self) -> None:
-        last_save = 0.0
+        last_save = last_status = 0.0
         while True:
-            await asyncio.sleep(10)
+            await asyncio.sleep(5)
             try:
+                was = self.active
+                self.apply_control()
                 self.flush()
                 now = time.time()
                 if now - last_save >= 120:
                     self._prune(now)
                     self.compress_old()
                     _write_json(self.dir / "pools.json", self.pools)
-                    _write_json(self.dir / "status.json", self.status(now))
                     last_save = now
+                if now - last_status >= 15 or was != self.active:     # the dashboard reads this
+                    _write_json(self.dir / "status.json", self.status(now))
+                    last_status = now
             except Exception as e:                       # noqa: BLE001
                 self._err("housekeeping", e)
 
@@ -361,6 +420,9 @@ class Recorder:
     async def stream_loop(self, s: aiohttp.ClientSession) -> None:
         """Every swap, all the time (~0.9 MB/s). Discovery is the same stream."""
         while True:
+            if not self.active:
+                await asyncio.sleep(5)
+                continue
             try:
                 async with s.ws_connect(self.ws_urls[0], max_msg_size=0, heartbeat=20) as ws:
                     await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
@@ -368,6 +430,8 @@ class Recorder:
                     async for msg in ws:
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             break
+                        if not self.active:
+                            break                               # a pause started: close the stream
                         self.stream_bytes[_day(time.time())] += len(msg.data)
                         v = (json.loads(msg.data).get("params") or {}).get("result", {}).get("value")
                         if not v or v.get("err"):
@@ -386,7 +450,7 @@ class Recorder:
                                 self.st["captured"] += 1
             except (aiohttp.ClientError, OSError, ValueError) as e:
                 self._err("stream", e)
-            await asyncio.sleep(5)
+            await asyncio.sleep(1 if not self.active else 5)
 
     async def run(self) -> None:
         log.info("wallet recorder (%s mode): %d pools known, data in %s", self.cfg.mode, len(self.pools), self.dir)

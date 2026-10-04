@@ -296,3 +296,101 @@ def evaluate_late_exit(pos: SniperPosition, s: TokenState, now: float, L, x):
     if now - s.last_high_ts() >= L.stall_s and held >= L.stall_s:
         return 1.0, f"late stall {L.stall_s:.0f}s"
     return None
+
+
+# --------------------------------------------------------------------------- what the bots are thinking
+def late_checklist(s: TokenState, now: float, L, red: dict) -> dict:
+    """evaluate_late_entry, step by step, for the Desk: every check with its live value and limit, and the
+    verdict. Mirrors evaluate_late_entry (tested to agree): all checks ok <=> it would buy."""
+    prog = s.curve.progress * 100
+    age = s.age(now)
+    checks = [
+        ("window", "curve in window", f"{prog:.0f}%", f"{L.min_curve_pct}-{L.max_curve_pct}%",
+         not s.migrated and L.min_curve_pct <= prog <= L.max_curve_pct, prog / max(L.min_curve_pct, 1e-9)),
+        ("window", "young enough", f"{age / 60:.1f} min", f"<= {L.max_age_s / 60:.0f} min", age <= L.max_age_s,
+         None),
+        ("flag", "dev holding", "sold" if s.dev_sold else "holding", "", not s.dev_sold, None),
+        ("flag", "bundled supply", f"{s.bundle_pct():.0f}%", f"<= {red['max_bundle_pct']}%",
+         s.bundle_pct() <= red["max_bundle_pct"], None),
+        ("flag", "early buyers dumped", f"{s.early_sold_ratio():.0%}", f"<= {red['max_early_sold_ratio']:.0%}",
+         s.early_sold_ratio() <= red["max_early_sold_ratio"], None),
+        ("flag", "creator launches / 24h", str(red["creator_launches"]), f"<= {red['max_creator_launches_24h']}",
+         red["creator_launches"] <= red["max_creator_launches_24h"], None),
+    ]
+    if s.cluster:
+        checks.append(("flag", "insider cluster", f"{s.cluster['pct']:.0f}%", f"<= {red['max_cluster_pct']}%",
+                       s.cluster["pct"] <= red["max_cluster_pct"], None))
+    if L.get("entry_mode", "rule") != "window":
+        w = s.window(now, L.flow_window_s)
+        nb = sum(1 for t in w if t[2] == "buy")
+        ns = sum(1 for t in w if t[2] == "sell")
+        flow = sum(t[3] if t[2] == "buy" else -t[3] for t in w)
+        buyers = len({t[4] for t in w if t[2] == "buy"})
+        near = s.curve.price / s.peak_price if s.peak_price else 0
+        ratio = nb / max(ns, 1)
+        checks += [
+            ("momentum", f"net inflow {L.flow_window_s:.0f}s", f"{flow:+.1f} SOL", f">= {L.min_net_flow_sol}",
+             flow >= L.min_net_flow_sol, flow / L.min_net_flow_sol if L.min_net_flow_sol else 1.0),
+            ("momentum", "unique buyers", str(buyers), f">= {L.min_buyers}", buyers >= L.min_buyers,
+             buyers / L.min_buyers if L.min_buyers else 1.0),
+            ("momentum", "buys / sells", f"{ratio:.1f}", f">= {L.min_buy_sell_ratio}", ratio >= L.min_buy_sell_ratio,
+             ratio / L.min_buy_sell_ratio if L.min_buy_sell_ratio else 1.0),
+            ("momentum", "near its high", f"{near:.0%}", f">= {L.min_near_high:.0%}", near >= L.min_near_high,
+             near / L.min_near_high if L.min_near_high else 1.0),
+        ]
+    rows = [{"group": g, "label": lab, "value": v, "limit": lim, "ok": bool(ok),
+             "frac": None if fr is None else round(max(0.0, min(fr, 1.5)), 3)} for g, lab, v, lim, ok, fr in checks]
+    fails = [r for r in rows if not r["ok"]]
+    if not fails:
+        verdict, why = "buy", "every check passes"
+    elif fails[0]["group"] == "window":
+        verdict = "early" if (not s.migrated and prog < L.min_curve_pct and age <= L.max_age_s) else "out"
+        why = ("migrated" if s.migrated else f"too old: {age / 60:.0f} min (max {L.max_age_s / 60:.0f})"
+               if age > L.max_age_s else f"curve {prog:.0f}%, the window opens at {L.min_curve_pct}%"
+               if prog < L.min_curve_pct else f"curve {prog:.1f}%, past the {L.max_curve_pct}% window")
+    elif any(r["group"] == "flag" for r in fails):
+        f = next(r for r in fails if r["group"] == "flag")
+        verdict, why = "pass", f"{f['label']}: {f['value']}"
+    else:
+        verdict = "wait"
+        why = ", ".join(f"{r['label']} {r['value']} / {r['limit'].lstrip('>= ')}" for r in fails)
+    return {"checks": rows, "verdict": verdict, "why": why, "progress": round(prog, 1),
+            "readiness": round(sum(min(r["frac"], 1.0) for r in rows if r["group"] == "momentum" and r["frac"] is not None)
+                               / max(1, sum(1 for r in rows if r["group"] == "momentum")), 3)}
+
+
+def exit_watch(pos: SniperPosition, s: TokenState, now: float, L, x) -> list[dict]:
+    """How close each exit is, for the Desk. Graduation plays mirror evaluate_late_exit's order; other
+    positions show their stop, peak and time limit."""
+    price = s.curve.price
+    gain = pos.gain_pct(price)
+    peak = max(pos.peak_price, price)
+    drop = (1 - price / peak) * 100 if peak else 0.0
+    held = now - pos.opened_at
+    out = []
+    if pos.source == "late":
+        prog = s.curve.progress * 100
+        since_high = now - s.last_high_ts()
+        flow = s.net_flow_sol(now, x.decay_window_s)
+        out = [
+            {"label": "graduation exit", "value": f"curve {prog:.0f}%", "limit": f"{L.exit_curve_pct}%",
+             "frac": prog / L.exit_curve_pct},
+            {"label": "stop loss", "value": f"{gain:+.0f}%", "limit": f"-{L.stop_loss_pct}%",
+             "frac": max(0.0, -gain) / L.stop_loss_pct},
+            {"label": "stall (no new high)", "value": f"{since_high:.0f}s", "limit": f"{L.stall_s:.0f}s",
+             "frac": min(since_high, held) / L.stall_s if L.stall_s else 0.0},
+            {"label": "momentum decay", "value": f"{flow:+.1f} SOL, -{drop:.0f}%",
+             "limit": f"-{x.decay_net_outflow_sol} SOL & -{x.decay_min_drop_pct}%",
+             "frac": min(max(0.0, -flow) / x.decay_net_outflow_sol, drop / x.decay_min_drop_pct)
+             if x.decay_net_outflow_sol and x.decay_min_drop_pct else 0.0},
+            {"label": "time limit", "value": f"{held / 60:.1f} min", "limit": f"{L.max_hold_s / 60:.0f} min",
+             "frac": held / L.max_hold_s},
+        ]
+    else:
+        out = [{"label": "drop from peak", "value": f"-{drop:.0f}%", "limit": "trailing stop", "frac": None},
+               {"label": "time held", "value": f"{held / 60:.1f} min", "limit": f"{x.max_hold_s / 60:.0f} min",
+                "frac": held / x.max_hold_s if x.max_hold_s else None}]
+    for r in out:
+        if r["frac"] is not None:
+            r["frac"] = round(max(0.0, min(r["frac"], 1.0)), 3)
+    return out

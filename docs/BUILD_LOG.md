@@ -4,6 +4,71 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #23: Open-source survey; USDC-quoted coins are invisible to the bot
+
+- Surveyed GitHub trading bots read-only ([OPEN_SOURCE_NOTES.md](OPEN_SOURCE_NOTES.md)). Most pump.fun sniper and copy-trading repos are sales pages or wallet-drainer bait.
+- Worth learning from:
+  - Chainstack's pump.fun bot: listener race, `programSubscribe` for late curves, the current IDL;
+  - the Rust streaming/landing SDKs;
+  - Hummingbot's funding arbitrage (a template for edge-scout);
+  - a small bot whose own notes show paper ~80% wins vs live 1 in 38.
+- **Measured:** about 3% of pump.fun trades (11 of 369 in 20 s) are on USDC- or token-quoted coins. Their `sol_amount` and virtual SOL reserves are 0, so this bot reads them as price 0 and never trades them.
+  - Proposed: decode `quote_mint` (after the event's variable-length fields) and skip non-SOL coins explicitly.
+- **Measured:** ipfs.io and dweb.link return 429 to this machine, so per-launch social-link lookups likely fail often.
+  - Proposed: the logo fetcher's gateway fallback for those lookups too.
+
+---
+
+## 2026-10-04 — Entry #22: The Desk, Portfolio, API keys, X feed, token logos
+
+- **Desk tab:** a card for each agent with its current thought:
+  - graduation scanner;
+  - exit manager;
+  - risk officer;
+  - feed watchdog;
+  - AI desk (four personas);
+  - Claude operator;
+  - wallet recorder;
+  - the bench (strategies that are off).
+
+  Below the cards:
+  - **Scanner list:** each coin near the window with its live checklist. `strategy.late_checklist` mirrors `evaluate_late_entry` and is tested to agree with it on replayed markets.
+  - **Exit gauges:** `strategy.exit_watch`.
+  - **AI desk votes:** each persona's vote, conviction and reasons.
+  - **Thought stream:** scanner verdict changes plus buys, sells and closes.
+  - **𝕏 feed** and **research progress.**
+
+  The scanner's thinking runs only on the live feed and never feeds a decision, so replays and frozen tests are unchanged.
+- **AI desk:** can be woken and rested at runtime (`engine.set_desk`), once an Anthropic key is set.
+- **API keys & connections (Controls):**
+  - Covers the Anthropic key, Solana RPC/websocket URLs, Helius, PumpPortal, Telegram, X and Jupiter.
+  - Keys are written to `.env` at mode 600 and applied to the running bot where possible.
+  - The page only ever gets "set" plus a hint (last 4 characters, or the endpoint's host).
+  - The live-trading confirmation flag and the keypair path can't be set from here.
+  - The Claude agent has no access.
+- **Wallet recorder control:**
+  - Pause, pause for N hours, or daily quiet hours, via `data/wallets/control.json`.
+  - The recorder closes the stream within about 5 s.
+  - Each pause goes into `pauses.jsonl`.
+- **Portfolio tab:**
+  - Watch-only wallets: SOL, SPL and Token-2022 holdings priced via DexScreener's most liquid pair, and recent transactions.
+  - The bot's paper book is shown alongside.
+  - Found while testing: the PumpPortal-linked wallet holds 0.006 SOL (~$0.74), not the ~$15 it was funded with. The metered PumpPortal feed used before #10 would have spent it.
+- **𝕏 feed:**
+  - Reads FxTwitter's public API (profile timelines and search).
+  - Polls one request at a time, each source every 2.5 min, and only while someone's looking.
+  - Post text is shown as plain text; images only from twimg.com.
+- **Token logos everywhere:**
+  - `/api/logo/<mint>` uses the token's own metadata image, then DexScreener.
+  - Fetching is public-address only with a 4 MB cap. Images are re-encoded by Pillow to a 96 px WebP (so the dashboard only serves images it made) and cached in `data/logos/`.
+  - Falls back to coloured initials.
+  - ipfs.io and dweb.link rate-limit this machine (HTTP 429, likely from the bot's per-launch metadata fetches), so IPFS links fall back to pump.fun's Pinata gateway, 4everland and public Pinata.
+- **Fixed:** `fetch_metadata` (and the new image fetch) read only the first network chunk of a response (`content.read(n)` returns what has arrived so far), which could truncate a token's metadata and lose its social links. Both now read to the end with a cap (`feeds.read_capped`), with a regression test.
+- Style: soft gradient backdrop, accented KPI cards, tab icons, a brand mark; the header fits on one row at laptop widths.
+- Pillow added to requirements (logo thumbnails). 231 tests.
+
+---
+
 ## 2026-10-04 — Entry #21: Wallet study (wallets-v1) registered, recorder running
 
 - **Why:** an X article claims the edge is following wallets that were early on several different runners into

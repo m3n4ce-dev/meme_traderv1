@@ -512,8 +512,19 @@ class _PublicOnlyResolver:
         await self._inner.close()
 
 
-async def fetch_metadata(uri: str) -> dict:
-    """Token metadata JSON (twitter/telegram/website). Best effort, 3 s budget.
+async def read_capped(resp, cap: int) -> bytes | None:
+    """The whole body, or None if it's longer than cap. (StreamReader.read(n) returns whatever has arrived so far,
+    which can be a fraction of the body.)"""
+    body = bytearray()
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        body += chunk
+        if len(body) > cap:
+            return None
+    return bytes(body)
+
+
+async def fetch_metadata(uri: str, fields: tuple = ("twitter", "telegram", "website")) -> dict:
+    """Token metadata JSON (twitter/telegram/website, or e.g. image). Best effort, 3 s budget.
 
     The URI is written by the token's creator, so it's treated as hostile: http(s) only, public
     addresses only (checked at connect time, redirects included), at most 3 redirects, a 64 KB body
@@ -541,7 +552,7 @@ async def fetch_metadata(uri: str) -> dict:
                             continue
                         if r.status != 200 or (r.content_length or 0) > METADATA_MAX_BYTES:
                             return {}
-                        body = await r.content.read(METADATA_MAX_BYTES + 1)
+                        body = await read_capped(r, METADATA_MAX_BYTES)
                         break
                 if body is None or len(body) > METADATA_MAX_BYTES:
                     return {}
@@ -550,7 +561,7 @@ async def fetch_metadata(uri: str) -> dict:
         return {}
     if not isinstance(d, dict):
         return {}
-    return {k: d[k][:200] for k in ("twitter", "telegram", "website") if isinstance(d.get(k), str)}
+    return {k: d[k][:300] for k in fields if isinstance(d.get(k), str)}
 
 
 # --------------------------------------------------------------------------- replay

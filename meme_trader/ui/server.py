@@ -8,9 +8,14 @@ this port to the internet without putting auth in front of it.
   GET /api/token/{mint}  token detail: gate checklist, model drivers, holders, tape
   GET /api/controls      live-adjustable settings (curated); /api/controls/advanced: every other one
   GET /api/chat          chat history and status (chat.py)
+  GET /api/desk          what the bots are thinking, the recorder and the research tests (the Desk tab)
+  GET /api/keys          which API keys are set (hints only, never values; keys.py)
+  GET /api/portfolio     watched wallets (portfolio.py); GET /api/xfeed: the X feed (xfeed.py)
+  GET /api/logo/{mint}   a token's logo as a small WebP (logos.py)
   WS  /ws                a hello with the UI version (an open page reloads itself after an update), then
                          1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
-                         risk lookup chat chat_stop chat_new chat_decide chat_opts
+                         risk lookup chat chat_stop chat_new chat_decide chat_opts key_set key_clear rec
+                         desk_wake pf_add pf_remove pf_refresh x_add x_remove x_auto
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
@@ -59,7 +64,25 @@ def _json(obj, status: int = 200) -> web.Response:
                         headers={"Cache-Control": "no-store"})
 
 
-def make_app(engine, agent_token: str | None = None, chat=None) -> web.Application:
+def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path | None = None) -> web.Application:
+    """data_dir: where the portfolio, X feed and logo cache live (tests pass a temp dir)."""
+    from . import keys as keymod, sidecars
+    from .logos import CACHE, Logos
+    from .portfolio import PATH as PF_PATH, Portfolio, PortfolioError
+    from .xfeed import PATH as XF_PATH, XFeed, XFeedError
+
+    logos = Logos(engine, (data_dir / "logos") if data_dir else CACHE)
+    pf = Portfolio((data_dir / "portfolio.json") if data_dir else PF_PATH, sol_usd=lambda: engine.sol_price.usd)
+    xf = XFeed((data_dir / "xfeed.json") if data_dir else XF_PATH,
+               held=lambda: [(p.symbol, m) for m, p in list(engine.positions.items()) if p.source != "callout"])
+    env_path = (data_dir / ".env") if data_dir else keymod.ENV
+    tasks: set = set()
+
+    def spawn(coro) -> None:
+        t = asyncio.create_task(coro)
+        tasks.add(t)
+        t.add_done_callback(tasks.discard)
+
     @web.middleware
     async def local_only(request, handler):
         if not _local(request.headers.get("Host", "")):
@@ -95,6 +118,32 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
 
     async def chat_state(_):
         return _json(chat.public() if chat else {"messages": [], "available": False, "disabled": True})
+
+    async def desk(_):
+        d = engine.desk_view()
+        d["recorder"] = sidecars.recorder_info()
+        d["research"] = sidecars.research_info()
+        d["anthropic_key"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        d["chat"] = {"available": bool(chat and chat.public().get("available"))} if chat else {"available": False}
+        return _json(d)
+
+    async def keys(_):
+        return _json(keymod.status(env_path))
+
+    async def portfolio(_):
+        if pf.stale():
+            spawn(pf.refresh())
+        return _json(pf.view())
+
+    async def xfeed(_):
+        return _json(xf.view())
+
+    async def logo(request):
+        img = await logos.get(request.match_info["mint"])
+        if not img:
+            return web.Response(status=404, headers={"Cache-Control": "max-age=60"})
+        return web.Response(body=img, content_type="image/webp",
+                            headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"})
 
     async def ws(request):
         # Browsers let any website open a websocket to 127.0.0.1, so a page you visit could send KILL/SELL.
@@ -201,6 +250,57 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
                                                                                   watch=bool(cmd.get("watch")))}
             except ValueError as e:
                 return {"ok": False, "text": str(e)}
+        if action == "key_set":
+            try:
+                k = keymod.set_key(str(cmd.get("name") or ""), str(cmd.get("value") or ""), env_path)
+            except keymod.KeyError_ as e:
+                return {"ok": False, "text": str(e)}
+            engine.say("info", f"{k['label']} set from the dashboard")
+            return {"ok": True, "keys": keymod.status(env_path),
+                    "text": f"{k['label']} saved to .env" + (" (restart the bot to use it)" if k["effect"] == "restart" else "")}
+        if action == "key_clear":
+            try:
+                k = keymod.clear_key(str(cmd.get("name") or ""), env_path)
+            except keymod.KeyError_ as e:
+                return {"ok": False, "text": str(e)}
+            if k["name"] == "ANTHROPIC_API_KEY" and engine.desk and engine.desk.enabled:
+                engine.set_desk(False)
+            return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} removed"}
+        if action == "rec":
+            try:
+                info = sidecars.set_recorder(cmd)
+            except (ValueError, TypeError) as e:
+                return {"ok": False, "text": str(e)}
+            return {"ok": True, "recorder": info, "text": "Wallet recorder: " + ("recording" if info["active"] else info["pause_reason"])
+                    + ("" if info["running"] else " (the meme-wallets service isn't running)")}
+        if action == "desk_wake":
+            on = bool(cmd.get("on"))
+            err = engine.set_desk(on)
+            return {"ok": not err, "text": err or ("AI desk is awake: it votes on every entry" if on else "AI desk is resting")}
+        if action in ("pf_add", "pf_remove", "pf_refresh"):
+            try:
+                if action == "pf_add":
+                    pf.add(str(cmd.get("address") or ""), str(cmd.get("label") or ""), bool(cmd.get("mine")))
+                    spawn(pf.refresh([str(cmd.get("address")).strip()]))
+                elif action == "pf_remove":
+                    pf.remove(str(cmd.get("address") or ""))
+                else:
+                    spawn(pf.refresh([w["address"] for w in pf.wallets]))
+            except PortfolioError as e:
+                return {"ok": False, "text": str(e)}
+            return {"ok": True, "portfolio": pf.view(), "text": {"pf_add": "Watching it", "pf_remove": "Removed",
+                                                                  "pf_refresh": "Refreshing"}[action]}
+        if action in ("x_add", "x_remove", "x_auto"):
+            try:
+                if action == "x_add":
+                    xf.add(str(cmd.get("kind") or ""), str(cmd.get("value") or ""))
+                elif action == "x_remove":
+                    xf.remove(str(cmd.get("source") or ""))
+                else:
+                    xf.set_auto(bool(cmd.get("on")))
+            except XFeedError as e:
+                return {"ok": False, "text": str(e)}
+            return {"ok": True, "xfeed": xf.view(), "text": "X feed updated"}
         if action.startswith("chat") and chat is None:
             return {"ok": False, "text": "Chat is off (sniper.chat.enabled, and the agent API must be on)"}
         if action == "chat":
@@ -222,7 +322,19 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
 
     app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics),
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
-                    web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced)])
+                    web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced),
+                    web.get("/api/desk", desk), web.get("/api/keys", keys), web.get("/api/portfolio", portfolio),
+                    web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo)])
+
+    async def _start_bg(_app):
+        spawn(xf.run())
+
+    async def _stop_bg(_app):
+        for t in list(tasks):
+            t.cancel()
+
+    app.on_startup.append(_start_bg)
+    app.on_cleanup.append(_stop_bg)
     if agent_token:
         from ..sniper.agent_api import AgentAPI, AgentError
 

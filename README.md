@@ -148,11 +148,13 @@ The limits live in the bot, not in the prompt:
 
 ## Screenshots
 
-| Live: risk dial, positions, market pulse | Chat: ask, approve actions, paste a contract address |
+| Desk: what each bot is thinking | Live: risk dial, positions, market pulse |
 |---|---|
-| ![Live view](docs/img/live.png) | ![Chat with Claude](docs/img/chat.png) |
-| **Token detail: every gate, live** | **Analytics: P&L by strategy and exit reason** |
-| ![Token detail with gate checklist](docs/img/token-detail.png) | ![Analytics view](docs/img/analytics.png) |
+| ![Desk view](docs/img/desk.png) | ![Live view](docs/img/live.png) |
+| **Chat: ask, approve actions, paste a contract address** | **Token detail: every gate, live** |
+| ![Chat with Claude](docs/img/chat.png) | ![Token detail with gate checklist](docs/img/token-detail.png) |
+| **Analytics: P&L by strategy and exit reason** | |
+| ![Analytics view](docs/img/analytics.png) | |
 
 Screenshots are from the built-in demo (`scripts/start.sh demo`, a simulated market), so the profits in them aren't results. Real results are under [Results so far](#results-so-far).
 
@@ -199,6 +201,7 @@ These have been tested against simulated failures, not yet with real money.
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
 | [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
 | [WALLETS.md](docs/WALLETS.md) | The wallet study: rules, data sources and their limits, timeline |
+| [OPEN_SOURCE_NOTES.md](docs/OPEN_SOURCE_NOTES.md) | What open-source trading bots on GitHub do, which ones are bait, and what we took |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 
