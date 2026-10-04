@@ -468,6 +468,39 @@ def _review(args, params) -> None:
     print(f"\nsaved {out}")
 
 
+def _calls(args) -> None:
+    """Re-check a ledger anyone sent you (or yours) and print its record."""
+    from .calls import CallLedger
+
+    path = Path(args.file) if args.file else DATA / "calls.jsonl"
+    if not path.exists():
+        sys.exit(f"no ledger at {path}")
+    L = CallLedger(path, path.with_name("calls_outcomes.json"))
+    v = L.verify()
+    if args.what == "verify":
+        print(("OK: " if v["ok"] else "TAMPERED: ") + v["text"])
+        if v["ok"]:
+            print(f"head {v['head']}: compare it with the hash that was published")
+        sys.exit(0 if v["ok"] else 1)
+    if args.what == "list":
+        for r in L.rows(args.caller, limit=50):
+            h1 = "–" if r["1h"] is None else f"{r['1h']:+.0f}%"
+            print(f"#{r['n']:<5} {time.strftime('%m-%d %H:%M', time.gmtime(r['ts']))}  {r['symbol'][:12]:12} "
+                  f"{r['caller']:5} ${r['mcap_usd']:>12,.0f}  peak {r['peak_x']:.2f}x  1h {h1}")
+        return
+    st = L.stats(args.caller)
+    print(f"{st['calls']} calls by {st['caller']} · ledger {v['text']}")
+    for label in ("5m", "1h", "6h", "24h"):
+        x = st.get(label)
+        if x:
+            print(f"  held {label:>3}: median {x['median_pct']:+.1f}%  mean {x['mean_pct']:+.1f}%  "
+                  f"won {x['win_rate']:.0%} of {x['n']}  (after ~{st['cost_pct']:g}% costs)")
+    if st.get("peak"):
+        pk = st["peak"]
+        print(f"  peak (sampled): {pk['hit_rate']:.0%} reached {st['hit_x']:g}x · median {pk['median_x']:.2f}x · "
+              f"best {pk['best_x']:.1f}x ({pk['settled']} of {pk['n']} fully settled)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="meme_trader.sniper")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -522,6 +555,10 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    cl = sub.add_parser("calls", help="the call ledger: verify the hash chain, show the record")
+    cl.add_argument("what", choices=["verify", "stats", "list"])
+    cl.add_argument("--caller", default="", help="only calls by this caller (you, bot)")
+    cl.add_argument("--file", help="a ledger file to check (default data/calls.jsonl)")
     from .research import add_parser as research_parser
 
     research_parser(sub)
@@ -529,6 +566,9 @@ def main() -> None:
         p.add_argument("--config")
         p.add_argument("--set", action="append", help="override a sniper param, e.g. exit.stop_loss_pct=25")
     args = ap.parse_args()
+    if args.cmd == "calls":                        # reads the ledger only: no config needed
+        _calls(args)
+        return
     if args.cmd == "research":                     # policies carry their own settings (not params.yaml)
         from .research import main as research
 
