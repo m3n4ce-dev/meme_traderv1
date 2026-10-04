@@ -217,6 +217,7 @@ class Engine:
         self._last_ledger_dex = 0.0
         self._ledger_busy = False
         self.orders: dict[str, dict] = {}                  # your limit orders and alerts, by id
+        self.away = False                                  # away mode: the bots manage your positions
         self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
@@ -997,11 +998,11 @@ class Engine:
         await self._buy(s, score, size, notes, source, leader)
 
     async def _buy(self, s: TokenState, score: float, sol: float, notes: list[str], source: str = "sniper",
-                   leader: str = "", then=None) -> None:
+                   leader: str = "", then=None, add: bool = False) -> None:
         """Authorize with the final size, reserve the cash, then send. Live, the order runs as its own task,
         so the feed keeps being read (other tokens' stops and dev sells) while it confirms; backtests run it
         inline so replays stay deterministic. `then`: coroutine function to run after a successful fill."""
-        if s.mint in self.positions or s.mint in self.pending:   # never stack a second position on one mint
+        if s.mint in self.pending or (s.mint in self.positions and not add):   # one position per mint; adds merge
             return
         z = self.p.sizing
         if source == "manual":
@@ -1021,7 +1022,7 @@ class Engine:
         self.book.reserved[s.mint] = sol + self._order_overhead(source)
         self.pending.add(s.mint)
         s.decided = "entered"
-        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot}
+        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add)}
         if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
             self._defer({"side": "buy", "mint": s.mint, "score": score, "sol": sol, "notes": list(notes),
                          "source": source, "leader": leader, "then": then, **meta})
@@ -1053,6 +1054,7 @@ class Engine:
         if fill.unknown:                                  # sent, but did it land? keep the cash and the mint held
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
+                                                    "add": bool((meta or {}).get("add")),
                                                     "notes": list(notes), "source": source, "leader": leader})
             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
                               "its cash stays reserved until the chain says", s.mint)
@@ -1153,6 +1155,23 @@ class Engine:
             self.book.day_pnl -= fill.fees_lost
             self.say("error", f"{s.symbol}: failed transaction(s) still cost {fill.fees_lost:.6f} SOL in fees", s.mint)
 
+    def _merge_add(self, s: TokenState, pos: SniperPosition, fill: SniperFill) -> None:
+        """More SOL into an open position: one position, a token-weighted average entry, the added cost in its
+        P&L. Its exits stay whatever they were (the bot's rules, or the stop/take profit you set)."""
+        held = pos.tokens + fill.tokens
+        pos.entry_price = (pos.entry_price * pos.tokens + fill.price * fill.tokens) / held if held else fill.price
+        pos.tokens, pos.initial_tokens = held, pos.initial_tokens + fill.tokens
+        pos.cost_sol += fill.sol
+        pos.initial_cost_sol += fill.sol
+        pos.rent_sol += fill.rent
+        pos.failed_fees_sol += fill.fees_lost
+        pos.adds = (pos.adds or []) + [(self.now, fill.sol, fill.tokens, fill.price)]
+        if pos.manual and pos.manual.get("tp_done"):
+            pos.manual["tp_done"] = False                     # a fresh take profit applies to the bigger bag
+        self.save_state()
+        self.say("buy", f"{s.symbol} +{fill.sol:.3f} SOL added: {pos.initial_cost_sol:.3f} SOL in now [{pos.source}]",
+                 s.mint, signature=fill.signature, timing=fill.timing)
+
     def _apply_buy(self, s: TokenState, fill: SniperFill, score, notes, source, leader, meta=None) -> None:
         self._book_fees_lost(fill, s)
         if not fill.ok:
@@ -1161,6 +1180,9 @@ class Engine:
             self.save_state()
             return
         self.book.sol -= fill.sol + fill.rent             # rent is cash locked in the token account until reclaimed
+        if (meta or {}).get("add") and s.mint in self.positions:
+            self._merge_add(s, self.positions[s.mint], fill)
+            return
         self.positions[s.mint] = SniperPosition(
             mint=s.mint, symbol=s.symbol, opened_at=self.now, entry_price=fill.price, tokens=fill.tokens,
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
@@ -1168,7 +1190,8 @@ class Engine:
             p=s.p, trough_price=fill.price, rent_sol=fill.rent,
             entry_quote=(meta or {}).get("quote", 0.0),
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
-            failed_fees_sol=fill.fees_lost)
+            failed_fees_sol=fill.fees_lost,
+            bot=self._bot_rules_for(s) if source == "manual" and self.away else "")
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
@@ -1189,27 +1212,28 @@ class Engine:
         pos = self.positions[s.mint]
         if not s.price_known:          # restored after a restart: wait for a real price before any exit logic,
             limit = {"late": self.p.late.max_hold_s,              # but each strategy's time limit still holds
-                     "callout": self.p.callouts.hold_s}.get(pos.source, self.p.exit.max_hold_s)
-            if self.now - pos.opened_at >= limit:
+                     "callout": self.p.callouts.hold_s}.get(pos.bot or pos.source, self.p.exit.max_hold_s)
+            if (pos.source != "manual" or pos.bot) and self.now - pos.opened_at >= limit:
                 await self._sell(s, pos, 1.0, f"max hold {limit:.0f}s (price unknown)")
             return
         px = s.curve.price
         pos.peak_price = max(pos.peak_price, px)
         pos.trough_price = min(pos.trough_price or px, px)
-        if pos.source == "manual":         # yours: only the exits you set, plus leaving the curve
+        rules = pos.bot or pos.source       # a position you handed over runs on the bots' rules
+        if rules == "manual":              # yours: only the exits you set, plus leaving the curve
             mc = self._manual_cfg()
             r = evaluate_manual_exit(pos, s, {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
                                               "tp_frac": mc.take_profit_frac, "trail": mc.trail_pct,
                                               "sell_on_graduation": mc.sell_on_graduation, **(pos.manual or {})})
             if r and r[1].startswith("manual take profit"):
                 pos.manual = {**(pos.manual or {}), "tp_done": True}      # once per position
-        elif pos.source == "callout":         # hold the $1 callout bag; never trade it against followers
+        elif rules == "callout":              # hold the $1 callout bag; never trade it against followers
             held = self.now - pos.opened_at
             r = (1.0, "dev sold") if s.dev_sold else \
                 ((1.0, "callout hold done") if held >= self.p.callouts.hold_s else None)
         elif (why := await self._cluster_watch(s)):
             r = (1.0, why)
-        elif pos.source == "late":
+        elif rules == "late":
             r = evaluate_late_exit(pos, s, self.now, self.p.late, self.p.exit)
         elif pos.leader and not self.p.copy.use_own_exits:
             r = None
@@ -1315,7 +1339,8 @@ class Engine:
                     self.say("info", f"buy {s.symbol} ({sig[:8]}…) never landed - cash released", mint)
                     self.save_state()
                     continue
-                self._apply_buy(s, fill, o["score"], o["notes"] + ["landed late"], o["source"], o["leader"])
+                self._apply_buy(s, fill, o["score"], o["notes"] + ["landed late"], o["source"], o["leader"],
+                                {"add": o.get("add", False)})
                 if fill.ok:
                     await self._watch(mint)
             else:
@@ -1531,7 +1556,7 @@ class Engine:
                           "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct,
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
-                 "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders,
+                 "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1576,6 +1601,7 @@ class Engine:
             restore_token(m)
             await self._watch(m)
         self.orders = {k: o for k, o in (d.get("orders") or {}).items() if o.get("status") == "open"}
+        self.away = bool(d.get("away"))
         for o in self.orders.values():                        # keep pricing coins with open orders
             if o["mint"] not in self.tokens:
                 restore_token(o["mint"]).decided = "watching: open order"
@@ -1895,8 +1921,17 @@ class Engine:
         mint = str(mint or "").strip()
         if not 32 <= len(mint) <= 44:
             return "that isn't a contract address"
-        if mint in self.positions or mint in self.pending:
-            return "already holding it (or an order is in flight): sell first, or use the sell buttons"
+        if mint in self.pending:
+            return "an order for that coin is already in flight: wait a moment"
+        if mint in self.positions:                       # you already hold it: this adds to the position
+            s = self.tokens.get(mint)
+            if s is None or not s.price_known or s.migrated:
+                return "no live price for it right now, so nothing to add at"
+            why = self._authorize(mint, sol, "manual")
+            if why:
+                return why
+            await self._buy(s, 50.0, sol, [f"manual add {sol:g} SOL"], source="manual", add=True)
+            return ""
         s = self.tokens.get(mint)
         if s is None:
             s = self.tokens[mint] = TokenState(mint, None, self.now)
@@ -2193,6 +2228,8 @@ class Engine:
         stretch.sort(key=lambda s: -s.curve.progress)
         grad = []
         for ts, mint, sym, mc in list(self.migrations)[:per_column]:
+            if mc < 20_000:                  # an "instant" migration of a coin that never filled its curve: not a graduate
+                continue
             s = self.tokens.get(mint)
             grad.append({"mint": mint, "symbol": sym, "graduated_s": round(self.now - ts), "mcap_usd": mc,
                          "age": round(s.age(self.now)) if s else None, "held": mint in self.positions,
@@ -2248,6 +2285,44 @@ class Engine:
             self.note_waiting.pop(item_id, None)
         self.say("desk", f"the desk replied to “{it.get('title', '')[:60]}”")
         return ""
+
+    # ------------------------------------------------------------------ hand your positions to the bots
+    def _bot_rules_for(self, s: TokenState | None) -> str:
+        """Graduation-play exits for a coin already past half its curve, the general sniper exits below that."""
+        return "late" if s is not None and s.curve.progress >= 0.5 else "sniper"
+
+    def hand_over(self, mint: str = "", on: bool = True, who: str = "dashboard") -> tuple[int, str]:
+        """Give your positions (one, or all with mint='') to the bots, or take them back. (count, message)."""
+        mints = [mint] if mint else [m for m, p in self.positions.items() if p.source == "manual"]
+        n = 0
+        for m in mints:
+            pos = self.positions.get(m)
+            if pos is None or pos.source != "manual":
+                continue
+            if on and not pos.bot:
+                pos.bot = self._bot_rules_for(self.tokens.get(m))
+                n += 1
+            elif not on and pos.bot:
+                pos.bot = ""
+                n += 1
+        if mint and not n:
+            pos = self.positions.get(mint)
+            return 0, ("no open position in that coin" if pos is None else
+                       "that's the bot's own position: it already manages it" if pos.source != "manual" else
+                       "already handed over" if on else "you already manage it")
+        if n:
+            self.save_state()
+            self.say("agent" if who == "agent" else "info",
+                     f"{n} of your position(s) {'handed to the bots: their exit rules apply now' if on else 'back to you: only your exits apply'}")
+        return n, ""
+
+    def set_away(self, on: bool, who: str = "dashboard") -> str:
+        """Away: the bots manage all your positions, and any your limit orders open; back: you take them back."""
+        self.away = bool(on)
+        n, _ = self.hand_over("", on, who)
+        self.save_state()
+        return (f"Away mode on: the bots manage your {n} position(s) and any your orders open" if on
+                else f"Welcome back: {n} position(s) are yours again")
 
     async def sell_now(self, mint: str) -> None:
         if mint in self.positions and mint in self.tokens:
@@ -2609,7 +2684,8 @@ class Engine:
                 "price": price, "gain_pct": pos.gain_pct(price), "peak_gain_pct": pos.gain_pct(pos.peak_price),
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
-                "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual,
+                "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual, "bot": pos.bot,
+                "adds": len(pos.adds or []), "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
@@ -2618,7 +2694,7 @@ class Engine:
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},
-            "orders": sorted(self.orders.values(), key=lambda o: -o["created"])[:40],
+            "orders": sorted(self.orders.values(), key=lambda o: -o["created"])[:40], "away": self.away,
             "ledger": {"calls": len(self.ledger.calls()), "head": self.ledger.head[:12]},
             "closed": self.book.closed[-50:][::-1], "rejects": self.rejects.most_common(14),
             "equity_hist": list(self.book.equity_hist)[-400:], "log": list(self.log)[-80:][::-1],
