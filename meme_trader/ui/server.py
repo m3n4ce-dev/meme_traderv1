@@ -258,6 +258,9 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             engine.say("info", f"{k['label']} set from the dashboard")
             return {"ok": True, "keys": keymod.status(env_path),
                     "text": f"{k['label']} saved to .env" + (" (restart the bot to use it)" if k["effect"] == "restart" else "")}
+        if action == "key_test":
+            ok, text = await keymod.test_anthropic()
+            return {"ok": ok, "text": ("✓ " if ok else "✕ ") + text}
         if action == "key_clear":
             try:
                 k = keymod.clear_key(str(cmd.get("name") or ""), env_path)

@@ -77,7 +77,9 @@ def gather(days: int, sniper_params: dict) -> dict:
 def ask_claude(data: dict, model: str) -> dict:
     import anthropic
 
-    client = anthropic.Anthropic()
+    from .desk import client_kwargs
+
+    client = anthropic.Anthropic(**client_kwargs())
     r = client.beta.messages.create(
         model=model, max_tokens=16000,
         betas=["server-side-fallback-2026-07-01"], fallbacks="default",
