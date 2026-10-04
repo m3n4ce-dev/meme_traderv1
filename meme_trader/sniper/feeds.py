@@ -282,6 +282,7 @@ class SolanaTradeFeed(Feed):
     EARLY_S = 15            # hold unwatched trades this long: a launch's first buys (often its insider
                             # bundle) can land before PumpPortal announces it; replay them on watch()
     RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
+    LAG_MEMORY_S = 1800     # how long an endpoint's measured lag counts when choosing where to go
 
     def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
                  max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0):
@@ -294,6 +295,10 @@ class SolanaTradeFeed(Feed):
         # broken even if the connection is up (seen 2026-10-03: a 91-minute silence on an open socket)
         self.stall_s = stall_s
         self.quality = FeedQuality(max_gap_pct, max_lag_s=max_lag_s)
+        # endpoint index -> (median lag s, when measured). Seen 2026-10-04: mainnet-beta's lag spiked past 5 s
+        # for a moment, the watchdog moved to PublicNode (10 s behind), then straight back: 40 switches in
+        # 35 min, each pausing entries while the new connection was measured. Never move to a known-worse one.
+        self.endpoint_lag: dict[int, tuple[float, float]] = {}
         self.last_trade = 0.0
         self.launches = PumpPortalFeed(fallback_urls, use_key=False)
         self.watched: set[str] = set()
@@ -429,17 +434,45 @@ class SolanaTradeFeed(Feed):
                              fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps)))
         return out
 
+    def _known_lag(self, i: int, now: float) -> float | None:
+        v = self.endpoint_lag.get(i)
+        return v[0] if v and now - v[1] < self.LAG_MEMORY_S else None
+
+    def _faster_endpoint(self, now: float) -> int | None:
+        """The next endpoint not measured slower than this one lately, or None (stay: the rest are worse)."""
+        cur = self.quality.lag_s or 0.0
+        for k in range(1, len(self.ws_urls)):
+            i = (self.ws_idx + k) % len(self.ws_urls)
+            lag = self._known_lag(i, now)
+            if lag is None or lag < cur:
+                return i
+        return None
+
     def _check_stream(self, now: float, connected: float) -> str:
         """Why the current endpoint should be dropped, or ''."""
         if now - self.last_trade > self.stall_s:
             return f"no pump.fun trades for {now - self.last_trade:.0f}s"
         if self.quality.bad:
             return f"{self.quality.gap_pct:.1f}% of trades missing"
-        if self.quality.slow:
+        if len(self.quality.lags) >= self.quality.min_lags:
+            self.endpoint_lag[self.ws_idx] = (self.quality.lag_s, now)
+        if self.quality.slow and self._faster_endpoint(now) is not None:
             return f"{self.quality.lag_s:.0f}s behind the chain"
+        # (slow but every other endpoint was slower: stay put; entries stay paused until it catches up)
         if self.ws_idx != 0 and now - connected > self.RETRY_PRIMARY_S:
-            return "retry"
+            first, cur = self._known_lag(0, now), self.quality.lag_s
+            if first is None or (cur is not None and first < cur):
+                return "retry"
         return ""
+
+    def _next_endpoint(self, why: str, now: float) -> int:
+        if why == "retry":
+            return 0
+        if "behind the chain" in why:
+            i = self._faster_endpoint(now)
+            if i is not None:
+                return i
+        return (self.ws_idx + 1) % len(self.ws_urls)
 
     async def _trades(self, q: asyncio.Queue) -> None:
         import aiohttp
@@ -482,7 +515,7 @@ class SolanaTradeFeed(Feed):
                 why = f"HTTP {err.status} {err.message}" if hasattr(err, "status") else f"{type(err).__name__}: {err}"
             self.trades_up = False
             old = self.host
-            self.ws_idx = 0 if why == "retry" else (self.ws_idx + 1) % len(self.ws_urls)
+            self.ws_idx = self._next_endpoint(why, time.time())
             print(f"[feed] trade logs {old}: {why[:200] if why != 'retry' else 'trying the first endpoint again'}"
                   f"; switching to {self.host} in {backoff}s")
             await asyncio.sleep(backoff)

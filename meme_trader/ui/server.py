@@ -77,6 +77,15 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
     xf = XFeed((data_dir / "xfeed.json") if data_dir else XF_PATH,
                held=lambda: [(p.symbol, m) for m, p in list(engine.positions.items()) if p.source != "callout"])
     env_path = (data_dir / ".env") if data_dir else keymod.ENV
+    from ..config import ROOT
+
+    ui_path = (data_dir or ROOT / "data") / "ui.json"        # page layouts and the bots' looks (any browser)
+
+    def ui_read() -> dict:
+        try:
+            return json.loads(ui_path.read_text()) if ui_path.exists() else {}
+        except ValueError:
+            return {}
     tasks: set = set()
 
     def spawn(coro) -> None:
@@ -138,6 +147,9 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
     async def xfeed(_):
         return _json(xf.view())
+
+    async def ui_state(_):
+        return _json(ui_read())
 
     async def memory(request):
         q, mint = request.query.get("q", ""), request.query.get("mint", "")
@@ -263,7 +275,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             engine.say("info", f"{k['label']} set from the dashboard")
             note = " (restart the bot to use it)" if k["effect"] == "restart" else ""
             if k["name"].startswith("ANTHROPIC_") and engine.desk and engine.desk.enabled:
-                err = engine.set_desk(True)              # rebuild the desk's client with the new key now
+                err = engine.set_desk(True, who="key")   # rebuild the desk's client with the new key now
                 note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
         if action == "key_test":
@@ -275,7 +287,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             except keymod.KeyError_ as e:
                 return {"ok": False, "text": str(e)}
             if k["name"] == "ANTHROPIC_API_KEY" and engine.desk and engine.desk.enabled:
-                engine.set_desk(False)
+                engine.set_desk(False, who="key")
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} removed"}
         if action == "rec":
             try:
@@ -287,7 +299,11 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "desk_wake":
             on = bool(cmd.get("on"))
             err = engine.set_desk(on)
-            return {"ok": not err, "text": err or ("AI desk is awake: it votes on every entry" if on else "AI desk is resting")}
+            return {"ok": not err, "text": err or ("AI desk is awake: it votes on every entry (stays on after a restart)" if on
+                                                   else "AI desk is resting (stays off after a restart)")}
+        if action == "paper_reset":
+            err = engine.reset_paper()
+            return {"ok": not err, "text": err or f"Paper account started over at {engine.book.start_sol:g} SOL"}
         if action in ("pf_add", "pf_remove", "pf_refresh"):
             try:
                 if action == "pf_add":
@@ -301,6 +317,17 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": str(e)}
             return {"ok": True, "portfolio": pf.view(), "text": {"pf_add": "Watching it", "pf_remove": "Removed",
                                                                   "pf_refresh": "Refreshing"}[action]}
+        if action == "ui_set":
+            key, value = str(cmd.get("key") or ""), cmd.get("value")
+            if key not in ("layout", "bots") or not isinstance(value, dict) or len(json.dumps(value)) > 64_000:
+                return {"ok": False, "text": "can't save that"}
+            data = ui_read()
+            data[key] = value
+            ui_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = ui_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(ui_path)
+            return None
         if action == "mem_add":
             from ..sniper.lookup import lookup
             from ..sniper.memory import MemoryError_
@@ -374,7 +401,8 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
                     web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced),
                     web.get("/api/desk", desk), web.get("/api/keys", keys), web.get("/api/portfolio", portfolio),
-                    web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory)])
+                    web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory),
+                    web.get("/api/ui", ui_state)])
 
     async def _start_bg(_app):
         spawn(xf.run())

@@ -278,6 +278,22 @@ class Engine:
         self.say("info", f"paper deposit +{sol:g} SOL: cash {b.sol:.3f} SOL, starting balance now {b.start_sol:g} SOL")
         return {"cash_sol": round(b.sol, 6), "start_sol": round(b.start_sol, 6), "equity_sol": round(self.equity(), 6)}
 
+    def reset_paper(self) -> str:
+        """Start the paper account over at capital.starting_sol: cash, today's P&L, the peak and the closed
+        trades on the dashboard. The trade files keep every past trade. '' or why not."""
+        if self.mode.startswith("live"):
+            return "paper only"
+        if self.positions or self.pending or self.deferred:
+            return "close the open positions first"
+        start = float(self.p.capital.starting_sol)
+        self.book = Book(start)
+        self.book.day = time.strftime("%Y-%m-%d", time.gmtime(self.now))
+        self.defense_until, self.defense_reason = 0.0, ""
+        self._snap_cache = self._analytics = self._summary_cache = None
+        self.save_state()
+        self.say("info", f"paper account started over at {start:g} SOL")
+        return ""
+
     def _global_block(self, manual: bool = False) -> str:
         """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout). Your own
         manual trades skip only "paused", which is about the bot's automatic entries."""
@@ -929,7 +945,7 @@ class Engine:
             self.desk_failures += 1
             self.desk_error = friendly_error(v.votes[0].error)
             if self.desk_failures >= 3:                  # a broken desk would silently pass every trade
-                self.set_desk(False)
+                self.set_desk(False, who="bot")
                 self.say("error", f"AI desk put to rest after 3 failed reviews: {self.desk_error}. "
                                   "Entries continue on the rules alone.")
         else:
@@ -939,11 +955,18 @@ class Engine:
             if kind == "sniper":
                 s.decided = "rejected: desk passed"
                 self._audit_start(s, "desk passed")
+            elif v.votes and not all(x.error for x in v.votes):
+                # follow what the passed coin does next, split by how many personas said buy, so the gate
+                # audit shows whether an outvoted majority (3 of 4) does better than a unanimous pass
+                nb = sum(1 for x in v.votes if x.vote == "buy" and not x.error)
+                label = {"late": "graduation"}.get(kind, kind)
+                self._audit_start(s, f"AI desk passed ({label}): {nb} of {len(v.votes)} said buy")
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]
         size = self._size(s, kind, score, buy_sol, v.size_mult, notes)
         why = self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
+            ("the curve is too thin to size a buy" if size <= 0 else "") or \
             (f"price moved {moved:+.0f}% during review" if moved > self.p.desk.max_price_move_pct else "") or \
             ("dev sold" if s.dev_sold else "")
         if why:
@@ -1452,7 +1475,7 @@ class Engine:
             s.peak_price = max(s.peak_price, px)
             s.last_trade_ts = self.now
 
-    # ------------------------------------------------------------------ persistence (live)
+    # ------------------------------------------------------------------ persistence (live, and the real-feed paper bot)
     def save_state(self) -> None:
         if not self.persist:
             return
@@ -1470,7 +1493,8 @@ class Engine:
         state = {"saved_at": time.time(), "mode": self.mode,
                  "book": {"sol": b.sol, "start_sol": b.start_sol, "day": b.day, "day_pnl": b.day_pnl,
                           "halted": b.halted, "closed": b.closed[-500:], "reserved": b.reserved,
-                          "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct},
+                          "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct,
+                          "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
@@ -1493,6 +1517,8 @@ class Engine:
         self.book.reserved = {m: v for m, v in (b.get("reserved") or {}).items() if m in open_buys}
         self.book.peak_equity = b.get("peak_equity", self.book.start_sol)
         self.book.max_dd_pct = b.get("max_dd_pct", 0.0)
+        self.book.deposits = [tuple(x) for x in b.get("deposits") or []]
+        self.book.equity_hist.extend(tuple(x) for x in b.get("equity_hist") or [])
         self.defense_until = (d.get("defense") or {}).get("until", 0.0)
         self.defense_reason = (d.get("defense") or {}).get("reason", "")
         self.callouts.called.update(d.get("called", []))
@@ -1702,8 +1728,18 @@ class Engine:
                          "degraded_reason": getattr(self.feed, "degraded_reason", ""),
                          "non_sol_skipped": getattr(self.feed, "non_sol_skipped", 0)}}
 
-    def set_desk(self, on: bool) -> str:
-        """Wake or rest the AI desk at runtime. '' or the reason it can't."""
+    def set_desk(self, on: bool, who: str = "dashboard") -> str:
+        """Wake or rest the AI desk. '' or the reason it can't. The owner's choice (who="dashboard") is saved
+        to params.yaml so a restart keeps it; the bot resting a failing desk lasts until the next restart."""
+        err = self._set_desk(on)
+        if not err and who == "dashboard" and self.persist:      # the real bot, not a demo or a test
+            try:
+                self.save_setting("desk.enabled", bool(on))
+            except OSError as e:
+                return f"applied, but not saved: {e}"
+        return err
+
+    def _set_desk(self, on: bool) -> str:
         import os
 
         if on:
