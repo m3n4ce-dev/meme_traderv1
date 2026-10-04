@@ -198,6 +198,8 @@ sniper:
     max_price_move_pct: 20       # skip if price ran this much while the desk deliberated
     price_in_per_mtok: 4.0       # for the cost meter on the dashboard (USD)
     price_out_per_mtok: 20.0
+    note_replies: true           # every persona reads each note you save (Teach the desk) and replies; 4 calls a note
+    note_effort: low             # thinking effort for those replies
 
   callouts:                      # pump.fun callouts: hold the $1 minimum, post a factual card, track results
     enabled: true

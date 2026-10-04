@@ -16,6 +16,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 MAX_ITEMS = 500
+MAX_THREAD = 60
 TEXT_CAP = 6000
 PAGE_CAP = 1_500_000
 URL = re.compile(r"^https?://\S+$")
@@ -161,6 +162,18 @@ class Memory:
 
     def for_mint(self, mint: str, limit: int = 3) -> list[dict]:
         return self.items(mint=mint, limit=limit)
+
+    def add_reply(self, item_id: str, who: str, text: str, stance: str = "", error: str = "") -> bool:
+        """One message in a note's discussion: yours ("you") or a desk persona's."""
+        it = next((i for i in self.items_ if i.get("id") == item_id), None)
+        if it is None:
+            return False
+        th = it.setdefault("thread", [])
+        th.append({"who": who[:20], "text": " ".join((text or "").split())[:1200], "stance": stance[:10],
+                   "error": error[:200], "ts": time.time()})
+        del th[:-MAX_THREAD]
+        self._save()
+        return True
 
     def remove(self, item_id: str) -> bool:
         n = len(self.items_)
