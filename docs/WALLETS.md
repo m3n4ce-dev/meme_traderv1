@@ -60,8 +60,10 @@ The recorder (`python -m meme_trader.wallets record`, user service `meme-wallets
    it: an overflowing call is a gap, and `status` shows the estimated coverage.
 4. Fetch daily candles for pools nearing 14 days old (for the "survived its first dump" gate).
 
-`mode: stream` records every swap from the full stream instead: complete data at ~80 GB/day of download.
-Switch to it only if your internet plan has no data cap.
+`mode: stream` records every swap from the full stream instead: complete data at ~85 GB/day of download and
+~10% of a CPU core. Switch to it only if your internet plan has no data cap (set `wallets.mode: stream` in
+`config/params.yaml`). The study's machine runs it since 2026-10-04; the first ~30 minutes were poll mode.
+`status` shows the download per day.
 
 ## Commands
 
