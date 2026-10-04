@@ -3921,6 +3921,7 @@ async function loadCalls() {
   if (S.tab === "calls") CL.timer = setTimeout(loadCalls, 10000);
 }
 const xx = v => v == null ? "–" : `${v.toFixed(v >= 10 ? 0 : 2)}x`;
+const agoBot = ts => ago(ts - (((snap && snap.now) || Date.now() / 1000) - Date.now() / 1000));   // the bot's clock (a simulated market runs ahead)
 const hz = v => v == null ? `<span class="note">–</span>` : `<span class="${cls(v)}">${pct(v, 0)}</span>`;
 function renderCalls() {
   const d = CL.data; if (!d) return;
@@ -3937,7 +3938,7 @@ function renderCalls() {
     + k(`Hit ${st.hit_x}x`, pk ? Math.round(pk.hit_rate * 100) + "%" : "–", pk ? `peak within 24 h · ${pk.settled} of ${pk.n} settled` : "")
     + k("Median peak", pk ? xx(pk.median_x) : "–", pk ? `best ${xx(pk.best_x)} · sampled, nobody sells the top` : ""));
   setHTML($("cl-callers"), ["", "you", "bot"].map(c => `<button data-clcaller="${c}" aria-pressed="${CL.caller === c}">${c ? c[0].toUpperCase() + c.slice(1) : "Everyone"}</button>`).join(""));
-  setHTML($("cl-rows"), d.rows.map(r => `<tr data-ctx="${esc(r.mint)}"><td class="num">#${r.n}</td><td class="num">${ago(r.ts)} ago</td>
+  setHTML($("cl-rows"), d.rows.map(r => `<tr data-ctx="${esc(r.mint)}"><td class="num">#${r.n}</td><td class="num">${agoBot(r.ts)} ago</td>
       <td><span data-open="${esc(r.mint)}" class="clk">${tok(r.mint, r.symbol)}</span>${r.thesis ? `<div class="note cl-th">${esc(r.thesis.slice(0, 90))}</div>` : ""}</td>
       <td><span class="tag ${r.caller === "you" ? "late" : ""}">${esc(r.caller)}</span>${r.mode && r.caller === "bot" ? `<div class="note">${esc(r.source)}</div>` : ""}</td>
       <td class="r num">$${fmtUsd(r.mcap_usd)}</td><td class="r num ${cls(r.now_x - 1)}">${xx(r.now_x)}</td><td class="r num"><b class="${r.peak_x >= 2 ? "up" : ""}">${xx(r.peak_x)}</b></td>
