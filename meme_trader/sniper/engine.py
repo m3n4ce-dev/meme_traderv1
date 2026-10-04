@@ -23,6 +23,7 @@ from pathlib import Path
 from ..config import EXAMPLE, ROOT, ConfigError, example_help, validate_sniper
 from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
+from .calls import CallLedger, LedgerError
 from .copytrade import LeaderBook
 from .curve import Curve
 from .events import Event, Funding, Health, Launch, Metadata, Migration, Social, Tick, Trade, dumps
@@ -210,6 +211,15 @@ class Engine:
         self.persist = mode.startswith("live") if persist is None else persist
         self.state_path = DATA / f"sniper_state_{mode.split('-')[0]}.json"
         self._last_state_save = 0.0
+        # every call, hash-chained (data/calls.jsonl): yours from the 📣 button, plus the bot's own entries
+        self.ledger = CallLedger(DATA / "calls.jsonl" if self.persist else None)
+        self._last_ledger_tick = 0.0
+        self._last_ledger_dex = 0.0
+        self._ledger_busy = False
+        self.orders: dict[str, dict] = {}                  # your limit orders and alerts, by id
+        self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
+        self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
+        self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
         self._load_funders()
         self._last_price_refresh = -1e12
         # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
@@ -438,7 +448,15 @@ class Engine:
         self.watch_until[mint] = self.now + (keep if self.record_file else 1e12)
         await self.feed.watch([mint])
 
+    def _pinned(self) -> set[str]:
+        """Coins to keep priced: open orders and alerts, and curve-stage calls still being scored."""
+        out = {o["mint"] for o in self.orders.values() if o["status"] == "open"}
+        out.update(c["mint"] for c in self.ledger.open_calls(self.now) if c.get("stage") == "curve")
+        return out
+
     async def _unwatch(self, mint: str) -> None:
+        if mint in self._pinned():
+            return
         # while recording, keep every launch's trades for the full window so backtests can
         # re-evaluate tokens that these params rejected
         if self.record_file and self.watch_until.get(mint, 0) > self.now:
@@ -525,6 +543,8 @@ class Engine:
         elif isinstance(e, Migration):
             s = self.tokens.get(e.mint)
             if s:
+                if not s.migrated:
+                    self.migrations.appendleft((self.now, s.mint, s.symbol, s.market_cap_sol * self.sol_price.usd))
                 s.migrated = True
                 await self._evaluate(s)
         elif isinstance(e, Social):
@@ -1151,6 +1171,13 @@ class Engine:
             failed_fees_sol=fill.fees_lost)
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
+        if source not in ("callout", "manual") and self.feed.realtime:
+            try:                                                     # the bot's call, on the record
+                self.ledger.call(s.mint, s.symbol, "bot", s.market_cap_sol * self.sol_price.usd, fill.price,
+                                 self.sol_price.usd, thesis="; ".join(notes)[:280], source=source,
+                                 mode=self.mode, ts=self.now)
+            except LedgerError:
+                pass
         self.stats["entries"] += 1
         self.save_state()
         self.stats["entries_" + source.split(":")[0]] += 1
@@ -1313,6 +1340,9 @@ class Engine:
     def _close(self, pos: SniperPosition, s: TokenState) -> None:
         if self.positions.pop(pos.mint, None) is None:
             return
+        for o in self.orders.values():
+            if o["mint"] == pos.mint and o["side"] == "sell" and o["status"] == "open":
+                o.update(status="cancelled: position closed", done_at=self.now)
         s.late_tried = True                        # no graduation-play re-buy of a token we just traded
         if pos.cost_sol > 0:                       # unsold remainder (dust, gone from wallet) is written off -
             self.book.day_pnl -= pos.cost_sol      # once, and today, so the daily loss limit sees all of it
@@ -1386,7 +1416,7 @@ class Engine:
         cleanup = self.now - self._last_cleanup >= 10       # deletions only need a 10 s cadence
         if cleanup:
             self._last_cleanup = self.now
-            recent_calls = {c.mint for c in self.callouts.calls if self.now - c.ts < 3660}
+            recent_calls = {c.mint for c in self.callouts.calls if self.now - c.ts < 3660} | self._pinned()
             keep_s = max(self.p.entry.max_age_s, self.p.callouts.max_age_s if self.p.callouts.enabled else 0) + 60
             if self.p.late.enabled:
                 keep_s = max(keep_s, self.p.late.max_age_s + 60)
@@ -1410,6 +1440,10 @@ class Engine:
         await self._maybe_callout()
         await self._maybe_late()
         await self._manual_queue_tick()
+        await self._orders_tick()
+        if self.now - self._last_ledger_tick >= 15:
+            self._last_ledger_tick = self.now
+            self._ledger_tick()
         if self.feed.realtime and self.now - self._last_think >= 2:
             self._last_think = self.now
             self._late_think()
@@ -1486,7 +1520,8 @@ class Engine:
         # enough safety context per held token that exits work the same after a restart: who the creator
         # is (dev-sell exits, funding links) and what they've already sold
         tokens = {}
-        for m in self.positions.keys() | {o["mint"] for o in self.unresolved.values()}:
+        for m in self.positions.keys() | {o["mint"] for o in self.unresolved.values()} | \
+                {o["mint"] for o in self.orders.values() if o["status"] == "open"}:
             s = self.tokens.get(m)
             if s is not None:
                 tokens[m] = {"launch": asdict(s.launch) if s.launch else None, "dev_sold": s.dev_sold}
@@ -1496,7 +1531,7 @@ class Engine:
                           "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct,
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
-                 "tokens": tokens, "unresolved": self.unresolved,
+                 "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1540,6 +1575,11 @@ class Engine:
             self.positions[m] = SniperPosition(**pd)
             restore_token(m)
             await self._watch(m)
+        self.orders = {k: o for k, o in (d.get("orders") or {}).items() if o.get("status") == "open"}
+        for o in self.orders.values():                        # keep pricing coins with open orders
+            if o["mint"] not in self.tokens:
+                restore_token(o["mint"]).decided = "watching: open order"
+                await self._watch(o["mint"])
         for o in self.unresolved.values():                    # held until the chain says what happened
             self.pending.add(o["mint"])
             if o["mint"] not in self.tokens:
@@ -1944,6 +1984,271 @@ class Engine:
         pos.manual = m
         return ""
 
+    # ------------------------------------------------------------------ limit orders and alerts (the owner)
+    MAX_ORDERS = 30
+
+    @staticmethod
+    def order_label(o: dict) -> str:
+        cond = f"MC {'≤' if o['op'] == 'le' else '≥'} ${o['mcap_usd']:,.0f}"
+        what = {"buy": f"buy {o.get('sol', 0):g} SOL", "sell": f"sell {o.get('frac', 1):.0%}",
+                "alert": "alert"}[o["side"]]
+        return f"{what} of {o['symbol']} when {cond}"
+
+    async def place_order(self, mint: str, side: str, op: str, mcap_usd, sol=None, frac=None,
+                          ttl_h=24.0) -> tuple[str, dict | None]:
+        """A limit buy, a limit sell or an alert at a market cap (USD). ('', order) or (why not, None)."""
+        import secrets
+
+        mint = str(mint or "").strip()
+        if not 32 <= len(mint) <= 44:
+            return "that isn't a contract address", None
+        if side not in ("buy", "sell", "alert") or op not in ("le", "ge"):
+            return "pick buy, sell or alert, and ≤ or ≥", None
+        try:
+            target, ttl = float(mcap_usd), min(max(float(ttl_h or 24), 0.1), 168.0)
+        except (TypeError, ValueError):
+            return "the market cap must be a number", None
+        if not 100 <= target <= 1e10:
+            return "the market cap must be between $100 and $10B", None
+        if sum(1 for o in self.orders.values() if o["status"] == "open") >= self.MAX_ORDERS:
+            return f"at most {self.MAX_ORDERS} open orders: cancel one first", None
+        o = {"side": side, "op": op, "mcap_usd": target}
+        if side == "buy":
+            mc = self._manual_cfg()
+            try:
+                o["sol"] = round(float(sol), 6)
+            except (TypeError, ValueError):
+                return "the amount must be a number", None
+            if not 0 < o["sol"] <= mc.max_sol:
+                return f"the amount must be more than 0 and at most {mc.max_sol:g} SOL (manual.max_sol)", None
+        elif side == "sell":
+            if mint not in self.positions:
+                return "no open position in that coin to sell", None
+            try:
+                o["frac"] = float(frac if frac not in (None, "") else 1.0)
+            except (TypeError, ValueError):
+                return "the fraction must be a number", None
+            if not 0 < o["frac"] <= 1:
+                return "sell between 1% and 100%", None
+        s = self.tokens.get(mint)
+        if s is None:
+            s = self.tokens[mint] = TokenState(mint, None, self.now)
+            s.decided = "watching: open order"
+            await self._watch(mint)
+        if s.migrated:
+            return "it has graduated off the bonding curve: orders follow curve coins only", None
+        now_mc = s.market_cap_sol * self.sol_price.usd if s.price_known else None
+        o.update(id=secrets.token_hex(4), mint=mint, symbol=s.symbol or mint[:6], created=self.now,
+                 expires=self.now + ttl * 3600, status="open", mcap_at_place=now_mc)
+        self.orders[o["id"]] = o
+        self.say("info", f"order placed: {self.order_label(o)}"
+                 + (f" (now ${now_mc:,.0f})" if now_mc else " (no price yet)"), mint)
+        self.save_state()
+        return "", o
+
+    def cancel_order(self, oid: str) -> str:
+        o = self.orders.get(str(oid or ""))
+        if o is None or o["status"] != "open":
+            return "no open order with that id"
+        o.update(status="cancelled", done_at=self.now)
+        self.say("info", f"order cancelled: {self.order_label(o)}", o["mint"])
+        self.save_state()
+        return ""
+
+    async def _orders_tick(self) -> None:
+        if not self.orders:
+            return
+        usd = self.sol_price.usd
+        for o in list(self.orders.values()):
+            if o["status"] != "open":
+                if self.now - o.get("done_at", o["created"]) > 3600:
+                    del self.orders[o["id"]]
+                continue
+            if self.now > o["expires"]:
+                o.update(status="expired", done_at=self.now)
+                continue
+            s = self.tokens.get(o["mint"])
+            if s is None or not s.price_known or o["mint"] in self.pending:
+                continue
+            if s.symbol and o["symbol"] == o["mint"][:6]:
+                o["symbol"] = s.symbol
+            if s.migrated:
+                o.update(status="cancelled: graduated", done_at=self.now)
+                continue
+            mc = s.market_cap_sol * usd
+            if not (mc <= o["mcap_usd"] if o["op"] == "le" else mc >= o["mcap_usd"]):
+                continue
+            o["fired_mcap"] = mc
+            if o["side"] == "alert":
+                why = ""
+                self.say("alert", f"🔔 {o['symbol']} market cap ${mc:,.0f} "
+                                  f"({'≤' if o['op'] == 'le' else '≥'} ${o['mcap_usd']:,.0f})", o["mint"])
+            elif o["side"] == "buy":
+                why = await self.manual_buy(o["mint"], o["sol"])
+            else:
+                why = await self.manual_sell(o["mint"], o["frac"]) if o["mint"] in self.positions \
+                    else "no open position any more"
+            o.update(status="done" if not why else f"failed: {why}", done_at=self.now)
+            if o["side"] != "alert":
+                self.say("info" if not why else "error",
+                         f"limit order fired at MC ${mc:,.0f}: {self.order_label(o)}" + (f": {why}" if why else ""),
+                         o["mint"])
+            self.save_state()
+
+    # ------------------------------------------------------------------ the call ledger
+    async def make_call(self, mint: str, thesis: str = "", caller: str = "you") -> dict:
+        """Put a call on the record at the current market cap: the live curve price when the bot tracks the
+        coin, else a lookup (DexScreener for graduated coins)."""
+        from .tracker import TokenState
+
+        mint = str(mint or "").strip()
+        s = self.tokens.get(mint)
+        stage, symbol, mcap, price = "curve", "", None, 0.0
+        if s is not None and s.price_known and not s.migrated:
+            symbol, mcap, price = s.symbol, s.market_cap_sol * self.sol_price.usd, s.curve.price
+        else:
+            from .lookup import lookup
+
+            info = await lookup(mint, self)
+            symbol, mcap = info.get("symbol") or "", info.get("mcap_usd")
+            price = info.get("price_sol") or 0.0
+            stage = "curve" if (info.get("curve") and not info["curve"].get("complete")) else "graduated"
+            if stage == "curve" and mint not in self.tokens:
+                self.tokens[mint] = TokenState(mint, None, self.now)
+                self.tokens[mint].decided = "watching: called"
+                await self._watch(mint)
+        rec = self.ledger.call(mint, symbol, caller, mcap or 0, price, self.sol_price.usd, thesis=thesis,
+                               source="manual", mode=self.mode, stage=stage)
+        self.say("info", f"📣 call on the record: {rec['symbol']} at ${rec['mcap_usd']:,.0f} market cap "
+                         f"(#{rec['n']}, {rec['hash'][:10]}…)", mint)
+        return rec
+
+    def _ledger_tick(self) -> None:
+        """Score open calls: curve coins from the live feed; the rest (graduated, untracked) from DexScreener."""
+        usd = self.sol_price.usd
+        rest = []
+        for c in self.ledger.open_calls(self.now):
+            s = self.tokens.get(c["mint"])
+            if s is not None and s.price_known and not s.migrated:
+                self.ledger.observe(c["id"], self.now, s.market_cap_sol * usd)
+            else:
+                rest.append(c)
+        if rest and self.feed.realtime and not self._ledger_busy and self.now - self._last_ledger_dex >= 60:
+            self._last_ledger_dex = self.now
+            self._ledger_busy = True
+            asyncio.create_task(self._ledger_dex(rest))
+        self.ledger.save()
+
+    async def _ledger_dex(self, calls: list[dict]) -> None:
+        import httpx
+
+        try:
+            mints = sorted({c["mint"] for c in calls})
+            caps: dict[str, float] = {}
+            async with httpx.AsyncClient(timeout=10, headers={"User-Agent": "meme_trader/1.0"}) as http:
+                for i in range(0, len(mints), 30):              # DexScreener: up to 30 tokens per request
+                    r = await http.get("https://api.dexscreener.com/tokens/v1/solana/" + ",".join(mints[i:i + 30]))
+                    if r.status_code != 200:
+                        continue
+                    best: dict[str, tuple[float, float]] = {}
+                    for p in r.json() or []:
+                        m = (p.get("baseToken") or {}).get("address")
+                        liq = float((p.get("liquidity") or {}).get("usd") or 0)
+                        mc = p.get("marketCap") or p.get("fdv")
+                        if m and mc and liq >= best.get(m, (-1, 0))[0]:
+                            best[m] = (liq, float(mc))
+                    caps.update({m: v[1] for m, v in best.items()})
+            for c in calls:
+                if c["mint"] in caps:
+                    self.ledger.observe(c["id"], self.now, caps[c["mint"]], graduated=True)
+            self.ledger.save()
+        except Exception as e:                                   # scoring is best effort; trading never waits
+            self.say("error", f"call scoring: DexScreener lookup failed ({type(e).__name__})")
+        finally:
+            self._ledger_busy = False
+
+    # ------------------------------------------------------------------ Pulse: new, final stretch, graduated
+    def _pulse_token(self, s: TokenState, usd: float, spark: bool) -> dict:
+        L = s.launch
+        return {"mint": s.mint, "symbol": s.symbol, "name": (L.name if L else "")[:40], "age": round(s.age(self.now)),
+                "mcap_usd": s.market_cap_sol * usd, "progress": s.curve.progress, "buyers": len(s.buyers),
+                "buys": s.buys, "sells": s.sells, "flow30": round(s.net_flow_sol(self.now, 30), 2),
+                "vol_sol": round(s.volume_sol, 2), "top10": round(s.top_holders_pct(10), 1),
+                "dev_pct": round(s.dev_initial_pct(), 1), "dev_sold": s.dev_sold > 0,
+                "bundle_pct": round(s.bundle_pct(), 1), "sniper_pct": round(s.sniper_pct(), 1),
+                "lk": [int(bool(L and L.twitter)), int(bool(L and L.telegram)), int(bool(L and L.website))],
+                "calls": len(s.socials), "score": s.score, "p": s.p, "status": s.decided or "watching",
+                "held": s.mint in self.positions, "mayhem": s.mayhem,
+                "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
+                "spark": s.sparkline(30) if spark else []}
+
+    def pulse_view(self, per_column: int = 120) -> dict:
+        usd = self.sol_price.usd
+        new, stretch = [], []
+        for s in self.tokens.values():
+            if not s.price_known or s.migrated:
+                continue
+            (stretch if s.curve.progress >= 0.5 else new).append(s)
+        new.sort(key=lambda s: -s.created_ts)
+        stretch.sort(key=lambda s: -s.curve.progress)
+        grad = []
+        for ts, mint, sym, mc in list(self.migrations)[:per_column]:
+            s = self.tokens.get(mint)
+            grad.append({"mint": mint, "symbol": sym, "graduated_s": round(self.now - ts), "mcap_usd": mc,
+                         "age": round(s.age(self.now)) if s else None, "held": mint in self.positions,
+                         "top10": round(s.top_holders_pct(10), 1) if s else None,
+                         "dev_pct": round(s.dev_initial_pct(), 1) if s else None,
+                         "buyers": len(s.buyers) if s else None,
+                         "lk": [int(bool(s and s.launch and x)) for x in ((s.launch.twitter, s.launch.telegram,
+                                s.launch.website) if s and s.launch else ("", "", ""))]})
+        return {"now": self.now, "sol_usd": usd,
+                "new": [self._pulse_token(s, usd, i < 40) for i, s in enumerate(new[:per_column])],
+                "stretch": [self._pulse_token(s, usd, i < 40) for i, s in enumerate(stretch[:per_column])],
+                "graduated": grad}
+
+    # ------------------------------------------------------------------ the desk discusses your notes
+    async def discuss_note(self, item_id: str, personas: list[str] | None = None) -> str:
+        """Each persona reads a memory item (and the discussion so far) and replies. '' or why not."""
+        import os
+
+        from . import desk as deskmod
+
+        it = next((i for i in self.memory.items_ if i.get("id") == item_id), None)
+        if it is None:
+            return "that note is gone"
+        pd = self.p.desk
+        if not pd.get("note_replies", True):
+            return "note replies are off (desk.note_replies)"
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return "add an Anthropic API key (Controls → API keys) so the desk can reply"
+        personas = [p for p in (personas or list(pd.personas)) if p in deskmod.PERSONAS]
+        if not personas:
+            return "nobody to ask"
+        live = None
+        s = self.tokens.get(it.get("mint") or "")
+        if s is not None and s.price_known:
+            live = deskmod.snapshot_for(s, self.now, "note")
+        import anthropic
+
+        client = anthropic.AsyncAnthropic(**deskmod.client_kwargs())
+        self.note_waiting[item_id] = set(personas)
+
+        async def one(persona: str) -> None:
+            r = await deskmod.reply_note(client, pd, persona, it, live)
+            self.note_stats["calls"] += 1
+            self.note_stats["input_tokens"] += r.get("input_tokens", 0)
+            self.note_stats["output_tokens"] += r.get("output_tokens", 0)
+            self.note_stats["error"] = deskmod.friendly_error(r["error"]) if r.get("error") else ""
+            self.memory.add_reply(item_id, persona, r.get("reply", ""), r.get("stance", ""),
+                                  deskmod.friendly_error(r["error"]) if r.get("error") else "")
+            self.note_waiting.get(item_id, set()).discard(persona)
+        try:
+            await asyncio.gather(*(one(p) for p in personas))
+        finally:
+            self.note_waiting.pop(item_id, None)
+        self.say("desk", f"the desk replied to “{it.get('title', '')[:60]}”")
+        return ""
+
     async def sell_now(self, mint: str) -> None:
         if mint in self.positions and mint in self.tokens:
             await self._sell(self.tokens[mint], self.positions[mint], 1.0, "manual sell")
@@ -2313,6 +2618,8 @@ class Engine:
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},
+            "orders": sorted(self.orders.values(), key=lambda o: -o["created"])[:40],
+            "ledger": {"calls": len(self.ledger.calls()), "head": self.ledger.head[:12]},
             "closed": self.book.closed[-50:][::-1], "rejects": self.rejects.most_common(14),
             "equity_hist": list(self.book.equity_hist)[-400:], "log": list(self.log)[-80:][::-1],
             "callers": sorted(({"caller": k, "calls": v.calls, "avg_return": v.avg_return, "weight": v.weight}
