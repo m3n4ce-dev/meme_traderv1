@@ -31,7 +31,7 @@ scripts/start.sh demo
 The dashboard opens at **http://127.0.0.1:8787** with a simulated market and fake money. No keys are needed. Press **Ctrl + C** in the terminal to stop.
 
 ## 2. Read the dashboard
-Seven views. Switch with the tabs or the keys **1–7**:
+Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls, Chat, Portfolio, Analytics, Controls, Guide. **Ctrl+K** finds anything; right-click any coin for quick actions; the **Guide** tab has a 1-minute tour.
 
 - **Live**: money, open positions, the launch radar and every event.
   - Click any token, position, closed trade or log line to open its **detail panel**.
@@ -53,11 +53,14 @@ Seven views. Switch with the tabs or the keys **1–7**:
     - **Click to zoom:** click a bot, the **P&L board** or the **corkboard** to zoom into its screen. Esc goes back.
     - **Night shift:** after 17:30 (your clock) the room gets dark, the lamps and monitors glow and the city lights up.
     - **👕 Wardrobe:** rename any bot and change its colour and hat. Every browser sees the change.
-  - **Teach the desk:** paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory: Claude in Chat can read it, and the AI desk sees your notes on any coin it votes on.
+  - **Teach the desk:** paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory, and **each of the four personas reads it and replies** in a thread under it (with an Anthropic key). Reply back, or start with `@skeptic` to ask one. Claude in Chat can read it all, and the AI desk sees your notes on any coin it votes on.
+- **Pulse**: new launches, the final stretch to graduation and fresh graduates, live. Each column has filters (age, market cap, buyers, inflow, top-10, dev, bundle, socials) and every row a ⚡ quick buy. A list stops updating while your mouse is on it.
+- **Calls**: your track record. 📣 Call puts a coin on the record at today's market cap; every call is hash-chained, then scored at 5 min, 1 h, 6 h and 24 h after costs (the peak is shown too). **Publish** posts the newest hash to X or Telegram so the record can't be rewritten; `python -m meme_trader.sniper calls verify` checks a ledger. See [EDGE_PROOF.md](EDGE_PROOF.md).
 - **Chat**: talk to Claude about the bot (see [14](#14-let-claude-operate-the-bot)).
 - **Manual trading** (Live tab, position cards, and every coin's details):
   - Paste a contract address (or press **Trade** in a coin's details), pick an amount or type one, and press **Buy**. **🦍 APE** buys the preset size in one click.
   - The coin's metrics appear under the address: price, market cap, liquidity, volume, buys vs sells, price change, top-10 holding, holders, curve, age, dev holding and risk flags. They refresh every ~20 s.
+  - **Limit orders and alerts:** buy when the market cap dips to a level (or breaks out above one), sell part of a position at a target, or just get alerted. They fire on the live price, survive restarts and expire after the time you pick. The quick buttons fill in common levels.
   - On any position, the bot's or yours: **25%**, **50%**, **Initials** (sell just enough to get your cost back; the rest rides free) and **Exit**.
   - **Your own positions** only exit on what you set on their card (stop, take profit, trail), plus when the coin graduates, because the bot can only trade the bonding curve. Defaults are in `sniper.manual`.
   - Pausing the bot doesn't block your trades. The kill switch, the daily loss limit and a broken feed do.
@@ -75,7 +78,12 @@ Seven views. Switch with the tabs or the keys **1–7**:
   - Paste a key and press Save: it goes into `.env` (readable only by you), is never shown again, and is never given to Claude.
   - Some keys work immediately (Anthropic, RPC URL); the rest after `systemctl --user restart meme-sniper`.
 - **Guide**: the same tour inside the app, plus keyboard shortcuts.
-- **✎ Arrange** (header, or the `a` key): drag panels by their bar to reorder any page, or hide the ones you don't use. **Reset to default** undoes it all. The layout is saved on the bot, so it follows you to any browser.
+- **✎ Arrange** (header, or the `a` key): the page becomes a 12-column board. Drag panels by their bar, drag a panel's right edge to resize it, pick a width or height, hide panels and bring them back. **▾** on any panel collapses it. Saved on the bot, so it follows you to any browser.
+- **Posting to X and Telegram:** Controls → Connections walks you through it.
+  - **X:** a developer app with Read and write permissions and its four keys, or Connect X with an OAuth client ID. X bills ~$0.015 a post ($0.20 with a link); the composer shows the price first.
+  - **Telegram:** a bot from @BotFather, added to your channel as an admin.
+  - **Where you can post from:** **✎ Post** (or `n`), the Share buttons on calls, and the record card.
+  - **From a terminal:** `python -m meme_trader.social post "text" --to x,telegram [--card record|call:<id>|trade:<mint>]`.
 
 Badges in the header:
 
