@@ -201,6 +201,7 @@ These have been tested against simulated failures, not yet with real money.
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
 | [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
 | [WALLETS.md](docs/WALLETS.md) | The wallet study: rules, data sources and their limits, timeline |
+| [OPEN_SOURCE_NOTES.md](docs/OPEN_SOURCE_NOTES.md) | What open-source trading bots on GitHub do, which ones are bait, and what we took |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 
