@@ -128,6 +128,10 @@ The engine makes split-second decisions on its own. An AI operator works one lev
 - It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
 - Claude gets only the bot's tools here: no shell, no files, no other connectors.
 
+**Manual trading:** paste a contract address and Buy, or 🦍 APE in one click; sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Trades land with a stamp and a burst of coins (or red shards).
+
+**The office:** on the Desk tab the agents live in a little office. They type at their desks, take coffee breaks, chat about the market and read the notes you **teach the desk** (X posts, articles, contract addresses), which Claude and the AI desk can read too.
+
 **Risk dial:** five levels on the Live and Controls tabs: Cautious, Normal (your settings), Bold, Aggressive and Max. Each scales trade size, open positions and the daily loss limit together. Say "more risk" in Chat and Claude asks you to approve a higher level. It can always turn the dial down, but only raises it with your click, and never above `risk.max_level`. The kill switch, stop losses and entry rules never move.
 
 **In a terminal:** the same tools load in Claude Code from `.mcp.json`.
