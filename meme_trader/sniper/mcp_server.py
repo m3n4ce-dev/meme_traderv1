@@ -178,6 +178,14 @@ async def sell_position(mint: str, reason: str, fraction: float = 1.0) -> str:
     return await _call("sell", mint=mint, reason=reason, fraction=fraction)
 
 
+@tool(CHANGE)
+async def hand_over_positions(reason: str, mint: str = "", on: bool = True, away: bool = False) -> str:
+    """Hand the owner's manual positions to the bots' exit rules (stop loss, initials, trailing stop, selling
+    before graduation), for when the owner is stepping away. mint='' means all of them; on=False hands them back.
+    away=True turns on away mode, which also hands over positions the owner's limit orders open later."""
+    return await _call("hand_over", reason=reason, mint=mint, on=on, away=away)
+
+
 @tool(TRADE)
 async def buy_token(mint: str, usd: float, reason: str) -> str:
     """Open a position in a tracked token for `usd` dollars. Goes through the bot's normal risk checks

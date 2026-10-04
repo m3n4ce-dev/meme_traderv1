@@ -20,7 +20,8 @@
       "mcp__meme-trader__buy_token",
       "mcp__meme-trader__watch_token",
       "mcp__meme-trader__add_paper_funds",
-      "mcp__meme-trader__add_note"
+      "mcp__meme-trader__add_note",
+      "mcp__meme-trader__hand_over_positions"
     ]
   }
 }

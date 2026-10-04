@@ -33,7 +33,7 @@ STRATEGY_KEYS = ("entry.enabled", "copy.enabled", "callouts.enabled", "late.enab
 SAFETY_KEYS = ("risk_adapt.enabled",)              # protective: may be turned on, off only if config had it off
 
 READ_TOOLS = ("status", "positions", "radar", "token", "lookup", "analytics", "trades", "log", "settings", "memory")
-ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk")
+ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk", "hand_over")
 
 
 def _get(p, key: str):
@@ -324,6 +324,20 @@ class AgentAPI:
         return {"risk_level": self.e.risk_level, "name": self.e.risk_info()["name"],
                 **{k.split(".")[1]: v for k, v in self.e.risk_values(self.e.risk_level).items()},
                 "note": "lasts until restart; the owner's dashboard dial is saved, this isn't"}
+
+    async def act_hand_over(self, reason: str, mint: str = "", on: bool = True, away: bool = False) -> dict:
+        """The owner's positions to the bots' exit rules (one, or all), or back; away=True also covers
+        positions the owner's limit orders open later."""
+        reason = self._reason(reason)
+        if away:
+            text = self.e.set_away(bool(on), who="agent")
+            self._say(f"{text} | {reason}")
+            return {"away": self.e.away, "text": text}
+        n, err = self.e.hand_over(str(mint or ""), bool(on), who="agent")
+        if err:
+            raise AgentError(err)
+        self._say(f"{n} position(s) {'handed to the bots' if on else 'back to the owner'} | {reason}", mint or "")
+        return {"changed": n, "handed_over": bool(on)}
 
     async def act_note(self, text: str) -> dict:
         text = str(text or "").strip()[:500]
