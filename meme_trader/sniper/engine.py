@@ -165,6 +165,8 @@ class Engine:
         self._think: dict[str, tuple[str, str, float]] = {}       # mint -> (verdict, why, when said)
         self._last_think = 0.0
         self.desk_reviews: deque = deque(maxlen=20)
+        self.desk_failures = 0                                   # reviews in a row where no persona answered
+        self.desk_error = ""
         self.paused = False
         self.journal = log_to_journal
         # replays start from neutral caller weights: today's learned track records are future information
@@ -912,6 +914,17 @@ class Engine:
         self.say("desk", f"{s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
         self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": kind,
                                   "approve": v.approve, "summary": v.summary, "votes": [vars(x) for x in v.votes]})
+        if v.votes and all(x.error for x in v.votes):
+            from .desk import friendly_error
+
+            self.desk_failures += 1
+            self.desk_error = friendly_error(v.votes[0].error)
+            if self.desk_failures >= 3:                  # a broken desk would silently pass every trade
+                self.set_desk(False)
+                self.say("error", f"AI desk put to rest after 3 failed reviews: {self.desk_error}. "
+                                  "Entries continue on the rules alone.")
+        else:
+            self.desk_failures, self.desk_error = 0, ""
         if not v.approve:
             self.rejects["desk passed"] += 1
             if kind == "sniper":
@@ -1654,6 +1667,7 @@ class Engine:
                 "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
+                         "error": self.desk_error, "failures": self.desk_failures,
                          "reviews": list(self.desk_reviews)[::-1]},
                 "risk": self.risk_info(), "day_pnl": self.book.day_pnl,
                 "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
@@ -1674,15 +1688,15 @@ class Engine:
         if on:
             if not os.environ.get("ANTHROPIC_API_KEY"):
                 return "add an Anthropic API key first (Controls -> API keys)"
-            if not (self.desk and self.desk.client):
-                try:
-                    from .desk import Desk
+            try:                                        # always a fresh client: the key or workspace may be new
+                from .desk import Desk
 
-                    self.p.desk["enabled"] = True
-                    self.desk = Desk(self.p.desk)
-                except Exception as e:                      # e.g. the anthropic package is missing
-                    self.p.desk["enabled"] = False
-                    return f"couldn't start the desk: {type(e).__name__}: {e}"[:200]
+                self.p.desk["enabled"] = True
+                self.desk = Desk(self.p.desk)
+            except Exception as e:                      # e.g. the anthropic package is missing
+                self.p.desk["enabled"] = False
+                return f"couldn't start the desk: {type(e).__name__}: {e}"[:200]
+            self.desk_failures, self.desk_error = 0, ""
             self.p.desk["enabled"] = True
             self.desk.enabled = True
             self.say("info", "AI desk is on: its personas now vote on every entry (Anthropic API, billed per call)")

@@ -4,6 +4,26 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #25: The AI desk's key problem, and the agents at their desks
+
+- **Why the AI desk failed:** every persona got HTTP 400 "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header".
+  - The key is a *user* key (`sk-ant-usr-…`). Unlike a workspace key (`sk-ant-api…`), every request must name a workspace.
+  - Reproduced with a plain request, so it wasn't the desk's beta options.
+- **Fixed:**
+  - **Workspace ID:** `ANTHROPIC_WORKSPACE_ID` (Controls → API keys, validated as `wrkspc_…`) adds the header to every Anthropic client: desk, review agent, doctor.
+  - **User-key warning:** the keys panel warns when a user key has no workspace ID.
+  - **Test button:** a 5-token request to the smallest model shows Anthropic's verdict in plain words.
+  - **Errors:** the full error is kept (400 characters, not 160).
+- **Safety:** when no persona answers, the desk passes the trade. That silently blocked every entry while the key was broken. After 3 such reviews in a row, the desk now rests itself and says why, and entries continue on the rules alone. Waking it always builds a fresh client.
+- **The floor (Desk tab):**
+  - **Characters:** each agent is a small character at a wooden desk with a speech bubble showing what it's saying now.
+  - **AI desk:** the four personas sit at a second, glass desk. Their bubbles show their last vote ("BUY 72: 14 fresh buyers in 30 s"); asleep, they doze with "z"s.
+  - **Moods** drive the animation: working (typing, live monitor), thinking (eyes scanning, frown), acting (a hop, big smile), alert (red "!"), asleep (head down). Bubbles pop when their text changes.
+  - **Details:** click anyone for their card, with its controls, in the side panel.
+  - Routine blocks (max positions) no longer look like alarms.
+
+---
+
 ## 2026-10-04 — Entry #24: Non-SOL coins skipped; social links survive ipfs.io's rate limit
 
 - **Non-SOL coins:**
