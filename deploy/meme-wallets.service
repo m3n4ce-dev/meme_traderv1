@@ -1,0 +1,19 @@
+# Wallet study recorder (docs/WALLETS.md): public market data only, no wallet, no trading.
+# User-level install (no sudo):
+#   cp deploy/meme-wallets.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now meme-wallets
+#   status: systemctl --user status meme-wallets   logs: journalctl --user -u meme-wallets -f
+# Edit WorkingDirectory/ExecStart if the repo isn't at ~/meme_traderv1.
+[Unit]
+Description=meme_trader wallet study recorder
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/meme_traderv1
+ExecStart=%h/meme_traderv1/.venv/bin/python -m meme_trader.wallets record
+Restart=on-failure
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

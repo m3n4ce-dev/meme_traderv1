@@ -298,3 +298,24 @@ sniper:
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)
+
+# ---------------------------------------------------------------------------------------------------------
+# Wallet study recorder: python -m meme_trader.wallets record (docs/WALLETS.md). Paper research only.
+wallets:
+  mode: poll                     # poll = discovery samples + GeckoTerminal (~3.5 GB/day, partial on the busiest pools)
+                                 # stream = the whole PumpSwap stream, complete (~80 GB/day download)
+  min_pool_age_days: 2           # record trades on pump.fun coins' PumpSwap pools at least this old (younger = ~90% of trades)
+  min_liquidity_usd: 5000        # ...with at least this much liquidity
+  keep_days: 10                  # stop polling a pool after this long without a trade (rediscovery restarts it)
+  max_pools: 4000
+  discover_s: 45                 # sample the whole PumpSwap stream this long (~0.9 MB/s while sampling) ...
+  discover_every_s: 900          # ... this often, to find which pools are trading (~3.5 GB/day)
+  gt_calls_per_min: 5            # GeckoTerminal's free API sustains ~5 (measured; bursts above get 429)
+  target_trades_per_poll: 250    # poll a busy pool often enough that one call (max 300 trades) doesn't overflow
+  min_poll_s: 60
+  max_poll_s: 72000              # 20 h: GeckoTerminal keeps 24 h of trades
+  deep_min_usd: 25               # a busy pool's first poll also fetches its last 300 trades over $25 (further back)
+  meta_refresh_s: 21600          # liquidity snapshot per pool this often
+  candles_every_s: 300           # daily candles: one pool per this many seconds ...
+  candles_min_age_days: 13       # ... for pools nearly old enough to signal ...
+  candles_refresh_days: 7        # ... refreshed this often
