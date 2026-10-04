@@ -1033,9 +1033,12 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
     <section class="panel" id="paper-panel">
       <h2>Paper balance <small>pretend SOL for paper trading · counts as starting capital, not profit</small></h2>
       <div class="toolbar"><input type="number" id="dep-sol" value="5" min="0.1" max="10000" step="0.5" aria-label="SOL to add"><span>SOL</span>
-        <label class="minisw"><span class="switch"><input type="checkbox" id="dep-keep"><i></i></span>Keep after a restart (saves the new starting balance)</label>
-        <button class="primary" id="dep-add">Add to paper balance</button></div>
-      <p class="note">Or just ask in Chat: “add 10 paper SOL”. Without “keep”, a restart starts again from <code>capital.starting_sol</code>.</p>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="dep-keep"><i></i></span>Also make it the starting balance for a fresh start</label>
+        <button class="primary" id="dep-add">Add to paper balance</button>
+        <div class="spacer"></div><button id="paper-reset" title="Cash back to the starting balance; today's P&amp;L, the peak and the dashboard's trade list start over. Trade files keep everything.">Start over…</button></div>
+      <p class="note">The paper account carries over restarts: cash, open positions, today's P&amp;L and the daily loss limit. Or just ask in Chat: “add 10 paper SOL”.</p>
+      <div id="paper-reset-confirm" class="note" hidden>Start the paper account over at <code>capital.starting_sol</code>? Open positions must be closed first.
+        <button class="small kill" id="paper-reset-yes">Yes, start over</button> <button class="small" id="paper-reset-no">Cancel</button></div>
     </section>
     <section class="panel" id="adv-panel">
       <h2>All settings <small>every other setting, applied live · Save to config keeps them after a restart · the frozen research test replays with its own locked settings</small></h2>
@@ -3226,6 +3229,9 @@ $("dep-add").onclick = () => { const v = +$("dep-sol").value; if (!(v > 0)) { to
 $("adv-q").oninput = renderAdvanced;
 $("xf-add").onclick = addX;
 $("arrange").onclick = () => setArrange(!AR.on);
+$("paper-reset").onclick = () => { $("paper-reset-confirm").hidden = false; };
+$("paper-reset-no").onclick = () => { $("paper-reset-confirm").hidden = true; };
+$("paper-reset-yes").onclick = () => { $("paper-reset-confirm").hidden = true; send({action: "paper_reset"}); };
 $("ar-done").onclick = () => setArrange(false);
 $("ar-reset").onclick = () => { AR.layout = {}; send({action: "ui_set", key: "layout", value: {}}); location.reload(); };
 $("wd-save").onclick = saveWardrobe;

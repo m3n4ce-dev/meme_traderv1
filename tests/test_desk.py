@@ -523,3 +523,101 @@ def test_page_layouts_and_bot_looks_are_saved_on_the_bot(tmp_path):
     ui = asyncio.run(go())
     assert ui["bots"]["scanner"]["name"] == "Hawk" and ui["layout"]["live"]["order"]["live:0"] == ["live:recent-trades"]
     assert "secrets" not in ui
+
+
+def test_paper_account_survives_a_restart_and_can_start_over(tmp_path, monkeypatch):
+    """The real-feed paper bot used to start a fresh 5 SOL account on every restart: today's P&L, the daily
+    loss limit and the drawdown all reset (seen 2026-10-04 as 'today -1.09' on a +3 SOL day)."""
+    from meme_trader.sniper.strategy import SniperPosition
+
+    monkeypatch.setattr("meme_trader.sniper.engine.DATA", tmp_path)
+    p = copy.deepcopy(P)
+
+    def make():
+        return Engine(p, Quiet(False), PaperExecutor(p.sniper.execution), mode="paper", log_to_journal=False,
+                      persist=True)
+    e = make()
+    e.book.sol, e.book.day, e.book.day_pnl, e.book.peak_equity = 6.2, "2026-10-04", -0.4, 6.9
+    e.book.closed.append({"symbol": "WIN", "pnl": 1.2})
+    e.deposit_paper(2.0)
+    e.book.equity_hist.append((1.0, 8.2))
+    m = "P" * 40 + "pump"
+    e.positions[m] = SniperPosition(m, "OPEN", 0, 1e-7, 1000.0, 1000.0, 0.05, 0.05, 70, peak_price=1e-7, exits=[])
+    e.save_state()
+
+    e2 = make()
+    asyncio.run(e2.restore_state())
+    b = e2.book
+    assert (b.sol, b.day, b.day_pnl, b.peak_equity, b.start_sol) == (8.2, "2026-10-04", -0.4, 8.9, p.sniper.capital.starting_sol + 2.0)
+    assert b.closed[-1]["symbol"] == "WIN" and b.deposits[0][1] == 2.0 and (1.0, 8.2) in b.equity_hist
+    assert m in e2.positions
+    assert e2.reset_paper() == "close the open positions first"
+    e2.positions.clear()
+    assert e2.reset_paper() == ""
+    assert e2.book.sol == p.sniper.capital.starting_sol and e2.book.day_pnl == 0 and not e2.book.closed
+    e3 = make()
+    asyncio.run(e3.restore_state())
+    assert e3.book.sol == p.sniper.capital.starting_sol
+    live = Engine(p, Quiet(False), PaperExecutor(p.sniper.execution), mode="live", log_to_journal=False)
+    assert live.reset_paper() == "paper only"
+
+
+def test_the_desk_stays_on_or_off_after_a_restart(monkeypatch):
+    saved = []
+    e = engine()
+    e.persist = True                                                     # the real bot (save_setting faked)
+    monkeypatch.setattr(e, "save_setting", lambda k, v, path=None: saved.append((k, v)))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-test")
+    assert e.set_desk(True) == "" and e.desk.enabled
+    assert e.set_desk(False) == ""
+    assert e.set_desk(False, who="bot") == "" and e.set_desk(True, who="key") == ""
+    assert saved == [("desk.enabled", True), ("desk.enabled", False)]     # only the owner's choice is saved
+    demo = engine()                                                      # a demo or test: persist off
+    monkeypatch.setattr(demo, "save_setting", lambda k, v, path=None: saved.append((k, v)))
+    demo.set_desk(False)
+    assert len(saved) == 2                                               # never writes the config
+
+
+def test_a_desk_approval_that_cannot_be_sized_says_why(monkeypatch):
+    from meme_trader.sniper import desk as deskmod
+    from meme_trader.sniper.tracker import TokenState
+
+    e = engine()
+
+    class Verdict:
+        approve, votes, summary, size_mult = True, [], "APPROVED", 1.0
+
+    class FakeDesk:
+        enabled = True
+
+        async def review(self, snap):
+            return Verdict()
+    e.desk = FakeDesk()
+    monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
+    monkeypatch.setattr(e, "_size", lambda *a, **k: 0.0)
+    s = TokenState("T" * 40 + "pump", None, e.now)
+    asyncio.run(e._desk_then_buy(s, "late", 60, 0.1, [], "late", "", 0.0))
+    assert any("desk approved" in l["text"] and "too thin" in l["text"] for l in e.log)
+
+
+def test_coins_the_desk_passes_are_followed_by_the_gate_audit(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from meme_trader.sniper import desk as deskmod
+    from meme_trader.sniper.tracker import TokenState
+
+    e = engine()
+    votes = [NS(persona=p, vote=v, conviction=60, error="", reasons=[], red_flags=[])
+             for p, v in (("veteran", "buy"), ("narrative", "buy"), ("skeptic", "pass"), ("quant", "buy"))]
+
+    class FakeDesk:
+        enabled = True
+
+        async def review(self, snap):
+            return NS(approve=False, votes=votes, summary="PASSED", size_mult=1.0)
+    e.desk = FakeDesk()
+    monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
+    s = TokenState("A" * 40 + "pump", None, e.now)
+    s.price_known = True
+    asyncio.run(e._desk_then_buy(s, "late", 60, 0.1, [], "late", "", 0.0))
+    assert e.audit[s.mint][0] == "AI desk passed (graduation): 3 of 4 said buy"

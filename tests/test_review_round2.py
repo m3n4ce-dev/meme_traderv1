@@ -1054,3 +1054,36 @@ def test_watchdog_switches_endpoint_when_trades_go_missing(monkeypatch):
         return f
     asyncio.run(asyncio.wait_for(go(), 20))
     assert seen_urls[0] == "wss://flaky.example" and seen_urls[1] == "wss://solana-rpc.publicnode.com"
+
+
+def test_watchdog_never_moves_to_an_endpoint_measured_slower():
+    """2026-10-04: mainnet-beta spiked past 5 s, the watchdog moved to PublicNode (10 s behind) and back,
+    40 times in 35 minutes. A slow endpoint is only left for one that isn't known to be slower."""
+    from meme_trader.sniper.feeds import FeedQuality
+
+    f = SolanaTradeFeed("wss://fast.example, wss://slow.example", stall_s=60, max_lag_s=5)
+    f.ws_urls = ["wss://fast.example", "wss://slow.example"]
+    now = 10_000.0
+    f.last_trade, f.trades_up = now, True
+    f.quality = FeedQuality(max_lag_s=5, min_lags=10)
+    f.quality.checks.extend([True] * 500)
+    for i in range(20):                                          # the fast one, briefly 6 s behind
+        f.quality.observe(Trade(f"m{i}", now, "w", "buy", 1, 1, 30, 1e9, chain_ts=now - 6))
+    f.endpoint_lag[1] = (10.0, now - 60)                         # the other was 10 s behind a minute ago
+    assert f._check_stream(now, now - 100) == ""                 # stay: entries stay paused, no churn
+    assert "behind the chain" in f.degraded_reason
+    f.endpoint_lag[1] = (10.0, now - f.LAG_MEMORY_S - 1)         # that measurement is old: try it again
+    assert "behind the chain" in f._check_stream(now, now - 100)
+    assert f._next_endpoint("6s behind the chain", now) == 1
+    f.endpoint_lag[1] = (2.0, now - 60)                          # known faster: go
+    assert f._next_endpoint("6s behind the chain", now) == 1
+    # on a fallback, the 30-minute retry of the first endpoint skips it while it's known slower
+    f.ws_idx, f.endpoint_lag = 1, {0: (12.0, now - 60)}
+    f.quality = FeedQuality(max_lag_s=5, min_lags=10)
+    f.quality.checks.extend([True] * 500)
+    for i in range(20):
+        f.quality.observe(Trade(f"m{i}", now, "w", "buy", 1, 1, 30, 1e9, chain_ts=now - 1.5))
+    assert f._check_stream(now, now - f.RETRY_PRIMARY_S - 1) == ""
+    f.endpoint_lag = {0: (12.0, now - f.LAG_MEMORY_S - 1)}
+    assert f._check_stream(now, now - f.RETRY_PRIMARY_S - 1) == "retry"
+    assert f._next_endpoint("connection closed (CLOSE)", now) == 0

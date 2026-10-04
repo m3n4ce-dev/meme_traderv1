@@ -113,7 +113,10 @@ async def _run(args, params) -> None:
         DATA.mkdir(exist_ok=True)
         record = DATA / f"feed-{time.strftime('%Y-%m-%d', time.gmtime())}.jsonl"
         _compress_old_feeds(record)
-    engine = Engine(params, feed, executor, mode=full_mode, record_path=record, desk=_desk(params, args.desk))
+    # live and the real-feed paper bot keep their book across restarts (cash, today's P&L and loss limit,
+    # open positions); the synthetic demo starts fresh every time
+    engine = Engine(params, feed, executor, mode=full_mode, record_path=record, desk=_desk(params, args.desk),
+                    persist=not args.synthetic)
 
     runner = None
     if not args.no_ui:                    # bind BEFORE trading: no controls = no engine
