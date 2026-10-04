@@ -61,6 +61,13 @@ def test_gt_trade_row():
     assert gt_trade_row("P", d) is None                                  # not quoted in SOL
 
 
+def test_sol_price_from_a_sol_pair():
+    from meme_trader.wallets.sources import _sol_usd
+
+    assert _sol_usd({"priceUsd": "0.0242", "priceNative": "0.0002"}) == pytest.approx(121)
+    assert _sol_usd({"priceUsd": "1", "priceNative": "0"}) is None and _sol_usd({}) is None
+
+
 def _cfg(**kw):
     c = config.load(config.EXAMPLE).wallets
     c.update(kw)
@@ -89,7 +96,9 @@ def test_recorder_eligibility_and_polling(tmp_path):
     assert r.st["gaps"] == 1 and r.status(now)["coverage_est"] < 1
     sw = Swap(ts=5, pool="P", user="U", side="buy", base=2_000_000, quote=1_000_000_000, pool_base=10**14, pool_quote=10**11)
     row = r.swap_row(sw, "sig", 0)
-    assert row["px"] == 0.5 and row["sol"] == 1.0 and row["mint"] == "Xpump"
+    assert row["px"] == 0.5 and row["sol"] == 1.0 and row["mint"] == "Xpump" and row["usd"] == 0.0
+    r.sol_usd = 120.0
+    assert r.swap_row(sw, "sig", 0)["usd"] == 120.0
     assert r.swap_row(Swap(5, "P", "U", "buy", 1, 1, 10, 10**12), "s", 0) is None    # SOL as base: skipped
 
 

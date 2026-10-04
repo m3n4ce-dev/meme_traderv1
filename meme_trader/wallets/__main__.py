@@ -33,6 +33,12 @@ def _status() -> None:
     print(f"pools: {s['pools_known']} known, {s['pools_eligible']} in the universe, {s['pools_polled']} polled, "
           f"{s['overdue']} overdue; GeckoTerminal calls last hour {s['gt_calls_last_hour']}")
     print(f"trades this run: {s['rows_this_run']} {s['rows_by_day']}; overflow gaps {s['gaps']}")
+    if s.get("stream_gb_by_day"):
+        run_h = max((s["updated"] - s["started"]) / 3600, 1e-6)
+        total = sum(s["stream_gb_by_day"].values())
+        print(f"stream download: {s['stream_gb_by_day']} GB (~{total / run_h * 24:.0f} GB/day at this rate)")
+    if s.get("coverage_est") is not None:
+        print(f"estimated coverage of trades in the universe: {s['coverage_est']:.0%}")
     if d:
         print(f"last discovery: {d.get('swaps')} swaps on {d.get('pools')} pools in {d.get('secs')}s "
               f"({d.get('new_pools')} new) via {d.get('url')}")

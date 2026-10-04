@@ -68,6 +68,8 @@ class Recorder:
         self.st = {"started": time.time(), "rows": 0, "gaps": 0, "polls": 0, "discovery": {}, "missed_est": 0.0,
                    "captured": 0}
         self.day_rows = collections.Counter()
+        self.sol_usd: float | None = None                # from DexScreener pairs; prices stream rows in USD
+        self.stream_bytes = collections.Counter()        # per UTC day: what the full stream downloads
 
     # ------------------------------------------------------------------ pool bookkeeping
     def _err(self, where: str, e) -> None:
@@ -177,6 +179,9 @@ class Recorder:
                 rec["meta_tries"] = rec.get("meta_tries", 0) + 1
                 continue
             liq = m.pop("liq_usd", None)
+            su = m.pop("sol_usd", None)
+            if su and m.get("quote") == WSOL:
+                self.sol_usd = su
             rec["meta"] = m
             rec["liq"] = ((rec.get("liq") or []) + [[now, liq or 0]])[-60:]
         return len(batch)
@@ -321,7 +326,9 @@ class Recorder:
                 "pools_eligible": len(elig), "pools_polled": sum(1 for r in elig if r.get("polls")),
                 "overdue": self.overdue(now), "gt_calls_last_hour": self.gt.per_hour(), "rows_this_run": self.st["rows"],
                 "rows_by_day": dict(self.day_rows), "gaps": self.st["gaps"], "polls": self.st["polls"],
-                "discovery": self.st["discovery"], "errors": list(self.errors)[-10:]}
+                "discovery": self.st["discovery"], "sol_usd": self.sol_usd,
+                "stream_gb_by_day": {d: round(b / 1e9, 2) for d, b in self.stream_bytes.items()},
+                "errors": list(self.errors)[-10:]}
 
     async def housekeeping(self) -> None:
         last_save = 0.0
@@ -347,7 +354,8 @@ class Recorder:
         sol, tokens = sw.quote / 1e9, sw.base / 1e6
         m = rec["meta"]
         return {"id": f"ws_{sig}_{k}", "t": float(sw.ts), "pool": sw.pool, "mint": m.get("mint"), "wallet": sw.user,
-                "side": sw.side, "sol": sol, "tokens": tokens, "px": sol / tokens, "usd": 0.0, "sig": sig,
+                "side": sw.side, "sol": sol, "tokens": tokens, "px": sol / tokens,
+                "usd": round(sol * self.sol_usd, 2) if self.sol_usd else 0.0, "sig": sig,
                 "sym": m.get("symbol")}
 
     async def stream_loop(self, s: aiohttp.ClientSession) -> None:
@@ -360,6 +368,7 @@ class Recorder:
                     async for msg in ws:
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             break
+                        self.stream_bytes[_day(time.time())] += len(msg.data)
                         v = (json.loads(msg.data).get("params") or {}).get("result", {}).get("value")
                         if not v or v.get("err"):
                             continue

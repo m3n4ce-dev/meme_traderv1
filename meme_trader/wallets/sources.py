@@ -108,6 +108,15 @@ async def gt_ohlcv(s: aiohttp.ClientSession, limiter: RateLimiter, pool: str, ti
     return sorted(([float(x) for x in r] for r in rows), key=lambda r: r[0])
 
 
+def _sol_usd(p: dict) -> float | None:
+    """SOL's dollar price implied by a SOL-quoted pair (priceUsd / priceNative)."""
+    try:
+        v = float(p["priceUsd"]) / float(p["priceNative"])
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+    return v if 10 < v < 10_000 else None
+
+
 async def ds_pairs(s: aiohttp.ClientSession, pools: list[str]) -> dict[str, dict]:
     """pool -> {dex, mint, symbol, quote, created, liq_usd, fdv}. Pools DexScreener doesn't know are absent."""
     out: dict[str, dict] = {}
@@ -118,6 +127,7 @@ async def ds_pairs(s: aiohttp.ClientSession, pools: list[str]) -> dict[str, dict
                 "dex": p.get("dexId"), "mint": (p.get("baseToken") or {}).get("address"),
                 "symbol": (p.get("baseToken") or {}).get("symbol"), "quote": (p.get("quoteToken") or {}).get("address"),
                 "created": (p.get("pairCreatedAt") or 0) / 1000 or None,
-                "liq_usd": (p.get("liquidity") or {}).get("usd"), "fdv": p.get("fdv")}
+                "liq_usd": (p.get("liquidity") or {}).get("usd"), "fdv": p.get("fdv"),
+                "sol_usd": _sol_usd(p)}
         await asyncio.sleep(0.25)
     return out

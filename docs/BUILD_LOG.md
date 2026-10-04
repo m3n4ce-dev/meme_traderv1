@@ -16,7 +16,8 @@ A running record of decisions, research, parameters and status. Newest entries a
   - Discovery: 45 s samples of the PumpSwap stream every 15 min.
   - Metadata from DexScreener; trades from GeckoTerminal at 5 calls/min, for pump.fun coins' pools at least
     2 days old with at least $5K liquidity; daily candles for the dump gate.
-  - `mode: stream` (complete, ~80 GB/day download) is available but off.
+  - `mode: stream` records every swap instead (complete, ~85 GB/day download, ~10% of a CPU core). The owner's
+    machine runs it: no data cap. Its prices match GeckoTerminal's on the same trades.
 - **Measured on the way:**
   - The full PumpSwap stream is 0.9 MB/s.
   - PublicNode drops most per-pool subscriptions and throttled this IP after a few dozen. The bot's feed failed
