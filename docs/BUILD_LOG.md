@@ -4,6 +4,21 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #23: Open-source survey; USDC-quoted coins are invisible to the bot
+
+- Surveyed GitHub trading bots read-only ([OPEN_SOURCE_NOTES.md](OPEN_SOURCE_NOTES.md)). Most pump.fun sniper and copy-trading repos are sales pages or wallet-drainer bait.
+- Worth learning from:
+  - Chainstack's pump.fun bot: listener race, `programSubscribe` for late curves, the current IDL;
+  - the Rust streaming/landing SDKs;
+  - Hummingbot's funding arbitrage (a template for edge-scout);
+  - a small bot whose own notes show paper ~80% wins vs live 1 in 38.
+- **Measured:** about 3% of pump.fun trades (11 of 369 in 20 s) are on USDC- or token-quoted coins. Their `sol_amount` and virtual SOL reserves are 0, so this bot reads them as price 0 and never trades them.
+  - Proposed: decode `quote_mint` (after the event's variable-length fields) and skip non-SOL coins explicitly.
+- **Measured:** ipfs.io and dweb.link return 429 to this machine, so per-launch social-link lookups likely fail often.
+  - Proposed: the logo fetcher's gateway fallback for those lookups too.
+
+---
+
 ## 2026-10-04 — Entry #22: The Desk, Portfolio, API keys, X feed, token logos
 
 - **Desk tab:** a card for each agent with its current thought:
