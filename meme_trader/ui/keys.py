@@ -20,6 +20,9 @@ ENV = ROOT / ".env"
 KEYS: dict[str, tuple[str, str, str, str]] = {
     "ANTHROPIC_API_KEY": ("Anthropic API key", "Wakes the AI desk: four Claude personas vote on each entry, billed per "
                           "call on your Anthropic account. The Chat tab uses your Claude Code login instead.", "secret", "now"),
+    "ANTHROPIC_WORKSPACE_ID": ("Anthropic workspace ID", "Only for a user key (sk-ant-usr-…), which isn't tied to "
+                               "a workspace: the workspace to bill, wrkspc_… from console.anthropic.com → Settings → "
+                               "Workspaces. A workspace key (sk-ant-api…) doesn't need it.", "plain", "now"),
     "SOLANA_RPC_URL": ("Solana RPC URL", "Balances, token lookups, the Portfolio tab, insider-cluster checks and live "
                        "trading. A paid endpoint (Helius, QuickNode, ...) avoids the public one's rate limits.", "https",
                        "now"),
@@ -37,6 +40,7 @@ KEYS: dict[str, tuple[str, str, str, str]] = {
                         "restart"),
 }
 _LINE = re.compile(r"^\s*([A-Z0-9_]+)\s*=")
+PATTERNS = {"ANTHROPIC_WORKSPACE_ID": (re.compile(r"^wrkspc_[A-Za-z0-9]{6,80}$"), "a workspace ID looks like wrkspc_…")}
 
 
 class KeyError_(ValueError):
@@ -59,7 +63,7 @@ def _hint(kind: str, v: str) -> str:
         hosts = [urlsplit(u.strip()).hostname or "?" for u in v.split(",") if u.strip()]
         return ", ".join(hosts)
     if kind == "plain":
-        return v if len(v) <= 16 else v[:6] + "…"
+        return v if len(v) <= 40 else v[:12] + "…"
     return "…" + v[-4:] if len(v) >= 12 else "set"
 
 
@@ -70,8 +74,13 @@ def status(path: Path = ENV) -> list[dict]:
     for name, (label, help_, kind, effect) in KEYS.items():
         v = fv.get(name) or os.environ.get(name, "")
         src = ".env" if fv.get(name) else ("environment" if v else "")
+        warn = ""
+        if name == "ANTHROPIC_API_KEY" and v.startswith("sk-ant-usr") and not (fv.get("ANTHROPIC_WORKSPACE_ID")
+                                                                             or os.environ.get("ANTHROPIC_WORKSPACE_ID")):
+            warn = "This is a user key: it also needs the Anthropic workspace ID below."
         out.append({"name": name, "label": label, "help": help_, "kind": kind, "effect": effect, "set": bool(v),
-                    "source": src, "hint": _hint(kind, v) if v else ""})
+                    "source": src, "hint": _hint(kind, v) if v else "", "warn": warn,
+                    "testable": name == "ANTHROPIC_API_KEY"})
     return out
 
 
@@ -84,6 +93,9 @@ def _validate(name: str, value: str) -> str:
     if len(v) > 2000 or re.search(r"[\s\x00-\x1f\x7f\"'#\\]", v):
         raise KeyError_("that doesn't look like a key or URL (spaces, quotes, # and control characters aren't allowed)")
     kind = KEYS[name][2]
+    pat = PATTERNS.get(name)
+    if pat and not pat[0].match(v):
+        raise KeyError_(pat[1])
     if kind in ("https", "wss"):
         scheme = "https" if kind == "https" else "wss"
         for u in v.split(","):
@@ -119,6 +131,24 @@ def set_key(name: str, value: str, path: Path = ENV) -> dict:
     _write(path, name, v)
     os.environ[name] = v
     return next(s for s in status(path) if s["name"] == name)
+
+
+async def test_anthropic() -> tuple[bool, str]:
+    """One tiny request (a 5-token reply from the smallest model) with the saved key and workspace."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False, "no Anthropic API key saved"
+    try:
+        import anthropic
+
+        from ..sniper.desk import client_kwargs
+
+        c = anthropic.AsyncAnthropic(**client_kwargs())
+        await c.messages.create(model="claude-haiku-4-5", max_tokens=5, messages=[{"role": "user", "content": "ping"}])
+        return True, "the Anthropic key works"
+    except Exception as e:                                      # the message never includes the key
+        from ..sniper.desk import friendly_error
+
+        return False, friendly_error(f"{type(e).__name__}: {e}")
 
 
 def clear_key(name: str, path: Path = ENV) -> dict:

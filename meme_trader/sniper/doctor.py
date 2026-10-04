@@ -138,7 +138,9 @@ def run(params) -> None:
         try:
             import anthropic
 
-            anthropic.Anthropic().models.retrieve(params.sniper.desk.model)
+            from .desk import client_kwargs
+
+            anthropic.Anthropic(**client_kwargs()).models.retrieve(params.sniper.desk.model)
             line(OK, f"Anthropic API reachable, model {params.sniper.desk.model} available")
         except Exception as e:
             line(FAIL, f"Anthropic API check failed ({type(e).__name__})", "check ANTHROPIC_API_KEY")
