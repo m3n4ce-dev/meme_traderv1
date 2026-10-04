@@ -1,0 +1,57 @@
+# Wallet following, version 1: the "insider wallet" framework from an X article (2026-09-30, "How to become a
+# memecoin insider in 7 days"), written down as testable rules BEFORE any data was recorded.
+# Registered with `python -m meme_trader.wallets register wallets-v1`: from then on any change here is refused
+# (copy the file to wallets-v2 instead). docs/WALLETS.md explains the study.
+name: wallets-v1
+
+thesis: >
+  Wallets that bought early, with real size, ahead of at least two separate big moves on graduated pump.fun
+  coins, and sold into strength at least once, keep doing it. When two or more of them buy the same coin that
+  is at least 14 days old within six hours, that coin does better over the following days than a random coin
+  of the same age bought at the same moment under the same rules, by more than fees and price impact.
+
+selection:          # period A: from the first recorded trade until the wallet list is frozen
+  period_days: 14              # `freeze` refuses before this many days of data
+  runner_x: 3.0                # a "move": price reaches 3x a low within move_window_h
+  move_window_h: 48
+  min_move_buyers: 10          # distinct buyers between the low and the 3x (not one wallet's own pump)
+  min_price_sol: 0.05          # trades smaller than this don't set prices (dust, bots)
+  early_pre_s: 3600            # early = bought from 60 min before the low ...
+  early_max_x: 1.5             # ... until price first reached 1.5x the low, paying at most 1.5x the low
+  min_buy_sol: 0.2
+  min_hits: 2                  # early on at least 2 different coins
+  require_good_exit: true      # and sold at >= good_exit_x its average entry on at least one coin
+  good_exit_x: 2.0
+  max_trades: 3000             # more trades than this in period A = bot or market maker: excluded
+  max_coins: 300               # more coins than this = spray bot: excluded
+  max_wallets: 30              # keep the best 30 (most hits, then good exits, then early SOL)
+  min_wallets: 10              # if fewer qualify, period A runs 7 more days (once), then the list freezes anyway
+
+signal:             # period B: after the freeze
+  min_wallets: 2               # distinct listed wallets ...
+  window_h: 6                  # ... buying the same coin within this window
+  min_buy_sol: 0.2
+  min_coin_age_days: 14
+  cooldown_days: 7             # one signal per coin per week
+
+gates:              # the article's other conditions for a "shot"
+  survived_dump_pct: 50        # fell >= 50% from its high (daily candles) at some point before the signal
+  min_liquidity_usd: 10000     # last liquidity snapshot before the signal
+  holders_growing: true        # 24 h before: more distinct buyers than distinct sellers (trade-flow proxy)
+
+trade:
+  size_sol: 0.5
+  entry_delay_s: 60            # buy at the first trade >= 60 s after the signal
+  fee_pct: 0.30                # per side: PumpSwap LP 0.20 + protocol 0.05 + creator 0.05
+  tx_cost_sol: 0.0002          # per transaction, two or three per trade
+  take_profit_x: 2.0           # sell half at 2x
+  trail_pct: 30                # then trail the rest 30% below its peak
+  stop_x: 0.5                  # sell everything at -50%
+  max_hold_days: 7
+
+pass:               # the verdict, fixed in advance
+  min_days: 14                 # of period B
+  min_signals: 30
+  p_mean_positive: 0.90        # day-block bootstrap: P(mean net return per trade > 0)
+  beat_random_coin_pct: 90     # mean beats 90% of random-coin draws (same signal times, same rules)
+  beat_random_wallets_pct: 90  # and 90% of random wallet lists drawn from period A's active wallets

@@ -6,7 +6,7 @@ this port to the internet without putting auth in front of it.
   GET /                  the dashboard
   GET /api/analytics     KPIs, breakdowns, Monte Carlo projection, highlights
   GET /api/token/{mint}  token detail: gate checklist, model drivers, holders, tape
-  GET /api/controls      live-adjustable settings
+  GET /api/controls      live-adjustable settings (curated); /api/controls/advanced: every other one
   GET /api/chat          chat history and status (chat.py)
   WS  /ws                a hello with the UI version (an open page reloads itself after an update), then
                          1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
@@ -90,6 +90,9 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
     async def controls(_):
         return _json(engine.controls())
 
+    async def advanced(_):
+        return _json(engine.advanced_controls())
+
     async def chat_state(_):
         return _json(chat.public() if chat else {"messages": [], "available": False, "disabled": True})
 
@@ -170,7 +173,8 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
             return None
         if action == "set" and cmd.get("key"):
             err = engine.set_control(str(cmd["key"]), cmd.get("value"))
-            return {"ok": not err, "key": cmd["key"], "text": err or "Applied now. Press Save to keep it after a restart", "controls": engine.controls()}
+            return {"ok": not err, "key": cmd["key"], "text": err or "Applied now. Press Save to keep it after a restart",
+                    "controls": engine.controls(), "advanced": engine.advanced_controls()}
         if action == "save":
             err = engine.save_controls()
             return {"ok": not err, "text": err or "Settings written to config/params.yaml"}
@@ -218,7 +222,7 @@ def make_app(engine, agent_token: str | None = None, chat=None) -> web.Applicati
 
     app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics),
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
-                    web.get("/api/chat", chat_state)])
+                    web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced)])
     if agent_token:
         from ..sniper.agent_api import AgentAPI, AgentError
 

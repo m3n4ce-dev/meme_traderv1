@@ -58,6 +58,44 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+_HELP: dict | None = None
+
+
+def example_help() -> dict[str, str]:
+    """{'sniper.late.min_buyers': 'unique buyers in flow_window_s', ...}: the comment after each setting in
+    params.example.yaml (plus its continuation lines), so the dashboard can explain every setting."""
+    global _HELP
+    if _HELP is not None:
+        return _HELP
+    import re
+
+    out: dict[str, str] = {}
+    stack: list[tuple[int, str]] = []
+    last, last_col = None, 0
+    for line in EXAMPLE.read_text().splitlines():
+        if not line.strip():
+            continue
+        m = re.match(r"^(\s*)([A-Za-z_][A-Za-z0-9_]*):(.*)$", line)
+        if m:
+            ind, key, rest = len(m.group(1)), m.group(2), m.group(3)
+            while stack and stack[-1][0] >= ind:
+                stack.pop()
+            path = ".".join([k for _, k in stack] + [key])
+            val, _, comment = rest.partition("#")
+            if not val.strip():                     # a section: its children follow, indented
+                stack.append((ind, key))
+            out[path] = comment.strip()
+            last, last_col = path, line.find("#") if "#" in rest else -1
+            continue
+        c = line.lstrip()
+        if c.startswith("#") and last and last_col >= 0 and len(line) - len(c) >= last_col - 2:
+            out[last] = (out[last] + " " + c.lstrip("# ").strip()).strip()   # comment continued below
+        else:
+            last = None
+    _HELP = out
+    return out
+
+
 def load_env(path: Path | None = None) -> None:
     """Read KEY=VALUE lines from .env into os.environ (existing env vars win). Keeps secrets out of git."""
     import os

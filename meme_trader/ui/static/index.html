@@ -293,7 +293,7 @@ select { font: inherit; font-size: 12.5px; padding: 4px 8px; border-radius: 8px;
 .minisw { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .minisw .switch { width: 34px; height: 20px; } .minisw .switch i::after { width: 14px; height: 14px; }
 .minisw .switch input:checked + i::after { transform: translateX(14px); }
-body.on-chat .toasts { bottom: auto; top: 64px; }
+body.on-chat .toasts { bottom: auto; top: 200px; }   /* below the buddy */
 @media (max-width: 1100px) { body.on-chat .toasts { display: none; } }
 .tabs button.dotted::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn-mark); margin-left: 5px; vertical-align: 1px; }
 .side-pos { display: grid; gap: 6px; }
@@ -350,6 +350,73 @@ body.on-chat .toasts { bottom: auto; top: 64px; }
 .badge.r1 { color: var(--series); } .badge.r2 { color: var(--good); } .badge.r3 { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .badge.r4, .badge.r5 { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
 tr.cur td { background: var(--accent-soft); font-weight: 600; }
+/* all settings */
+.advsec { border: 1px solid var(--ring); border-radius: 10px; margin-bottom: 8px; background: var(--surface-2); }
+.advsec summary { cursor: pointer; padding: 10px 12px; list-style: none; }
+.advsec summary::-webkit-details-marker { display: none; }
+.advsec summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--muted); transition: transform .15s; }
+.advsec[open] summary::before { transform: rotate(90deg); }
+.advgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; padding: 0 12px 12px; }
+.advrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--ring); min-width: 0; }
+.advrow.changed { border-color: var(--warn-mark); }
+.advrow code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+.advrow .note { margin-top: 2px; }
+.advrow .in { display: flex; gap: 6px; align-items: center; flex: none; }
+/* buddy: the chat's little character */
+.buddy-card { display: flex; gap: 12px; align-items: center; }
+.buddy { width: 112px; height: 112px; flex: none; cursor: pointer; }
+.buddy svg { width: 100%; height: 100%; overflow: visible; }
+.b-head { fill: var(--surface-2); stroke: var(--accent); stroke-width: 3; }
+.b-torso { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 3; }
+.b-arm rect { fill: var(--accent); }
+.b-eye { fill: var(--ink); transform-box: fill-box; transform-origin: center; }
+.b-mouth { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.b-mouth-o { fill: var(--ink); opacity: 0; transform-box: fill-box; transform-origin: center; }
+.b-antenna { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.b-bulb { fill: var(--axis); }
+.b-cheek { fill: var(--bad); opacity: .18; }
+.b-screen { fill: var(--series-soft); }
+.b-body { transform-box: view-box; transform-origin: 60px 110px; animation: b-bob 3.2s ease-in-out infinite; }
+.b-eyes { transform-box: view-box; transform-origin: 60px 54px; }
+.b-eye { animation: b-blink 4.5s infinite; }
+.b-arm-l { transform-box: fill-box; transform-origin: 100% 50%; }
+.b-arm-r { transform-box: fill-box; transform-origin: 0% 50%; }
+.buddy-bubble { position: relative; flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--ring); border-radius: 12px;
+  padding: 8px 11px; font-size: 13px; line-height: 1.35; color: var(--ink); }
+.buddy-bubble::before { content: ""; position: absolute; left: -7px; top: 18px; border: 7px solid transparent; border-left: 0;
+  border-right-color: var(--ring); }
+.buddy-bubble small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+@keyframes b-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes b-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+@keyframes b-look { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+@keyframes b-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes b-type-l { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-22deg); } }
+@keyframes b-type-r { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(22deg); } }
+@keyframes b-wave { 0%, 100% { transform: rotate(-70deg); } 50% { transform: rotate(-95deg); } }
+@keyframes b-talk { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes b-jump { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-12px); } 55% { transform: translateY(0); } 70% { transform: translateY(-5px); } }
+@keyframes b-zz { 0% { opacity: 0; transform: translate(0, 0); } 50% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -14px); } }
+.buddy[data-state="think"] .b-eyes { animation: b-look 2.2s ease-in-out infinite; }
+.buddy[data-state="think"] .b-bulb, .buddy[data-state="tool"] .b-bulb { fill: var(--accent); animation: b-pulse .9s infinite; }
+.buddy[data-state="tool"] .b-arm-l { animation: b-type-l .32s infinite; }
+.buddy[data-state="tool"] .b-arm-r { animation: b-type-r .32s infinite .16s; }
+.buddy[data-state="tool"] .b-screen { fill: var(--accent-soft); }
+.buddy[data-state="talk"] .b-mouth-o { animation: b-talk .35s infinite; }
+.buddy[data-state="talk"] .b-bulb { fill: var(--series); }
+.buddy[data-state="wait"] .b-arm-r { animation: b-wave .8s ease-in-out infinite; }
+.buddy[data-state="wait"] .b-bulb { fill: var(--warn-mark); animation: b-pulse .6s infinite; }
+.buddy[data-state="happy"] .b-body { animation: b-jump .9s ease-out 2; }
+.buddy[data-state="happy"] .b-bulb { fill: var(--good-mark); }
+.buddy[data-state="happy"] .b-cheek { opacity: .45; }
+.buddy[data-state="sad"] .b-body { transform: translateY(3px); animation: none; }
+.buddy[data-state="sad"] .b-bulb { fill: var(--bad); }
+.buddy[data-state="sad"] .b-eye { transform: scaleY(.55); animation: none; }
+.buddy[data-state="sleep"] .b-eye { transform: scaleY(.12); animation: none; }
+.buddy[data-state="sleep"] .b-body { animation-duration: 5s; }
+.b-zz { opacity: 0; font: 700 13px system-ui; fill: var(--muted); }
+.buddy[data-state="sleep"] .b-zz { animation: b-zz 2.4s infinite; }
+@media (prefers-reduced-motion: reduce) { .buddy * { animation: none !important; } }
 /* guide */
 .guide { max-width: 980px; display: grid; gap: 16px; }
 .guide h3 { margin: 0 0 8px; font-size: 16px; }
@@ -506,6 +573,29 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
         </div>
       </section>
       <div class="stack">
+        <section class="panel">
+          <div class="buddy-card">
+            <div class="buddy" id="buddy" data-state="idle" role="img" aria-label="Claude's status" title="Click me for a tip">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <g class="b-body">
+                  <line class="b-antenna" x1="60" y1="20" x2="60" y2="31"/>
+                  <circle class="b-bulb" cx="60" cy="15" r="6"/>
+                  <rect class="b-head" x="26" y="31" width="68" height="50" rx="18"/>
+                  <rect class="b-screen" x="34" y="39" width="52" height="34" rx="11"/>
+                  <g class="b-eyes"><ellipse class="b-eye" cx="48" cy="54" rx="5.5" ry="7"/><ellipse class="b-eye" cx="72" cy="54" rx="5.5" ry="7"/></g>
+                  <circle class="b-cheek" cx="40" cy="64" r="4"/><circle class="b-cheek" cx="80" cy="64" r="4"/>
+                  <path class="b-mouth" d="M52 65 Q60 71 68 65"/>
+                  <ellipse class="b-mouth-o" cx="60" cy="67" rx="5" ry="4"/>
+                  <g class="b-arm b-arm-l"><rect x="20" y="88" width="20" height="7" rx="3.5"/></g>
+                  <g class="b-arm b-arm-r"><rect x="80" y="88" width="20" height="7" rx="3.5"/></g>
+                  <rect class="b-torso" x="38" y="81" width="44" height="26" rx="9"/>
+                  <text class="b-zz" x="92" y="28">z</text>
+                </g>
+              </svg>
+            </div>
+            <div class="buddy-bubble" id="buddy-bubble">Hi! Ask me anything about the bot.<small>click me for a tip</small></div>
+          </div>
+        </section>
         <section class="panel"><h2>Account <small id="cs-mode"></small></h2><div id="cs-acct"></div></section>
         <section class="panel"><h2>Open positions <small id="cs-pos-sub"></small></h2><div id="cs-pos" class="side-pos"></div></section>
         <section class="panel"><h2>Market pulse</h2><div id="cs-pulse"></div></section>
@@ -572,6 +662,14 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
         <label class="minisw"><span class="switch"><input type="checkbox" id="dep-keep"><i></i></span>Keep after a restart (saves the new starting balance)</label>
         <button class="primary" id="dep-add">Add to paper balance</button></div>
       <p class="note">Or just ask in Chat: “add 10 paper SOL”. Without “keep”, a restart starts again from <code>capital.starting_sol</code>.</p>
+    </section>
+    <section class="panel" id="adv-panel">
+      <h2>All settings <small>every other setting, applied live · Save to config keeps them after a restart · the frozen research test replays with its own locked settings</small></h2>
+      <div class="toolbar" style="margin-bottom:10px">
+        <input id="adv-q" type="search" placeholder="Search settings (stop, slippage, buyers, late…)" aria-label="Search settings" style="flex:1;min-width:180px">
+        <label class="minisw"><span class="switch"><input type="checkbox" id="adv-changed"><i></i></span>Only changed</label>
+      </div>
+      <div id="adv"><div class="empty">Loading…</div></div>
     </section>
   </section>
 
@@ -767,6 +865,7 @@ function logToasts(s) {
   }
   S.first = false;
   if (S.seen.size > 3000) S.seen = new Set([...S.seen].slice(-1500));
+  if (S.tab === "chat") { const c = fresh.filter(l => l.level === "close").pop(); if (c) buddyOnTrade(c); }
   fresh.reverse().filter(l => ["buy", "sell", "close", "error", "callout", "agent"].includes(l.level)).slice(-3)
     .forEach(l => toast(`<b>${l.level.toUpperCase()}</b> ${esc(l.text)}`, l.level, l.mint || null));
 }
@@ -1228,6 +1327,82 @@ function renderControls() {
   }).join("");
 }
 
+// ---------------------------------------------------------------- all settings
+const SECTION_NAMES = {late: "Graduation plays", execution: "Execution & fills", sizing: "Sizing", capital: "Capital",
+  risk_adapt: "Defense mode", exit: "Exits (sniper & copy)", entry: "Sniper entry & safety gates", copy: "Copy trading",
+  callouts: "Callouts", predict: "Prediction model", signals: "Signals"};
+const ADV_OPEN = new Set(["late", "execution"]);
+async function loadAdvanced() {
+  try { S.adv = await (await fetch("/api/controls/advanced", {cache: "no-store"})).json(); renderAdvanced(); }
+  catch (e) { $("adv").innerHTML = `<div class="empty">Couldn't load settings (${esc(e)})</div>`; }
+}
+function advRow(a) {
+  const name = a.key.split(".").slice(1).join(".");
+  let input;
+  if (a.type === "bool") input = `<span class="switch"><input type="checkbox" data-advkey="${esc(a.key)}" ${a.value ? "checked" : ""} aria-label="${esc(a.key)}"><i></i></span>`;
+  else if (a.type.startsWith("enum:")) input = `<div class="seg" role="group">${a.type.slice(5).split(",").map(v =>
+      `<button data-key="${esc(a.key)}" data-enum="${esc(v)}" aria-pressed="${v === a.value}">${esc(v)}</button>`).join("")}</div>`;
+  else input = `<span class="in"><input type="number" id="adv-${esc(a.key)}" value="${esc(a.value)}" step="any" style="width:96px" aria-label="${esc(a.key)}">
+      <button class="small" data-advapply="${esc(a.key)}">Apply</button></span>`;
+  return `<div class="advrow ${a.changed ? "changed" : ""}"><div style="min-width:0"><code>${esc(name)}</code>${a.changed ? ` <span class="tag late">default ${esc(a.default)}</span>` : ""}
+    <div class="note">${esc(a.help || "")}</div></div>${input}</div>`;
+}
+function renderAdvanced() {
+  if (!S.adv) return;
+  const q = $("adv-q").value.trim().toLowerCase(), only = $("adv-changed").checked;
+  const rows = S.adv.filter(a => (!q || (a.key + " " + a.help).toLowerCase().includes(q)) && (!only || a.changed));
+  const by = {};
+  rows.forEach(a => (by[a.section] = by[a.section] || []).push(a));
+  const order = Object.keys(SECTION_NAMES);
+  $("adv").innerHTML = Object.keys(by).sort((a, b) => order.indexOf(a) - order.indexOf(b)).map(sec => {
+    const ch = by[sec].filter(a => a.changed).length;
+    return `<details class="advsec" data-sec="${esc(sec)}" ${ADV_OPEN.has(sec) || q || only ? "open" : ""}><summary><b>${esc(SECTION_NAMES[sec] || sec)}</b>
+      <span class="note">· ${by[sec].length} settings${ch ? ` · <span style="color:var(--warn)">${ch} changed</span>` : ""}</span></summary>
+      <div class="advgrid">${by[sec].map(advRow).join("")}</div></details>`; }).join("") || `<div class="empty">No setting matches.</div>`;
+}
+
+// ---------------------------------------------------------------- buddy: the chat's little character
+const B = {state: "", override: null, timer: null, tip: 0};
+const TIPS = ["Paste a contract address and I'll pull its metrics.", "Say “more risk” or “less risk” to turn the dial (you approve).",
+  "“Desk check” = a full review of feed, P&L, positions and radar.", "Every action I take waits for your Approve.",
+  "Ask “why did we lose on the last trade?”", "Switch to Haiku in the menu to make your usage last longer."];
+function buddyBase() {
+  if (C.st.available === false) return ["sleep", "Claude Code isn't set up on this machine yet.", "install it and run claude once"];
+  const m = C.msgs[C.msgs.length - 1];
+  if (C.st.busy && m && m.role === "assistant" && !m.done) {
+    const pend = m.parts.find(p => p.approval && p.approval.status === "pending");
+    if (pend) return ["wait", "I need your OK for this one!", (TOOL[pend.name] || [0, pend.name])[1]];
+    const last = m.parts[m.parts.length - 1];
+    if (last && last.type === "tool" && last.status === "running") return ["tool", ((TOOL[last.name] || [0, 0, "Working"])[2]) + "…", ""];
+    if (last && last.type === "card" && last.status === "loading") return ["tool", "Pulling token metrics…", "on-chain, DexScreener, RugCheck"];
+    if (last && last.type === "text") return ["talk", "Writing…", ""];
+    return ["think", "Thinking…", C.st.model ? `model: ${C.st.model}` : ""];
+  }
+  if (snap && snap.halted) return ["sad", "Trading is halted.", snap.halted];
+  return ["idle", C.msgs.length ? "Anything else?" : "Hi! Ask me anything about the bot.", "click me for a tip"];
+}
+function buddyRender() {
+  const el = $("buddy"); if (!el) return;
+  const [st, text, sub] = B.override || buddyBase();
+  if (el.dataset.state !== st) el.dataset.state = st;
+  const html = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ""}`;
+  if ($("buddy-bubble").dataset.h !== html) { $("buddy-bubble").dataset.h = html; $("buddy-bubble").innerHTML = html; }
+}
+function buddyFlash(state, text, sub = "", ms = 3500) {
+  clearTimeout(B.timer); B.override = [state, text, sub]; buddyRender();
+  B.timer = setTimeout(() => { B.override = null; buddyRender(); }, ms);
+}
+function buddyOnDone(m) {
+  if (m.error) buddyFlash("sad", "That didn't work.", m.error.slice(0, 80), 6000);
+  else buddyFlash("happy", "Done!", m.meta ? `${m.meta.duration_s}s` : "");
+}
+function buddyOnTrade(l) {
+  const v = parseFloat((l.text.match(/([+-]\d+\.\d+) SOL/) || [])[1]);
+  if (!isFinite(v)) return;
+  if (v > 0) buddyFlash("happy", `Nice, ${l.text.split(" ")[0]} closed +${v.toFixed(3)} SOL!`, l.text.match(/\[(\w+)/)?.[1] || "");
+  else buddyFlash("sad", `Ouch, ${l.text.split(" ")[0]} closed ${v.toFixed(3)} SOL.`, l.text.match(/\[(\w+)/)?.[1] || "", 3000);
+}
+
 // ---------------------------------------------------------------- small svg visuals
 const fmtUsd = v => { v = +v; if (!isFinite(v)) return "–"; const a = Math.abs(v);
   return a >= 1e9 ? (v / 1e9).toFixed(2) + "B" : a >= 1e6 ? (v / 1e6).toFixed(2) + "M" : a >= 1e3 ? (v / 1e3).toFixed(1) + "K" : a >= 1 ? v.toFixed(0) : v.toFixed(2); };
@@ -1549,6 +1724,7 @@ function renderChat(scroll) {
   log.innerHTML = C.msgs.length ? C.msgs.map(m => `<div id="m-${esc(m.id)}">${msgHTML(m)}</div>`).join("") : welcomeHTML();
   renderChatHead();
   if (scroll) { if (C.msgs.length) toBottom(); else log.scrollTop = 0; }
+  buddyRender();
 }
 function renderMsg(m) {
   const log = $("ch-log"); if (!log) return;
@@ -1594,12 +1770,14 @@ function onChat(m) {
     const old = C.byId[m.msg.id]; C.byId[m.msg.id] = m.msg;
     if (old) C.msgs[C.msgs.indexOf(old)] = m.msg; else C.msgs.push(m.msg);
     if (C.loaded) renderMsg(m.msg);
-    if (m.msg.role === "assistant") chatAttention(m.msg);
+    if (m.msg.role === "assistant") { chatAttention(m.msg); if (m.msg.done && (!old || !old.done)) buddyOnDone(m.msg); }
+    buddyRender();
   } else if (m.ev === "delta") {
     const msg = C.byId[m.id]; if (!msg) return;
     const p = msg.parts; if (!p.length || p[p.length - 1].type !== "text") p.push({type: "text", text: ""});
     p[p.length - 1].text += m.text; if (C.loaded) renderMsg(msg);
-  } else if (m.ev === "status") { const {type, ev, ...rest} = m; Object.assign(C.st, rest); if (C.loaded) renderChatHead(); }
+    buddyRender();
+  } else if (m.ev === "status") { const {type, ev, ...rest} = m; Object.assign(C.st, rest); if (C.loaded) renderChatHead(); buddyRender(); }
   else if (m.ev === "cleared") { C.msgs = []; C.byId = {}; if (C.loaded) renderChat(true); }
 }
 function chatSend(text) {
@@ -1622,6 +1800,7 @@ function renderChatSide(s) {
   $("cs-pos").innerHTML = s.positions.map(p => `<div data-open="${esc(p.mint)}"><b>${esc(p.symbol)}</b><span class="note">${esc(p.source)} · ${dur(p.held_s)}</span><span class="num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span></div>`).join("")
     || `<div class="empty" style="padding:6px">None open</div>`;
   renderPulse("cs-pulse", null, s);
+  buddyRender();
   const ag = s.log.filter(l => l.level === "agent");
   $("cs-agent").innerHTML = ag.map(l => `<div class="agent" ${l.mint ? `data-open="${esc(l.mint)}"` : ""}><time>${hhmmss(l.ts)}</time><span>${esc(l.text)}</span></div>`).join("")
     || `<div class="empty" style="padding:6px">Nothing yet. Actions Claude takes show up here and on the Live tab.</div>`;
@@ -1641,6 +1820,7 @@ function setTab(t) {
     if (!C.loaded) loadChat(); else renderChat(true);
     if (snap) renderChatSide(snap); setTimeout(() => $("ch-in").focus(), 30); }
   if (t === "controls" && snap) $("paper-panel").hidden = snap.mode.startsWith("live");
+  if (t === "controls") loadAdvanced();
 }
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
@@ -1660,6 +1840,7 @@ function connect() {
       }
       if (m.text) toast(esc(m.text), m.ok ? "ok" : "bad");
       if (m.controls) { S.controls = m.controls; if (S.tab === "controls") renderControls(); }
+      if (m.advanced) { S.adv = m.advanced; if (S.tab === "controls") renderAdvanced(); }
       return;
     }
     render(m);
@@ -1677,6 +1858,10 @@ $("ctl-save").onclick = () => send({action: "save"});
 $("dep-add").onclick = () => { const v = +$("dep-sol").value; if (!(v > 0)) { toast("Enter how much SOL to add", "bad"); return; }
   const keep = $("dep-keep").checked;
   if (confirm(`Add ${v} SOL of pretend money to the paper balance${keep ? " and save it as the starting balance" : ""}?`)) send({action: "deposit", sol: v, keep}); };
+$("adv-q").oninput = renderAdvanced;
+$("adv-changed").onchange = renderAdvanced;
+$("buddy").onclick = () => { B.tip = (B.tip + 1) % TIPS.length; buddyFlash("happy", TIPS[B.tip], "tip " + (B.tip + 1) + "/" + TIPS.length, 6000); };
+document.addEventListener("toggle", e => { const d = e.target; if (d.matches && d.matches("details.advsec")) { if (d.open) ADV_OPEN.add(d.dataset.sec); else ADV_OPEN.delete(d.dataset.sec); } }, true);
 $("ch-send").onclick = () => C.st.busy ? send({action: "chat_stop"}) : chatSend();
 $("ch-in").addEventListener("input", growInput);
 $("ch-in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
@@ -1694,10 +1879,11 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply]");
   if (!t) return;
   const d = t.dataset;
   if (d.lv) { setRisk(+d.lv); return; }
+  if (d.advapply) { const v = $("adv-" + d.advapply).value; send({action: "set", key: d.advapply, value: v}); return; }
   if (d.decide) { send({action: "chat_decide", aid: d.decide, allow: d.allow === "1"}); t.closest(".btns")?.querySelectorAll("button").forEach(b => b.disabled = true); return; }
   if (d.ask !== undefined) { if (S.tab !== "chat") setTab("chat"); if (d.ask) chatSend(d.ask); else $("ch-in").focus(); return; }
   if (d.sell) { e.stopPropagation(); if (confirm("Sell this whole position now?")) send({action: "sell", mint: d.sell}); return; }
@@ -1711,9 +1897,11 @@ document.addEventListener("click", e => {
   if (d.tabLink) { setTab(d.tabLink); return; }
   if (d.open) openDrawer(d.open);
 });
-document.addEventListener("change", e => { const t = e.target; if (t.matches('.ctl input[type="checkbox"]')) send({action: "set", key: t.dataset.key, value: t.checked}); });
+document.addEventListener("change", e => { const t = e.target; if (t.matches('.ctl input[type="checkbox"]')) send({action: "set", key: t.dataset.key, value: t.checked});
+  if (t.matches("input[data-advkey]")) send({action: "set", key: t.dataset.advkey, value: t.checked}); });
 addEventListener("keydown", e => {
-  if (e.target.matches("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); if (e.key === "Enter" && e.target.id.startsWith("in-")) send({action: "set", key: e.target.id.slice(3), value: e.target.value}); return; }
+  if (e.target.matches("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); if (e.key === "Enter" && e.target.id.startsWith("in-")) send({action: "set", key: e.target.id.slice(3), value: e.target.value});
+    if (e.key === "Enter" && e.target.id.startsWith("adv-") && e.target.type === "number") send({action: "set", key: e.target.id.slice(4), value: e.target.value}); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openDrawer(e.target.dataset.open); return; }
   if (e.key === "Escape") closeDrawer();
