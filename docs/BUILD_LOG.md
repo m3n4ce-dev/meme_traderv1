@@ -20,6 +20,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Manual trade metrics:** pasting a contract address shows price, market cap, liquidity, volume, buys vs sells, price change, top-10 holding, holders, curve progress, age, dev holding and risk flags, with links to pump.fun, DexScreener and Solscan. It refreshes every ~20 s while the coin is in the box.
 - **Server:** `GET /api/ui` and the `ui_set` action (only the `layout` and `bots` keys, 64 KB cap, written atomically). Test: `test_page_layouts_and_bot_looks_are_saved_on_the_bot`.
 
+### Found checking the live bot (2026-10-04, 15:00–16:35 local)
+
+- **The AI desk forgot it was on.** The bot restarted at 16:00 and came back with the desk asleep: waking it was runtime-only, while `params.yaml` still said `desk.enabled: false`. In the 3½ minutes before it was woken again, the bot bought ARC and UNK at risk level Max, unreviewed; both devs dumped (−0.40 and −0.70 SOL).
+  - **Fix:** waking or resting the desk from the dashboard is saved to `params.yaml`, like the risk dial. When the bot rests a failing desk itself (3 failed reviews), that lasts only until the next restart.
+- **The paper account reset on every restart.** Only live mode saved its book, so each restart opened a fresh 5 SOL paper account. The dashboard showed "Today −1.09 SOL" and a 22% drawdown on a day whose trades were +3.17 SOL, and a restart also cleared the daily loss limit.
+  - **Fix:** the real-feed paper bot now saves and restores its book like live (`data/sniper_state_paper.json`): cash, today's P&L, the peak, deposits, the equity chart, the closed-trade list and open positions. The synthetic demo still starts fresh.
+  - **Start over:** Controls → Paper balance → **Start over…** (refused while positions are open). The trade files keep every trade either way.
+  - The first restart after this deploy still starts fresh (nothing was saved before).
+- **The feed flapped between endpoints.** With no `SOLANA_WS_URL`, PublicNode (≈10 s behind) is first in the list and mainnet-beta second. When mainnet-beta's lag briefly topped 5 s, the watchdog moved to PublicNode, found it slower and moved back: 40 switches in 35 minutes, each pausing entries while the new connection was measured.
+  - **Fix:** the watchdog remembers each endpoint's measured lag for 30 minutes. It leaves a slow endpoint only for one that isn't known to be slower; otherwise it stays (entries stay paused until the lag recovers). The 30-minute retry of the first endpoint skips it while it's known to be slower.
+- **A desk approval could vanish.** POLLM was approved at 15:52:56, but the buy sized to zero (the liquidity cap) and nothing said so. The graduation scanner then paid for a second review, which passed. Now an approval that can't be sized logs "desk approved … but skipped: the curve is too thin to size a buy".
+- **What the desk passed (23 reviews, 15:24–16:25; a small sample, not for tuning):**
+  - **Unanimous passes:** 6 of the 8 fell 60–75% within 3 minutes.
+  - **Coins with 3 of 4 buy votes**, still passed because the quorum counts conviction ("buy share 44% vs 45%"), split: cyber +89%, fartfun +30% and Plumb +18% at 3 minutes; FREESIM, CHAI, BYTE and MINIPAD fell.
+  - The gate audit (Analytics) now follows every coin the desk passes on a graduation play, grouped as "AI desk passed (graduation): N of 4 said buy", so the quorum can be judged on more data.
+
 ---
 
 ## 2026-10-04 — Entry #26: Manual trading, the office, the desk's memory, trade effects

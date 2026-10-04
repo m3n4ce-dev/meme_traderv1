@@ -40,7 +40,7 @@ Seven views. Switch with the tabs or the keys **1–7**:
   - **Graduation scanner:** every coin near its 55–85% window, checked rule by rule (the same check that decides a buy), with what it's still waiting for.
   - **Exit manager:** how close each open position is to each of its exits.
   - **Risk officer** and **feed watchdog:** the loss limit, drawdown and data health.
-  - **AI desk:** four Claude personas who vote on each entry. Asleep until you add an Anthropic API key, then **Wake the desk**. It bills your Anthropic account, roughly $0.04 per vote set, and adds a few seconds before each buy.
+  - **AI desk:** four Claude personas who vote on each entry. Asleep until you add an Anthropic API key, then **Wake the desk** (it stays awake after a restart until you rest it). It bills your Anthropic account, roughly $0.04 per vote set, and adds a few seconds before each buy.
     - A *user* key (`sk-ant-usr-…`) also needs your **Anthropic workspace ID** (`wrkspc_…`, from console.anthropic.com → Settings → Workspaces). A workspace key (`sk-ant-api…`) doesn't.
     - **Test** next to the key shows whether Anthropic accepts it.
     - If three reviews in a row get no answers, the desk rests itself and says why, so trading isn't silently blocked.
@@ -209,7 +209,7 @@ Claude Code has to be installed and logged in on this machine (run `claude` once
 
 **More or less risk.** Use the **risk dial** on the Live tab (or Controls), or tell Claude "more risk" / "less risk" in Chat. Raising it always waits for your Approve, even with "Ask before actions" off. Each level shows exactly what changes: dollars per trade, open positions, and the daily loss limit.
 
-**Paper balance.** Ask in Chat ("add 5 paper SOL"), or use **Controls → Paper balance**. A deposit counts as starting capital, not profit. It lasts until the bot restarts, unless you tick "keep", which saves the new starting balance to `config/params.yaml`.
+**Paper balance.** Ask in Chat ("add 5 paper SOL"), or use **Controls → Paper balance**. A deposit counts as starting capital, not profit. The paper account (cash, open positions, today's P&L and the daily loss limit) carries over restarts. **Start over…** resets it to `capital.starting_sol`; tick "keep" on a deposit to make that the new starting balance.
 
 **From a terminal.** Open Claude Code in the project folder:
 ```bash

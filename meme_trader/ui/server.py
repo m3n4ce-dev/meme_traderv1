@@ -275,7 +275,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             engine.say("info", f"{k['label']} set from the dashboard")
             note = " (restart the bot to use it)" if k["effect"] == "restart" else ""
             if k["name"].startswith("ANTHROPIC_") and engine.desk and engine.desk.enabled:
-                err = engine.set_desk(True)              # rebuild the desk's client with the new key now
+                err = engine.set_desk(True, who="key")   # rebuild the desk's client with the new key now
                 note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
         if action == "key_test":
@@ -287,7 +287,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             except keymod.KeyError_ as e:
                 return {"ok": False, "text": str(e)}
             if k["name"] == "ANTHROPIC_API_KEY" and engine.desk and engine.desk.enabled:
-                engine.set_desk(False)
+                engine.set_desk(False, who="key")
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} removed"}
         if action == "rec":
             try:
@@ -299,7 +299,11 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "desk_wake":
             on = bool(cmd.get("on"))
             err = engine.set_desk(on)
-            return {"ok": not err, "text": err or ("AI desk is awake: it votes on every entry" if on else "AI desk is resting")}
+            return {"ok": not err, "text": err or ("AI desk is awake: it votes on every entry (stays on after a restart)" if on
+                                                   else "AI desk is resting (stays off after a restart)")}
+        if action == "paper_reset":
+            err = engine.reset_paper()
+            return {"ok": not err, "text": err or f"Paper account started over at {engine.book.start_sol:g} SOL"}
         if action in ("pf_add", "pf_remove", "pf_refresh"):
             try:
                 if action == "pf_add":
