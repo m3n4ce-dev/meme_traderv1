@@ -1697,6 +1697,7 @@ class Engine:
                 self.p.desk["enabled"] = False
                 return f"couldn't start the desk: {type(e).__name__}: {e}"[:200]
             self.desk_failures, self.desk_error = 0, ""
+            self.desk_reviews.clear()                   # votes from before this wake (maybe another key) are stale
             self.p.desk["enabled"] = True
             self.desk.enabled = True
             self.say("info", "AI desk is on: its personas now vote on every entry (Anthropic API, billed per call)")

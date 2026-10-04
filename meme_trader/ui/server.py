@@ -256,8 +256,11 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             except keymod.KeyError_ as e:
                 return {"ok": False, "text": str(e)}
             engine.say("info", f"{k['label']} set from the dashboard")
-            return {"ok": True, "keys": keymod.status(env_path),
-                    "text": f"{k['label']} saved to .env" + (" (restart the bot to use it)" if k["effect"] == "restart" else "")}
+            note = " (restart the bot to use it)" if k["effect"] == "restart" else ""
+            if k["name"].startswith("ANTHROPIC_") and engine.desk and engine.desk.enabled:
+                err = engine.set_desk(True)              # rebuild the desk's client with the new key now
+                note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
+            return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
         if action == "key_test":
             ok, text = await keymod.test_anthropic()
             return {"ok": ok, "text": ("✓ " if ok else "✕ ") + text}
