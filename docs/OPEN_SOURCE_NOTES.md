@@ -42,9 +42,9 @@ built to steal wallets. Patterns seen:
    - In a 20 s live sample, 357 of 369 trades were SOL-quoted (`quote_mint` all zeros, quote fields equal to the SOL fields).
    - 11 were **USDC-quoted** and 1 used another token.
    - For those, `sol_amount` and `virtual_sol_reserves` are **0**, so this bot reads them as price 0. They never reach a trading window, so nothing is bought wrongly, but about 3% of the market is invisible.
-   - Proposed fix: decode `quote_mint` and skip non-SOL coins explicitly, with a counter.
+   - Fixed in BUILD_LOG #24: decode `quote_mint` and skip non-SOL coins explicitly, with a counter.
 2. **ipfs.io rate-limits this machine** (HTTP 429), as does dweb.link, which public gateways redirect to.
    - pump.fun metadata lives there, so the bot's per-launch social-link lookups (X / Telegram / website) are likely failing often.
    - The logo fetcher now falls back to other gateways (pump.fun's Pinata, 4everland, public Pinata).
-   - Proposed: the same fallback for the social-link lookup.
+   - Fixed in BUILD_LOG #24: the same fallback for the social-link lookup.
 3. **Latency is the gating cost, not code.** The fastest bots all use pre-execution data (shreds) or Geyser plus paid landing routes. Nothing in the open-source world changes the conclusion of BUILD_LOG #18.
