@@ -142,6 +142,8 @@ class SniperPosition:
     exit_delay_s: float = 0.0
     failed_fees_sol: float = 0.0
     manual: dict | None = None   # manual positions: {"sl", "tp", "tp_frac", "trail", "tp_done"} (0 = off)
+    adds: list | None = None     # buys added to the position later: [(ts, sol, tokens, price)]
+    bot: str = ""                # your position handed to the bots: the exit rules they run on it ("late", "sniper")
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100

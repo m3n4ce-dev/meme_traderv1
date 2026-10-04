@@ -33,6 +33,20 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **Wardrobe → "Change your looks":** a bot row, categories (hair 9 styles and 14 colours, 8 hats, glasses, 7 tops, 4 bottoms, shoes, 6 skin tones), preview tiles of the selected bot, colour swatches, a turnable preview, Random, Reset and the name.
   - Saved on the bot as `{name, look}`; looks saved before this still load.
 
+- **Owner's follow-ups the same evening:**
+  - **Chat bubbles:** they cut text off, drifted off the edge of the room, and idle lines repeated.
+    - Bubbles now wrap (up to 3 lines), stack by their measured height, stay inside the room and point at the speaker.
+    - A **Room chat** panel on the Desk tab keeps everything said.
+    - Idle chatter comes from big pools: places, plus a voice for each bot. A line is never used twice: used lines are remembered in this browser, and when a pool runs dry, lines are made from live numbers. No identical line from anyone within 5 minutes.
+  - **Add to an open position:** buying a coin you hold adds to that position. You get one position with a token-weighted average entry and the added cost in its P&L. Works on bot and manual positions, through instant, delayed-paper and late-confirmed live fills. Position cards have ＋ buttons, and Buy says "＋ Add".
+  - **Hand positions to the bots** ("in case I need to leave"):
+    - **🤖 Hand to the bots** on each of your positions switches it to the bots' exit rules: graduation exits past half the curve, sniper exits below. **Take back** returns it.
+    - **🚶 Away** hands over everything you hold, plus anything your limit orders open, until **I'm back**.
+    - Claude can do it from Chat (`hand_over_positions`, with your Approve).
+    - Fixed along the way: your own positions could be force-sold at the bots' max-hold time while their price was unknown.
+  - **Empty charts:** a position in a coin nobody has traded since you bought it now shows a line from entry to the last price, with a note. The detail panel explains the missing chart. Buying a coin with no trades for 3+ minutes asks first.
+  - Pulse no longer lists "graduations" under a $20K market cap (instant migrations of coins that never filled their curve). The trade panel starts with a default size, so Buy works in one click.
+
 ---
 
 ## 2026-10-04 — Entry #28: Pulse, limit orders, the call ledger, X and Telegram posting, notes the desk replies to, a real guide

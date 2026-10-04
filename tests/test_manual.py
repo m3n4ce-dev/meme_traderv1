@@ -53,7 +53,7 @@ def test_manual_buy_skips_pause_and_seats_but_not_the_kill_switch():
     assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
     pos = e.positions[s.mint]
     assert pos.source == "manual" and pos.initial_cost_sol == pytest.approx(0.1, rel=0.05)
-    assert "already holding" in asyncio.run(e.manual_buy(s.mint, 0.1))
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == "" and e.positions[s.mint].adds   # a second buy adds to it
     other = next(x for x in e.tokens.values() if x.price_known and not x.migrated and x.mint != s.mint)
     assert "at most" in asyncio.run(e.manual_buy(other.mint, 50))
     e.book.halted = "manual kill switch"
@@ -156,3 +156,66 @@ def test_dashboard_actions(tmp_path):
     assert out["exits"]["ok"] and out["sell"]["ok"]
     assert e.positions[s.mint].manual["sl"] == 30 and e.positions[s.mint].tokens < e.positions[s.mint].initial_tokens
     assert out["note"]["ok"] and out["note"]["memory"]["items"][0]["note"] == "mine"
+
+
+def test_buying_a_coin_you_hold_adds_to_the_position():
+    """Owner: 'I want to be able to add more funds to already open positions' (it used to refuse)."""
+    e = market()
+    s = live_coin(e)
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
+    pos = e.positions[s.mint]
+    t1, c1, p1 = pos.tokens, pos.initial_cost_sol, pos.entry_price
+    s.curve.v_sol *= 1.5                                       # price up 50%, then add more
+    cash = e.book.sol
+    assert asyncio.run(e.manual_buy(s.mint, 0.2)) == ""
+    pos = e.positions[s.mint]
+    assert pos.initial_cost_sol == pytest.approx(c1 + 0.2, rel=0.02) and pos.tokens > t1
+    assert p1 < pos.entry_price < s.curve.price                 # token-weighted average entry
+    assert e.book.sol == pytest.approx(cash - 0.2, rel=0.02) and len(pos.adds) == 1
+    assert asyncio.run(e.manual_sell(s.mint, 1)) == ""
+    row = e.book.closed[-1]
+    assert row["cost"] == pytest.approx(c1 + 0.2, rel=0.02)      # P&L counts both buys
+    assert "at most" in asyncio.run(e.manual_buy(live_coin(e).mint, 50))
+
+
+def test_adds_land_late_in_paper_too():
+    e = market()
+    e.p.execution["paper_delay_s"] = 2.0
+    s = live_coin(e)
+
+    async def go():
+        assert await e.manual_buy(s.mint, 0.1) == ""
+        e.now += 3
+        await e._settle_deferred()
+        first = e.positions[s.mint].initial_cost_sol
+        assert await e.manual_buy(s.mint, 0.1) == ""
+        assert "in flight" in await e.manual_buy(s.mint, 0.1)  # one order at a time per coin
+        e.now += 3
+        await e._settle_deferred()
+        return first, e.positions[s.mint]
+    first, pos = asyncio.run(go())
+    assert pos.initial_cost_sol == pytest.approx(first + 0.1, rel=0.03) and len(pos.adds) == 1
+
+
+def test_hand_your_positions_to_the_bots_and_take_them_back():
+    """Owner: 'tell the agents to take over certain or all positions including manual ones in case I need to leave'."""
+    e = market()
+    a = live_coin(e)
+    assert asyncio.run(e.manual_buy(a.mint, 0.1)) == ""
+    b = next(x for x in e.tokens.values() if x.price_known and not x.migrated and x.mint != a.mint and x.curve.progress < .8)
+    assert asyncio.run(e.manual_buy(b.mint, 0.1)) == ""
+    a.curve.v_sol *= 0.5                                       # down hard: your rules (none set) keep holding
+    asyncio.run(e._check_exit(a))
+    assert a.mint in e.positions
+    n, err = e.hand_over(a.mint, True)
+    assert n == 1 and not err and e.positions[a.mint].bot in ("sniper", "late")
+    assert "already handed over" in e.hand_over(a.mint, True)[1]
+    asyncio.run(e._check_exit(a))                              # the bots' stop loss sells it
+    assert a.mint not in e.positions
+    assert "Away mode on" in e.set_away(True) and e.away
+    assert e.positions[b.mint].bot                             # away: everything you hold goes to the bots
+    c = next(x for x in e.tokens.values() if x.price_known and not x.migrated and x.mint not in (a.mint, b.mint) and x.curve.progress < .8)
+    asyncio.run(e.manual_buy(c.mint, 0.1))
+    assert e.positions[c.mint].bot                             # and anything you open while away
+    assert "back" in e.set_away(False).lower()
+    assert not any(p.bot for p in e.positions.values())
