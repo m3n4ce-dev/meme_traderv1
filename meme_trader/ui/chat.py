@@ -31,7 +31,7 @@ from ..sniper.lookup import brief, is_mint, lookup
 
 TOOL_PREFIX = "mcp__meme-trader__"
 READ_TOOLS = ["get_status", "get_positions", "get_radar", "get_token", "lookup_token", "get_analytics",
-              "get_recent_trades", "get_log", "get_settings"]
+              "get_recent_trades", "get_log", "get_settings", "get_memory"]
 MODELS = ("", "opus", "sonnet", "haiku")
 MAX_MESSAGES = 300
 ENV_KEEP = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LANGUAGE", "TERM", "SHELL", "TMPDIR", "TZ",

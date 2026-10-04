@@ -4,6 +4,31 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #26: Manual trading, the office, the desk's memory, trade effects
+
+- **Manual trading (Live → Manual trade, every position card, every coin's detail drawer):**
+  - **Buying:** presets, a custom amount, and a one-click **🦍 APE**.
+  - **Selling:** **25% / 50%**, **Initials** (sell just enough to get the initial cost back, net of fees; refused when that would mean the whole bag) and **Exit**, on any position, the bot's or yours.
+  - **Settings:** `sniper.manual` (`max_sol`, presets, `ape_sol`, default stop / take profit / trail).
+  - **Rules for your trades:** the same order path as the bot (paper delays and fees; the live executor in live mode, after a confirm). "Paused" and "max positions" don't apply, because those are the bot's limits. The kill switch, a degraded feed, the daily loss limit and cash do.
+  - **Your positions** exit only on the rules you set per position (stop, take profit, trail), plus a sale when the coin graduates: the bot prices and sells on the bonding curve only.
+  - **A coin with no live price yet** is bought at its first trade, within `queue_s`.
+- **The office (Desk tab):** a side-view office replaces the desk row.
+  - **The room:** a window with a skyline (day or night by local time) and a live SOL / P&L ticker, a clock with real hands, a HODL poster, a corkboard, a coffee machine with steam, a water cooler, plants, desks with monitors, the AI meeting table, and a couch.
+  - **The bots** walk with swinging legs, sit and type at their desks, and take coffee, water, window and plant breaks. They chat in pairs about real data, and one walks over to read each new memory note on the corkboard. They rush back to their desk on an alert or a trade.
+  - **The AI personas** nap on the couch while the desk is off, and sit at the meeting table when awake.
+  - **Bubbles take turns** by neighbourhood (urgent news quiets the neighbours).
+- **Trade effects:** a "BOUGHT", "INITIALS OUT" or "+0.123 SOL" stamp, with coins and confetti for buys and wins and red shards with a screen shake for losses. The bot that made the move reacts in the office.
+- **The desk's memory (Desk → Teach the desk; `sniper/memory.py`, `data/memory.json`):** paste an X post or article link, a contract address, or a note, with an optional comment.
+  - **Links:** X posts and articles come through FxTwitter, other pages through the same public-only, size-capped fetcher as token metadata.
+  - **Contract addresses** get a metrics snapshot, and the bot starts watching the coin.
+  - **Who reads it:**
+    - Claude in the Chat tab reads memory with the new `get_memory` tool.
+    - The AI desk sees your notes on a coin it's voting on (`owner_notes`, marked as data, never instructions).
+    - The corkboard shows the newest six.
+
+---
+
 ## 2026-10-04 — Entry #25: The AI desk's key problem, and the agents at their desks
 
 - **Why the AI desk failed:** every persona got HTTP 400 "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header".

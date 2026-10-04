@@ -141,6 +141,7 @@ class SniperPosition:
     exit_fill: float = 0.0
     exit_delay_s: float = 0.0
     failed_fees_sol: float = 0.0
+    manual: dict | None = None   # manual positions: {"sl", "tp", "tp_frac", "trail", "tp_done"} (0 = off)
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
@@ -296,6 +297,35 @@ def evaluate_late_exit(pos: SniperPosition, s: TokenState, now: float, L, x):
     if now - s.last_high_ts() >= L.stall_s and held >= L.stall_s:
         return 1.0, f"late stall {L.stall_s:.0f}s"
     return None
+
+
+# --------------------------------------------------------------------------- manual positions
+def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
+    """Your own position: no strategy exits, only what you set (stop, take profit, trail), plus an exit when
+    the coin leaves the bonding curve (the bot can't price or sell it after). (fraction, reason) or None."""
+    price = s.curve.price
+    pos.peak_price = max(pos.peak_price, price)
+    gain = pos.gain_pct(price)
+    if s.migrated and m.get("sell_on_graduation", True):
+        return 1.0, "manual: graduated (curve only)"
+    if m.get("sl") and gain <= -m["sl"]:
+        return 1.0, f"manual stop {gain:.0f}%"
+    if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:
+        m["tp_done"] = True
+        return min(max(float(m.get("tp_frac") or 0.5), 0.05), 1.0), f"manual take profit {gain:+.0f}%"
+    if m.get("trail") and gain > 0 and pos.peak_price and price <= pos.peak_price * (1 - m["trail"] / 100):
+        return 1.0, f"manual trail -{m['trail']:.0f}% off peak"
+    return None
+
+
+def initials_fraction(pos: SniperPosition, price: float, fee_pct: float) -> float | None:
+    """The share of the bag to sell to get back what's still owed of the initial cost (net of fees).
+    None if it would take the whole bag (or more): then it isn't 'initials', it's an exit."""
+    owed = pos.initial_cost_sol - pos.proceeds_sol
+    value = pos.tokens * price * (1 - fee_pct / 100)
+    if owed <= 0 or value <= 0 or owed >= value:
+        return None
+    return owed / value
 
 
 # --------------------------------------------------------------------------- what the bots are thinking

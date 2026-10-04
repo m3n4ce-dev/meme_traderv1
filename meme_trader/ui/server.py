@@ -15,7 +15,8 @@ this port to the internet without putting auth in front of it.
   WS  /ws                a hello with the UI version (an open page reloads itself after an update), then
                          1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
                          risk lookup chat chat_stop chat_new chat_decide chat_opts key_set key_clear rec
-                         desk_wake pf_add pf_remove pf_refresh x_add x_remove x_auto
+                         desk_wake pf_add pf_remove pf_refresh x_add x_remove x_auto key_test mem_add mem_del
+                         m_buy m_ape m_sell m_initials m_exits (manual trading)
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
@@ -137,6 +138,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
     async def xfeed(_):
         return _json(xf.view())
+
+    async def memory(request):
+        q, mint = request.query.get("q", ""), request.query.get("mint", "")
+        return _json({"items": engine.memory.items(q=q, mint=mint, limit=100), "total": len(engine.memory.items_)})
 
     async def logo(request):
         img = await logos.get(request.match_info["mint"])
@@ -296,6 +301,45 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": str(e)}
             return {"ok": True, "portfolio": pf.view(), "text": {"pf_add": "Watching it", "pf_remove": "Removed",
                                                                   "pf_refresh": "Refreshing"}[action]}
+        if action == "mem_add":
+            from ..sniper.lookup import lookup
+            from ..sniper.memory import MemoryError_
+
+            async def look(mint):
+                try:
+                    return await lookup(mint, engine, watch=True)
+                except ValueError:
+                    return {}
+            try:
+                it = await engine.memory.add(str(cmd.get("text") or ""), str(cmd.get("note") or ""), lookup=look)
+            except (MemoryError_, OSError, asyncio.TimeoutError) as e:
+                return {"ok": False, "text": f"couldn't save that: {e}"}
+            engine.say("info", f"memory: saved {it['kind']} \"{it['title'][:60]}\"", it.get("mint") or "")
+            return {"ok": True, "memory": {"items": engine.memory.items(limit=100), "total": len(engine.memory.items_)},
+                    "added": it, "text": f"Saved to the desk's memory: {it['title'][:70]}"}
+        if action == "mem_del":
+            engine.memory.remove(str(cmd.get("id") or ""))
+            return {"ok": True, "memory": {"items": engine.memory.items(limit=100), "total": len(engine.memory.items_)},
+                    "text": "Removed from memory"}
+        if action in ("m_buy", "m_ape"):
+            sol = engine._manual_cfg().ape_sol if action == "m_ape" else cmd.get("sol")
+            mint = str(cmd.get("mint") or "").strip()
+            err = await engine.manual_buy(mint, sol)
+            if err:
+                return {"ok": False, "text": err}
+            if mint in engine.manual_queue:
+                return {"ok": True, "text": f"Queued {float(sol):g} SOL: buying at its first trade on the curve"}
+            return {"ok": True, "text": f"🦍 Aped {float(sol):g} SOL" if action == "m_ape" else f"Buy {float(sol):g} SOL sent"}
+        if action == "m_sell":
+            err = await engine.manual_sell(str(cmd.get("mint") or ""), cmd.get("fraction"))
+            return {"ok": not err, "text": err or "Sell sent"}
+        if action == "m_initials":
+            err = await engine.take_initials(str(cmd.get("mint") or ""))
+            return {"ok": not err, "text": err or "Taking initials: the rest rides for free"}
+        if action == "m_exits":
+            err = engine.set_manual_exits(str(cmd.get("mint") or ""), cmd.get("sl"), cmd.get("tp"), cmd.get("tp_frac"),
+                                          cmd.get("trail"))
+            return {"ok": not err, "text": err or "Exit rules saved for that position"}
         if action in ("x_add", "x_remove", "x_auto"):
             try:
                 if action == "x_add":
@@ -330,7 +374,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
                     web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced),
                     web.get("/api/desk", desk), web.get("/api/keys", keys), web.get("/api/portfolio", portfolio),
-                    web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo)])
+                    web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory)])
 
     async def _start_bg(_app):
         spawn(xf.run())
