@@ -4,6 +4,30 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #21: Wallet study (wallets-v1) registered, recorder running
+
+- **Why:** an X article claims the edge is following wallets that were early on several different runners into
+  coins at least 14 days old. It shows no record. That kind of hold takes days, so our execution delay doesn't
+  matter, which makes it worth a proper test. See [WALLETS.md](WALLETS.md).
+- **Rules registered first:** `research/policies/wallets-v1.yaml`, signature `904875fa93aa`, before any data.
+  - Wallets are chosen in period A (≥ 14 days) and frozen.
+  - Period B decides, against random-coin and random-wallet baselines, with the pass mark fixed in the file.
+- **Recorder:** `python -m meme_trader.wallets record`, user service `meme-wallets`.
+  - Discovery: 45 s samples of the PumpSwap stream every 15 min.
+  - Metadata from DexScreener; trades from GeckoTerminal at 5 calls/min, for pump.fun coins' pools at least
+    2 days old with at least $5K liquidity; daily candles for the dump gate.
+  - `mode: stream` (complete, ~80 GB/day download) is available but off.
+- **Measured on the way:**
+  - The full PumpSwap stream is 0.9 MB/s.
+  - PublicNode drops most per-pool subscriptions and throttled this IP after a few dozen. The bot's feed failed
+    over to api.mainnet-beta, which ran at 1.2 s lag with no gaps. The recorder therefore uses one PublicNode
+    connection, never the bot's endpoint.
+  - GeckoTerminal sustains ~5 calls/min.
+  - Coins 14+ days old are ~3% of PumpSwap trades.
+- Earliest verdict: around 2026-11-01.
+
+---
+
 ## 2026-10-04 — Entry #20: All settings on the dashboard, and a chat buddy
 
 - **Controls → All settings:** every other scalar setting (about 110: graduation plays, execution, sizing, exits, entry gates, copy, callouts, defense mode) can be changed live, with search, an "only changed" filter, its default, and the help text from `params.example.yaml`. **Save to config** writes the ones changed this run.
