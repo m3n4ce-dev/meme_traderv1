@@ -114,6 +114,35 @@ def aggregate(votes: list[Vote], weights: dict, quorum: float, veto_conviction: 
     return Verdict(approve, size, votes, f"{'APPROVED' if approve else 'PASSED'} {tally} | {why}")
 
 
+def client_kwargs() -> dict:
+    """A user API key (sk-ant-usr-...) isn't tied to a workspace: every request must name one in the
+    anthropic-workspace-id header (ANTHROPIC_WORKSPACE_ID). Workspace keys (sk-ant-api...) don't need it."""
+    ws = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+    return {"default_headers": {"anthropic-workspace-id": ws}} if ws else {}
+
+
+def friendly_error(err: str) -> str:
+    """One plain sentence for the dashboard from an Anthropic SDK error string."""
+    e = (err or "").lower()
+    if "not scoped to a workspace" in e:
+        return "the API key is a user key: add your Anthropic workspace ID in Controls (or use a workspace key)"
+    if "invalid x-api-key" in e or "authentication" in e or "401" in e:
+        return "Anthropic rejected the API key"
+    if "credit balance" in e or "billing" in e:
+        return "the Anthropic account is out of credits"
+    if "permission" in e or "403" in e:
+        return "the API key isn't allowed to use this model"
+    if "rate" in e and "limit" in e or "429" in e:
+        return "Anthropic is rate-limiting the key"
+    if "overloaded" in e or "529" in e:
+        return "Anthropic is overloaded right now"
+    if "timeout" in e:
+        return "the vote took too long"
+    if "not_found" in e or "model" in e and "not" in e and "found" in e:
+        return "the model name isn't available to this key"
+    return (err or "unknown error")[:120]
+
+
 class Desk:
     def __init__(self, p, client=None):
         """p: params.sniper.desk"""
@@ -122,7 +151,7 @@ class Desk:
         if client is None and p.enabled and os.environ.get("ANTHROPIC_API_KEY"):
             import anthropic
 
-            self.client = anthropic.AsyncAnthropic()
+            self.client = anthropic.AsyncAnthropic(**client_kwargs())
         self.enabled = bool(p.enabled and self.client)
         self.calls = 0
         self.input_tokens = 0
@@ -148,7 +177,7 @@ class Desk:
             d = json.loads(text)
             return Vote(persona, d["vote"], max(0, min(100, int(d["conviction"]))), d["reasons"][:3], d["red_flags"][:5])
         except Exception as e:  # network, rate limit, parse - never block trading on the desk
-            return Vote(persona, "pass", 0, error=f"{type(e).__name__}: {e}"[:160])
+            return Vote(persona, "pass", 0, error=f"{type(e).__name__}: {e}"[:400])
 
     async def review(self, snapshot: dict) -> Verdict:
         personas = list(self.p.personas)

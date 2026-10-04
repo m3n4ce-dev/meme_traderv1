@@ -392,3 +392,75 @@ def test_ipfs_links_fall_back_to_other_gateways():
     assert urls[0] == f"https://ipfs.io/ipfs/{cid}" and urls[1:] == [g + cid for g in GATEWAYS]
     assert ipfs_urls("https://cdn.dexscreener.com/cms/images/x?w=1") == ["https://cdn.dexscreener.com/cms/images/x?w=1"]
     assert ipfs_urls(f"ipfs://{cid}")[0] == f"https://ipfs.io/ipfs/{cid}"
+
+
+# ---------------------------------------------------------------- the AI desk's key problems
+def test_workspace_header_and_friendly_errors(monkeypatch):
+    from meme_trader.sniper.desk import client_kwargs, friendly_error
+
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID", raising=False)
+    assert client_kwargs() == {}
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_01ABCdef")
+    assert client_kwargs() == {"default_headers": {"anthropic-workspace-id": "wrkspc_01ABCdef"}}
+    real = ("BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': "
+            "'This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header'}}")
+    assert "workspace ID" in friendly_error(real)
+    assert "out of credits" in friendly_error("Your credit balance is too low")
+    assert "rejected the API key" in friendly_error("AuthenticationError: 401 invalid x-api-key")
+
+
+def test_user_key_warning_and_workspace_validation(tmp_path, monkeypatch):
+    from meme_trader.ui import keys
+
+    env = tmp_path / ".env"
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID"):
+        monkeypatch.delenv(k, raising=False)
+    keys.set_key("ANTHROPIC_API_KEY", "sk-ant-usr-" + "x" * 90, env)
+    st = {s["name"]: s for s in keys.status(env)}
+    assert st["ANTHROPIC_API_KEY"]["warn"] and st["ANTHROPIC_API_KEY"]["testable"]
+    with pytest.raises(keys.KeyError_, match="wrkspc_"):
+        keys.set_key("ANTHROPIC_WORKSPACE_ID", "my-workspace", env)
+    keys.set_key("ANTHROPIC_WORKSPACE_ID", "wrkspc_01ABCdefGHI", env)
+    st = {s["name"]: s for s in keys.status(env)}
+    assert not st["ANTHROPIC_API_KEY"]["warn"] and st["ANTHROPIC_WORKSPACE_ID"]["hint"] == "wrkspc_01ABCdefGHI"
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID"):
+        os.environ.pop(k, None)
+
+
+def test_key_test_without_a_key(monkeypatch):
+    from meme_trader.ui import keys
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert asyncio.run(keys.test_anthropic()) == (False, "no Anthropic API key saved")
+
+
+def test_a_broken_desk_rests_itself_after_three_failed_reviews(monkeypatch):
+    """Every persona erroring means the desk passes every trade: after 3 such reviews it steps aside."""
+    from meme_trader.sniper.desk import Vote, aggregate
+
+    e = engine()
+    err = "BadRequestError: This API key is not scoped to a workspace, so this request must include ..."
+
+    class Broken:
+        enabled, client, calls = True, object(), 0
+
+        async def review(self, snap):
+            return aggregate([Vote(p, "pass", 0, error=err) for p in ("veteran", "skeptic")], {}, 0.45, 75)
+
+        def cost_usd(self):
+            return 0.0
+    e.desk = Broken()
+    e.p.desk["enabled"] = True
+
+    async def go():
+        async for ev in SyntheticFeed(seed=3, speed=0, launches=40, start_ts=1_780_000_000).events():
+            await e.handle(ev)
+        s = next(s for s in e.tokens.values() if s.price_known)
+        for _ in range(3):
+            e.reviewing.add(s.mint)
+            await e._desk_then_buy(s, "late", 60.0, 0.05, [], "late", "", 0.0)
+        return s
+    asyncio.run(go())
+    assert not e.desk.enabled and not e.p.desk.enabled and "workspace" in e.desk_error
+    assert any("put to rest" in l["text"] for l in e.log)
+    assert e.desk_view()["desk"]["error"]

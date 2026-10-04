@@ -41,6 +41,10 @@ Seven views. Switch with the tabs or the keys **1–7**:
   - **Exit manager:** how close each open position is to each of its exits.
   - **Risk officer** and **feed watchdog:** the loss limit, drawdown and data health.
   - **AI desk:** four Claude personas who vote on each entry. Asleep until you add an Anthropic API key, then **Wake the desk**. It bills your Anthropic account, roughly $0.04 per vote set, and adds a few seconds before each buy.
+    - A *user* key (`sk-ant-usr-…`) also needs your **Anthropic workspace ID** (`wrkspc_…`, from console.anthropic.com → Settings → Workspaces). A workspace key (`sk-ant-api…`) doesn't.
+    - **Test** next to the key shows whether Anthropic accepts it.
+    - If three reviews in a row get no answers, the desk rests itself and says why, so trading isn't silently blocked.
+  - The agents sit at two desks with speech bubbles. Click any of them for its card and controls.
   - **Wallet recorder:** pause it, pause it for 1, 4 or 12 hours, or set daily quiet hours. Every pause is logged so the wallet study knows about the gap.
   - **Thought stream:** every decision as it happens.
   - **𝕏 feed:** public posts from accounts and searches you pick, plus each coin the bot holds. It reads public posts through FxTwitter, so no X login or paid API is needed. Contract addresses in posts are clickable.
