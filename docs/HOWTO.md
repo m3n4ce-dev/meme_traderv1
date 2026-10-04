@@ -44,16 +44,20 @@ Seven views. Switch with the tabs or the keys **1–7**:
     - A *user* key (`sk-ant-usr-…`) also needs your **Anthropic workspace ID** (`wrkspc_…`, from console.anthropic.com → Settings → Workspaces). A workspace key (`sk-ant-api…`) doesn't.
     - **Test** next to the key shows whether Anthropic accepts it.
     - If three reviews in a row get no answers, the desk rests itself and says why, so trading isn't silently blocked.
-  - The agents sit at two desks with speech bubbles. Click any of them for its card and controls.
   - **Wallet recorder:** pause it, pause it for 1, 4 or 12 hours, or set daily quiet hours. Every pause is logged so the wallet study knows about the gap.
   - **Thought stream:** every decision as it happens.
   - **𝕏 feed:** public posts from accounts and searches you pick, plus each coin the bot holds. It reads public posts through FxTwitter, so no X login or paid API is needed. Contract addresses in posts are clickable.
   - **Research:** progress of the running tests.
-  - **The office:** the agents live in a little office. They sit and type at their desks, take coffee and water breaks, chat about what's going on, and read new notes on the corkboard. Click any of them for their card and controls.
+  - **The trading room:** the agents work in a Habbo-style room. They type at their desks, walk round the furniture for coffee, water or a look out of the window, and talk about real numbers. Their chat rises above the room.
+    - **Hand-offs:** when the AI desk reviews a coin, the scanner carries it to the AI table and each persona says its vote. When the bot buys, the scanner hands the coin to the exit manager, who reports the result when it closes.
+    - **Click to zoom:** click a bot, the **P&L board** or the **corkboard** to zoom into its screen. Esc goes back.
+    - **Night shift:** after 17:30 (your clock) the room gets dark, the lamps and monitors glow and the city lights up.
+    - **👕 Wardrobe:** rename any bot and change its colour and hat. Every browser sees the change.
   - **Teach the desk:** paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory: Claude in Chat can read it, and the AI desk sees your notes on any coin it votes on.
 - **Chat**: talk to Claude about the bot (see [14](#14-let-claude-operate-the-bot)).
 - **Manual trading** (Live tab, position cards, and every coin's details):
   - Paste a contract address (or press **Trade** in a coin's details), pick an amount or type one, and press **Buy**. **🦍 APE** buys the preset size in one click.
+  - The coin's metrics appear under the address: price, market cap, liquidity, volume, buys vs sells, price change, top-10 holding, holders, curve, age, dev holding and risk flags. They refresh every ~20 s.
   - On any position, the bot's or yours: **25%**, **50%**, **Initials** (sell just enough to get your cost back; the rest rides free) and **Exit**.
   - **Your own positions** only exit on what you set on their card (stop, take profit, trail), plus when the coin graduates, because the bot can only trade the bonding curve. Defaults are in `sniper.manual`.
   - Pausing the bot doesn't block your trades. The kill switch, the daily loss limit and a broken feed do.
@@ -71,6 +75,7 @@ Seven views. Switch with the tabs or the keys **1–7**:
   - Paste a key and press Save: it goes into `.env` (readable only by you), is never shown again, and is never given to Claude.
   - Some keys work immediately (Anthropic, RPC URL); the rest after `systemctl --user restart meme-sniper`.
 - **Guide**: the same tour inside the app, plus keyboard shortcuts.
+- **✎ Arrange** (header, or the `a` key): drag panels by their bar to reorder any page, or hide the ones you don't use. **Reset to default** undoes it all. The layout is saved on the bot, so it follows you to any browser.
 
 Badges in the header:
 

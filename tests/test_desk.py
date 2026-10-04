@@ -499,3 +499,27 @@ def test_waking_the_desk_clears_stale_votes_and_a_new_key_rebuilds_it(monkeypatc
     m = asyncio.run(go())
     assert m["ok"] and "restarted with it" in m["text"] and built[-1].endswith("b" * 90) and e.desk.enabled
     os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_page_layouts_and_bot_looks_are_saved_on_the_bot(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    async def go():
+        async with TestClient(TestServer(make_app(engine(), data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.receive_json()
+            await ws.send_json({"action": "ui_set", "key": "bots", "value": {"scanner": {"name": "Hawk", "color": "#ff7a00", "acc": "crown"}}})
+            await ws.send_json({"action": "ui_set", "key": "layout", "value": {"live": {"order": {"live:0": ["live:recent-trades"]}, "hidden": []}}})
+            await ws.send_json({"action": "ui_set", "key": "secrets", "value": {"x": 1}})               # not a UI key
+            await ws.send_json({"action": "ui_set", "key": "layout", "value": {"x": "y" * 70_000}})    # too big
+            while (m := await ws.receive_json())["type"] != "ack":
+                pass
+            assert not m["ok"]
+            await ws.close()
+            return await (await c.get("/api/ui", headers={"Host": host})).json()
+    ui = asyncio.run(go())
+    assert ui["bots"]["scanner"]["name"] == "Hawk" and ui["layout"]["live"]["order"]["live:0"] == ["live:recent-trades"]
+    assert "secrets" not in ui
