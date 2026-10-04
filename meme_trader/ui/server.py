@@ -442,6 +442,13 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "mem_del":
             engine.memory.remove(str(cmd.get("id") or ""))
             return {"ok": True, "memory": memory_view(), "text": "Removed from memory"}
+        if action == "m_hand":
+            n, err = engine.hand_over(str(cmd.get("mint") or ""), bool(cmd.get("on")))
+            return {"ok": not err, "text": err or (("🤖 The bots manage it now: their exit rules apply" if cmd.get("on")
+                                                    else "✋ It's yours again: only your exits apply") if cmd.get("mint")
+                                                   else f"{n} position(s) {'handed to the bots' if cmd.get('on') else 'back to you'}")}
+        if action == "away":
+            return {"ok": True, "text": engine.set_away(bool(cmd.get("on")))}
         if action == "order_place":
             err, o = await engine.place_order(str(cmd.get("mint") or ""), str(cmd.get("side") or ""),
                                               str(cmd.get("op") or ""), cmd.get("mcap_usd"), cmd.get("sol"),
@@ -494,7 +501,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action in ("m_buy", "m_ape"):
             sol = engine._manual_cfg().ape_sol if action == "m_ape" else cmd.get("sol")
             mint = str(cmd.get("mint") or "").strip()
+            held = engine.positions.get(mint)
             err = await engine.manual_buy(mint, sol)
+            if not err and held is not None:
+                return {"ok": True, "text": f"Adding {float(sol):g} SOL to {held.symbol}"}
             if err:
                 return {"ok": False, "text": err}
             if mint in engine.manual_queue:

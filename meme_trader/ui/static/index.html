@@ -639,7 +639,15 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 @keyframes av-float { 0% { opacity: 0; transform: translateY(6px); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-26px); } }
 /* Habbo-style chat: one row per line, older lines float up */
 .hchat { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
-.hmsg { position: absolute; transform: translateX(-50%); max-width: 46%; background: #fff; color: #111; border: 2px solid #1b1b1b; border-radius: 9px;
+.hmsg { white-space: normal !important; overflow: visible !important; transition: top .35s ease, left .35s ease, opacity .6s !important; }
+.hmsg .hm-t { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; }
+.hmsg::after { content: ""; position: absolute; left: var(--tail, 50%); bottom: -7px; width: 10px; height: 10px; transform: translateX(-50%) rotate(45deg);
+  background: inherit; border-right: 2px solid #1b1b1b; border-bottom: 2px solid #1b1b1b; }
+.hmsg.alert::after { border-color: #a52a2a; } .hmsg.act::after { border-color: #127a3a; }
+.room-log { max-height: 320px; overflow: auto; display: grid; gap: 6px; font-size: 12.5px; }
+.rl { display: flex; gap: 8px; align-items: flex-start; } .rl .hm-av { width: 26px; height: 26px; flex: none; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+.rl.rl-act > div > div { color: var(--good); } .rl.rl-alert > div > div { color: var(--bad); }
+.hmsg { position: absolute; max-width: min(400px, 48%); background: #fff; color: #111; border: 2px solid #1b1b1b; border-radius: 9px;
   padding: 2px 8px 2px 3px; font: 600 clamp(9px, 1.2cqw, 12.5px)/1.35 system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   box-shadow: 0 2px 0 rgba(0,0,0,.35); transition: top .45s ease, opacity .6s; display: flex; align-items: center; gap: 5px; }
 .hmsg .hm-av { width: 1.5em; height: 1.5em; border-radius: 5px; display: inline-grid; place-items: center; color: #fff; font-weight: 800; font-size: .85em; flex: none;
@@ -757,6 +765,13 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.pos-more { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 6px; } .pos-more .spacer { flex: 1; }
+.tb-add { border-color: var(--good-mark); color: var(--good); font-weight: 700; }
+.pos.handed .mexits { opacity: .45; } .tag.bot { color: var(--series); border-color: var(--series); }
+.nochart { margin: -84px 8px 62px; text-align: center; font-size: 11.5px; position: relative; }
+.nochart-box { padding: 18px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; }
+.banner.away { border-color: var(--series); background: var(--series-soft); color: var(--ink); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+#away-btn[aria-pressed="true"] { background: var(--series); color: #fff; border-color: transparent; }
 .ord { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; border-radius: 9px; background: var(--surface-2); font-size: 12.5px; }
 .ord.done { opacity: .7; } .ord .tag.ok { color: var(--good); } .ord .tag.bad { color: var(--bad); }
 .ord-quick { display: inline-flex; flex-wrap: wrap; gap: 4px; }
@@ -908,6 +923,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div class="chips" id="strats"></div>
       <span class="note" style="margin-left:8px">Risk</span>
       <div class="dial" id="dial" role="group" aria-label="Risk dial"></div>
+      <button class="small" id="away-btn" title="Leaving? The bots take over all your positions, and any your limit orders open, until you're back">🚶 Away</button>
       <div class="spacer"></div>
       <span class="note hide-sm">Click any token for details · <kbd>/</kbd> filter · <kbd>c</kbd> chat · <kbd>?</kbd> guide</span>
     </div>
@@ -1065,6 +1081,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
         <section class="panel"><h2>AI desk votes <small id="dk-votes-sub"></small></h2><div id="dk-votes" class="stack" style="gap:10px"></div></section>
       </div>
       <div class="stack">
+        <section class="panel" id="room-chat"><h2>Room chat <small>everything the bots said, newest at the bottom</small></h2><div class="room-log" id="room-log"><div class="empty">Nothing said yet.</div></div></section>
         <section class="panel"><h2>Thought stream <small>newest first · click a coin</small></h2><div id="dk-thoughts" class="thoughts"></div></section>
         <section class="panel">
           <h2>𝕏 feed <small id="xf-sub">public posts via FxTwitter · no login needed</small><button class="small" data-compose="1" title="Post to X or Telegram (n)">✎ Post</button></h2>
@@ -1411,6 +1428,8 @@ function renderChrome(s) {
   }
   const b = [];
   if (s.halted) b.push(`<div class="banner bad">⛔ Halted: ${esc(s.halted)}. No new positions. Restart the bot to reset.</div>`);
+  if (s.away) b.push(`<div class="banner away">🚶 Away mode: the bots are managing your positions (and any your orders open). <button class="small" data-away="0">I'm back</button></div>`);
+  if ($("away-btn")) { $("away-btn").textContent = s.away ? "🚶 Away: on" : "🚶 Away"; $("away-btn").setAttribute("aria-pressed", String(!!s.away)); }
   if (s.defense && s.defense.on) b.push(`<div class="banner warn">🛡 Defense mode for ${s.defense.minutes_left} more min (${esc(s.defense.reason)}): half size, higher entry bar.</div>`);
   const bh = b.join("");
   if ($("banners").dataset.h !== bh) { $("banners").dataset.h = bh; $("banners").innerHTML = bh; }
@@ -1491,9 +1510,11 @@ function render(s) {
       pe.dataset.keys = keys;
       pe.innerHTML = s.positions.map(p => `<div class="pos ${p.source === "manual" ? "manual" : ""}" id="p-${esc(p.mint)}" data-open="${esc(p.mint)}" tabindex="0" role="button" aria-label="${esc(p.symbol)} details">
         <div class="top"><span class="sym">${logo(p.mint, p.symbol, "md")}${esc(p.symbol)}</span><span class="gain num"></span></div>
-        <div class="meta num"></div><canvas height="90"></canvas>
+        <div class="meta num"></div><canvas height="90"></canvas><div class="nochart note" hidden>No trades since you bought: the line runs from your entry to the last price seen.</div>
         <div class="top" style="margin-top:6px"><div class="bar" style="flex:1" title="bonding curve"><i></i></div>
-          <span class="btnrow">${sellBtns(p.mint)}</span></div>${p.source === "manual" ? exitsForm(p) : ""}</div>`).join("");
+          <span class="btnrow">${sellBtns(p.mint)}</span></div>
+        <div class="pos-more"><span class="note">Add</span>${addBtns(p.mint)}${p.source === "manual" ? `<span class="spacer"></span><span class="hand"></span>` : ""}</div>
+        ${p.source === "manual" ? exitsForm(p) : ""}</div>`).join("");
       if (S.prevPos) for (const m of nowPos) if (!S.prevPos.has(m)) { const el = $("p-" + m); if (el) el.classList.add("flash"); }
     }
     for (const p of s.positions) {
@@ -1505,7 +1526,14 @@ function render(s) {
         ${p.initials ? '<span class="tag ok">✓ initials out</span>' : '<span class="tag">initials pending</span>'}
         <span class="tag ${tagCls}" title="${esc(p.desk)}">${esc(p.source)}${p.desk ? " · AI ✓" : ""}</span>`;
       el.querySelector(".bar > i").style.width = (p.progress * 100).toFixed(1) + "%";
-      const g = p.spark.map(x => (x / p.entry - 1) * 100);
+      if (p.source === "manual") {
+        el.classList.toggle("handed", !!p.bot);
+        setHTML(el.querySelector(".hand"), p.bot ? `<span class="tag bot">🤖 bots manage it (${p.bot === "late" ? "graduation" : "sniper"} exits)</span><button class="small" data-mhand="${esc(p.mint)}" data-on="0" title="Your own exits apply again">✋ Take back</button>`
+          : `<button class="small" data-mhand="${esc(p.mint)}" data-on="1" title="The bots run their exits on it (stop loss, initials, trailing stop, sell before graduation)">🤖 Hand to the bots</button>`);
+      }
+      const quiet = p.spark.length < 2;
+      el.querySelector(".nochart").hidden = !quiet;
+      const g = quiet ? [0, p.gain_pct] : p.spark.map(x => (x / p.entry - 1) * 100);
       lineChart(el.querySelector("canvas"), g, {axis: true, fmt: v => pct(v), mark: p.entry_idx,
         refs: [{y: 0, label: "entry", dash: true}].concat(p.peak_gain_pct > 8 ? [{y: p.peak_gain_pct, label: "peak", dash: true}] : []),
         hover: i => `${pct(g[i], 1)} vs entry`});
@@ -1684,6 +1712,8 @@ function renderDrawer(d) {
   const ch = d.chart || [];
   if (ch.length > 1) lineChart($("dr-chart"), ch, {axis: true, fill: true, fmt: v => v.toExponential(1),
     refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [], hover: i => `${ch[i].toExponential(3)} SOL`});
+  else $("dr-chart").outerHTML = `<div class="nochart-box">No trades since the bot started watching this coin, so there's no price line yet.
+    ${pos ? "Your position is valued at the last price seen. " : ""}A coin nobody trades can be hard to sell.</div>`;
 }
 
 // ---------------------------------------------------------------- analytics view
@@ -2408,14 +2438,86 @@ const SEAT = {veteran: [12.5, 4.05], narrative: [13.5, 4.05], skeptic: [11.75, 4
 const COUCH_AT = [11, 9.2];
 const NAP = {veteran: [11.5, 9.55], narrative: [12.5, 9.55], skeptic: [13.5, 9.55], quant: [14.5, 9.55]};
 const STOPS = {coffee: [12.9, 1.7], cooler: [15.3, 1.7], window: [2.8, 1.1], board: [1.1, 3.4], cork: [8.3, 1.1], plant: [1.1, 9.4], table: [11.1, 3.3]};
+// ---- what the bots say when nothing's happening: big pools, never the same line twice (remembered in this
+// browser); when a pool runs dry they talk about live numbers instead
 const LINES = {
-  coffee: ["Refill time.", "Third coffee today.", "Decaf? Never.", "The curve can wait 30 seconds.", "Who drank the last oat milk?"],
-  cooler: ["Hydrating.", "Stay liquid.", "Water's colder than this market."],
-  window: ["Nice view.", "Charts look better from up here.", "Is that a green candle in the sky?"],
-  board: ["Checking the numbers.", "Board says we're alive.", "Don't look at the drawdown."],
-  plant: ["Watering the plant.", "Plants don't get rugged."],
-  night: ["Night shift.", "Coffee number five.", "Asia's waking up.", "Quiet hours are when coins sneak up."],
+  coffee: ["Refill time.", "Third coffee today.", "Decaf? Never.", "The curve can wait 30 seconds.", "Who drank the last oat milk?",
+    "This machine is older than Bitcoin.", "Espresso, double. It's a volatile day.", "Coffee's the only thing here that never dumps.",
+    "If the machine beeps twice, it's a buy signal.", "Brewing. Don't ape anything without me.", "Black, like the night shift.",
+    "One sugar for every red candle.", "This mug says HODL. I didn't buy it.", "The coffee tastes like slippage.",
+    "Grinding beans and grinding entries.", "Cold brew. Patience is a strategy."],
+  cooler: ["Hydrating.", "Stay liquid.", "Water's colder than this market.", "Liquidity check: still wet.", "Ice-cold, like my stops.",
+    "Two cups. One for me, one for the drawdown.", "The cooler gurgles like a rug pull.", "Refreshing. Unlike the order book.",
+    "Water: zero fees, zero slippage.", "Drink water, check holders.", "Cooler talk: who's holding what?", "Hydrated traders take initials."],
+  window: ["Nice view.", "Charts look better from up here.", "Is that a green candle in the sky?", "Somewhere out there a dev is selling.",
+    "Clouds look like a head and shoulders.", "The city never sleeps. Neither does pump.fun.", "Sunlight. I forgot about that.",
+    "That building's at all-time highs.", "Counting cars like counting buyers.", "Rain makes the curve fill slower. Probably.",
+    "Watching birds. They move in bundles too.", "One day I'll trade from a beach."],
+  board: ["Checking the numbers.", "Board says we're alive.", "Don't look at the drawdown.", "The board doesn't lie. People do.",
+    "Profit factor looks healthy.", "Every trade on the board, wins and losses.", "Who wrote that note? Good call though.",
+    "The equity line has a nice slope today.", "Reading the board like tea leaves.", "Numbers first, opinions second."],
+  plant: ["Watering the plant.", "Plants don't get rugged.", "This plant has diamond leaves.", "Growing slow and steady, like a good chart.",
+    "Even the plant takes profits in sunlight.", "Talking to the plant. It's a better listener than the skeptic.",
+    "New leaf. Bullish.", "Photosynthesis: the original passive income."],
+  night: ["Night shift.", "Coffee number five.", "Asia's waking up.", "Quiet hours are when coins sneak up.", "Lights low, feed on.",
+    "The moon's out. So are the degens.", "Graveyard shift, but nothing dies on my watch.", "3 a.m. launches hit different.",
+    "Night mode: fewer coins, cleaner reads.", "The city's lit up like a green day."],
 };
+// each bot's own voice
+const VOICE = {
+  scanner: ["Fifty coins near the window and none of them ready.", "Buyers first, everything else second.", "I check every rule, every two seconds.",
+    "Curve at 54%? Not yet. Patience.", "If it's not net inflow, it's noise.", "Twelve fresh buyers. That's my number.",
+    "I don't chase. I wait for the window.", "A coin near 85% with no buyers is a trap."],
+  exits: ["Initials first, then let it ride.", "A trailing stop is a promise to yourself.", "Selling into strength never hurt anyone.",
+    "Momentum decay is the quiet exit.", "Graduation exit: sell before the pool, not after.", "The best exit is the one you planned."],
+  risk: ["The loss limit is a seatbelt.", "Size down when you're cold.", "Kill switch armed. Hope we never need it.",
+    "Defense mode isn't fear. It's math.", "Every position has a worst case. I know them all.", "Max risk? Then max discipline."],
+  feed: ["Every trade, in order, on time.", "Lag under two seconds. Happy.", "A gap in the feed is a blindfold.", "I count every trade twice.",
+    "If the feed stalls, we stop. Simple.", "Mainnet-beta's quick tonight."],
+  operator: ["Ask me anything in Chat.", "I only act with your OK.", "I read the memory board every morning.", "Want a desk check? Just ask.",
+    "I keep notes so you don't have to.", "Paper first, always."],
+  recorder: ["Recording every graduated pool.", "The wallet study needs fourteen quiet days.", "Disk's fine. Plenty of room.",
+    "Smart wallets leave footprints.", "Period A, day one. Slow and honest."],
+  veteran: ["Seen a thousand of these. Most die in minutes.", "Real demand doesn't need a hype thread.", "Order flow tells the truth.",
+    "Back in my day we sniped with our bare hands.", "If the dev buys 30%, I walk.", "Clean chart, clean holders, then we talk."],
+  narrative: ["Memes are attention with a ticker.", "Is the story bigger than the first wave?", "A real X account beats a pretty logo.",
+    "Copycats never outrun the original.", "Culture moves first, charts follow.", "That ticker would trend. Maybe."],
+  skeptic: ["Bundled supply. Again.", "Who are these 20 wallets buying in one block?", "I'm not negative, I'm early.",
+    "Every pump has a seller somewhere.", "Show me the holders, then the chart.", "I'd veto that in my sleep. Actually, I am asleep."],
+  quant: ["About 1% of launches graduate. Base rates matter.", "Expected value beats vibes.", "Fees eat 5% of every round trip.",
+    "A win rate means nothing without the average win.", "Small sample. Ask me again in a hundred trades.", "Variance is the tax on excitement."],
+};
+const RL = {used: null, recent: []};
+function linesUsed() {
+  if (!RL.used) { try { RL.used = new Set(JSON.parse(localStorage.getItem("room.lines") || "[]")); } catch { RL.used = new Set(); } }
+  return RL.used;
+}
+function markUsed(t) {
+  const u = linesUsed(); u.add(t);
+  try { localStorage.setItem("room.lines", JSON.stringify([...u].slice(-3000))); } catch { /* private window: this session only */ }
+}
+function dataLine(id) {                                // fresh sentences from live numbers
+  const d = DK.data || {}, s = snap || {}, f = d.feed || {}, L = d.late || {}, sm = s.summary || {};
+  const c = (L.candidates || [])[Math.floor(Math.random() * Math.max(1, (L.candidates || []).length))];
+  const p = (s.positions || [])[0], last = (s.closed || [])[0];
+  const now = new Date(), hh = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return [
+    s.sol_usd ? `SOL is $${(+s.sol_usd).toFixed(2)} right now.` : "",
+    L.tracked ? `${L.tracked} coins on the radar at ${hh}.` : "",
+    f.lag_s != null ? `Feed is ${fx(f.lag_s, 1)} s behind the chain at ${hh}.` : "",
+    s.equity != null ? `Equity ${(+s.equity).toFixed(3)} SOL at ${hh}.` : "",
+    c ? `${c.symbol} sits at ${fx(c.progress, 0)}% of its curve.` : "",
+    p ? `${p.symbol} is ${pct(p.gain_pct, 0)} since we bought it.` : "",
+    last ? `Last close: ${last.symbol}, ${last.pnl >= 0 ? "+" : ""}${(+last.pnl).toFixed(3)} SOL.` : "",
+    sm.closed ? `${sm.closed} trades closed, ${Math.round((sm.win_rate || 0) * 100)}% won.` : "",
+  ].filter(x => x && !linesUsed().has(x));
+}
+function nextLine(id, place) {
+  const pool = [...(LINES[place] || []), ...(VOICE[id] || [])].filter(t => !linesUsed().has(t));
+  const pick = pool.length ? pool[Math.floor(Math.random() * pool.length)] : (dataLine(id)[0] || "");
+  if (pick) markUsed(pick);
+  return pick;
+}
 function seatOf(id) {
   if (DESK_AT[id]) { const [dx, dy] = DESK_AT[id]; return [dx + 1, dy - .3]; }
   return null;
@@ -2582,25 +2684,50 @@ function isoFrame(now) {
 function hsay(id, html, opts = {}) {
   const b = IO.bots[id]; if (!b || !html) return;
   if (!opts.force && b.said === html && Date.now() - b.lastSaid < 60000) return;
+  const plain = html.replace(/<[^>]+>/g, ""), said = (RL.last ||= new Map()).get(plain);
+  if (said && Date.now() - said < 300000) return;                   // nobody repeats a line within 5 minutes
+  RL.last.set(plain, Date.now()); if (RL.last.size > 400) RL.last.delete(RL.last.keys().next().value);
   b.said = html; b.lastSaid = Date.now();
   const {color, name, look} = botLook(id);
   const [sx] = iso(b.x, b.y);
   const el = document.createElement("div");
   el.className = `hmsg ${opts.kind || ""}`;
   el.style.left = `${Math.min(86, Math.max(14, sx / VBW * 100)).toFixed(1)}%`;
-  el.innerHTML = `<span class="hm-av" style="background:${color}"><img src="${headURL(look)}" alt=""></span><b>${esc(name)}:</b> ${html}`;
+  el.innerHTML = `<span class="hm-av" style="background:${color}"><img src="${headURL(look)}" alt=""></span><span class="hm-t"><b>${esc(name)}:</b> ${html}</span>`;
   el.dataset.bot = id;
   $("hchat").appendChild(el);
-  IO.chat.push({el, at: Date.now()});
+  IO.chat.push({el, at: Date.now(), id});
+  (IO.history ||= []).push({id, name, look, html, at: Date.now(), kind: opts.kind || ""});
+  if (IO.history.length > 300) IO.history.shift();
+  renderRoomLog();
   layoutChat();
 }
+function renderRoomLog() {
+  const box = $("room-log"); if (!box || box.closest("[hidden]")) return;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = (IO.history || []).map(m => `<div class="rl ${m.kind ? "rl-" + m.kind : ""}"><span class="hm-av"><img src="${headURL(m.look)}" alt=""></span>
+    <div><b>${esc(m.name)}</b> <span class="note">${new Date(m.at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}</span><div>${m.html}</div></div></div>`).join("")
+    || `<div class="empty">Nothing said yet.</div>`;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
 function layoutChat() {
-  const now = Date.now();
-  IO.chat = IO.chat.filter(m => { const keep = now - m.at < 26000; if (!keep) m.el.remove(); return keep; });
-  const max = $("office").clientWidth < 600 ? 4 : 7;           // a phone gets fewer lines so the room stays visible
-  while (IO.chat.length > max) IO.chat.shift().el.remove();
-  const n = IO.chat.length;
-  IO.chat.forEach((m, i) => { const row = n - 1 - i; m.el.style.top = `${(31 - row * 4.6).toFixed(1)}%`; m.el.style.opacity = row >= max - 1 ? .45 : 1; });
+  // newest line lowest; each older one sits above it by its real height; whatever no longer fits at the top leaves
+  const now = Date.now(), room = $("office"); if (!room) return;
+  IO.chat = IO.chat.filter(m => { const keep = now - m.at < 30000; if (!keep) m.el.remove(); return keep; });
+  const W = room.clientWidth, H = room.clientHeight, gap = 4, base = H * .4;
+  let y = base;
+  for (let i = IO.chat.length - 1; i >= 0; i--) {
+    const m = IO.chat[i], el = m.el, b = IO.bots[m.id];
+    const h = el.offsetHeight, w = el.offsetWidth;
+    y -= h;
+    if (y < 6) { IO.chat.slice(0, i + 1).forEach(o => o.el.remove()); IO.chat = IO.chat.slice(i + 1); break; }
+    const sx = b ? iso(b.x, b.y)[0] / VBW * W : W / 2;
+    const left = Math.max(8, Math.min(W - w - 8, sx - w / 2));
+    el.style.left = left + "px"; el.style.top = y + "px";
+    el.style.setProperty("--tail", `${Math.max(14, Math.min(w - 14, sx - left))}px`);
+    el.style.opacity = y < 30 ? .55 : 1;
+    y -= gap;
+  }
 }
 // ---- day / dusk / night from the local clock
 function lightPhase(d = new Date()) {
@@ -2672,7 +2799,8 @@ function errand2(b) {
   goTo(b, STOPS[kind].map(v => v + (Math.random() - .5) * .5), () => {
     if (["window", "board"].includes(kind)) { b.view = "back"; drawBot(b); }     // looking out, reading the board
     setProp(b, {coffee: "☕", cooler: "🥤", plant: "🪴", board: "", window: ""}[kind]);
-    hsay(b.id, esc(pick(night && Math.random() < .5 ? LINES.night : LINES[kind])), {force: true});
+    const line = nextLine(b.id, night && Math.random() < .5 ? "night" : kind);
+    if (line) hsay(b.id, esc(line), {force: true});
     setTimeout(() => { if (b.busy === kind) goHome(b); }, 5000 + Math.random() * 5000);
   });
 }
@@ -2687,16 +2815,29 @@ function meet(a, b) {
     setTimeout(() => { if (a.busy === "chat") goHome(a); if (b.busy === "chat") goHome(b); }, 6500); };
   goTo(a, [mx - .55, my], arrived); goTo(b, [mx + .55, my], arrived);
 }
-function chatLines() {
-  const d = DK.data || {}, L = d.late || {}, f = d.feed || {}, r = d.risk || {};
+function chatLines(a, b) {
+  const d = DK.data || {}, L = d.late || {}, f = d.feed || {}, r = d.risk || {}, s = snap || {};
   const top = (L.candidates || []).find(c => ["wait", "buy", "early"].includes(c.verdict));
-  return pick([
-    [`How's the feed?`, f.host ? `${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing. Clean.` : `Quiet. It's the demo market.`],
-    [`Dial's on ${esc(r.name || "?")}. Nervous?`, `Never. The stops are set.`],
-    top ? [`Seen ${esc(top.symbol)}? ${fx(top.progress, 0)}% full.`, `Watching it. ${esc(top.why).slice(0, 60)}`] : [`Anything filling?`, `Not yet. Most coins never get there.`],
-    [`Coffee machine's broken again.`, `It's not broken. It got rugged.`],
-    [`Today: ${signed(d.day_pnl || 0)} SOL.`, (d.day_pnl || 0) >= 0 ? `Green day. Don't jinx it.` : `It's not over till 00:00 UTC.`],
-  ]);
+  const p = (s.positions || [])[0], now = new Date(), hh = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const pairs = [
+    f.host ? [`How's the feed at ${hh}?`, `${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing. Clean.`] : null,
+    [`Dial's on ${r.name || "?"} at ${hh}. Nervous?`, `Never. The stops are set.`],
+    top ? [`Seen ${top.symbol}? ${fx(top.progress, 0)}% full.`, `Watching it. ${String(top.why || "").slice(0, 60)}`] : null,
+    p ? [`${p.symbol} is ${pct(p.gain_pct, 0)}. Selling?`, p.gain_pct > 50 ? `Initials, then let it ride.` : `Not yet. The plan says hold.`] : null,
+    [`Today: ${signed(d.day_pnl || 0)} SOL so far (${hh}).`, (d.day_pnl || 0) >= 0 ? `Green day. Don't jinx it.` : `It's not over till 00:00 UTC.`],
+    ["Coffee machine's broken again.", "It's not broken. It got rugged."], ["Did you see that bundle earlier?", "Twenty wallets, one block. Classic."],
+    ["What's the best trade you ever skipped?", "The one that went to zero an hour later."], ["Initials or full send?", "Initials. Always initials."],
+    ["Do you ever sleep?", "Only when the feed is clean."], ["Why do devs always sell at 80%?", "Because that's where the buyers are."],
+    ["Lunch?", "After this coin graduates. Or doesn't."], ["Is the skeptic ever happy?", "Once. It was a typo."],
+    ["What's a good win rate?", "Depends how big the wins are."], ["Should we tell the quant about the snacks?", "It already knows the expected value."],
+    ["Who renamed me in the wardrobe?", "Not me. Nice hat though."], ["You ever look at the P&L board and smile?", "Every green day."],
+    ["Big launch coming?", "There's always a big launch coming."], ["Did the narrative pick a meme yet?", "Three. They all have dogs."],
+    ["Think we'll graduate one today?", "If the buyers keep coming."], ["What did the recorder find?", "Fourteen days. Ask again later."],
+  ].filter(x => x && !linesUsed().has(x[0] + "|" + x[1]));
+  if (!pairs.length) { const x = dataLine(a.id), y = dataLine(b.id); return [x[0] || "", y[1] || y[0] || ""].map(esc); }
+  const pk = pairs[Math.floor(Math.random() * pairs.length)];
+  markUsed(pk[0] + "|" + pk[1]);
+  return pk.map(esc);
 }
 setInterval(() => {
   if (!IO.built || S.tab !== "desk" || document.hidden) return;
@@ -2742,6 +2883,8 @@ function relay(ev) {
     b.busy = "cork";
     goTo(b, STOPS.cork.map(v => v + (Math.random() - .5) * .9), () => { setProp(b, "📌"); hsay(ev.persona, line, {force: true});
       setTimeout(() => { if (b.busy === "cork") goHome(b); }, 6500); });
+  } else if (ev.kind === "handover") {
+    hsay("exits", ev.n > 1 ? `Got your ${ev.n} positions. Stops and trails are on me.` : `Got it. I'll run my exits on that one.`, {force: true, kind: "act"});
   } else if (ev.kind === "call") {
     hsay("operator", `📣 You called <b>${esc(ev.sym)}</b> at $${fmtUsd(ev.mc)}. It's on the record.`, {force: true, kind: "act"});
   } else if (ev.kind === "order") {
@@ -3011,8 +3154,17 @@ function resetLayout(all) {
 const TR = {mint: "", info: null, amt: null};
 const isMint = v => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v || "");
 function liveConfirm(text) { return !(snap && snap.mode.startsWith("live")) || confirm(`REAL MONEY: ${text}?`); }
+function quietFor(mint) {
+  const p = snap && snap.positions.find(x => x.mint === mint);
+  if (p) return p.last_trade_s ?? Infinity;
+  for (const col of ["new", "stretch"]) { const r = PL.data && (PL.data[col] || []).find(x => x.mint === mint); if (r) return r.last_trade_s ?? Infinity; }
+  return null;                                                  // unknown: the bot doesn't track it yet
+}
 function trBuy(mint, sol, ape = false) {
   if (!isMint(mint)) { toast("Paste a contract address first", "bad"); $("tr-ca").focus(); return; }
+  const q = quietFor(mint);
+  if (q != null && q > 180 && !confirm(q === Infinity ? "Nobody has traded this coin since the bot started watching it. Buying it may be easy; selling it may not. Buy anyway?"
+      : `No trades on this coin for ${dur(q)}. A quiet coin can be hard to sell. Buy anyway?`)) return;
   if (!ape && !(sol > 0)) { toast("Pick an amount", "bad"); return; }
   const m = snap && snap.manual, size = ape ? (m ? m.ape_sol : "?") : sol;
   if (!liveConfirm(`${ape ? "Ape" : "Buy"} ${size} SOL of ${tokenName(mint).replace(/<[^>]+>/g, "")}`)) return;
@@ -3035,6 +3187,10 @@ function sellBtns(mint) {
     <button class="small tb-init" data-minit="${esc(mint)}" title="Sell just enough to get your initial cost back">Initials</button>
     <button class="small tb-exit" data-msell="${esc(mint)}" data-frac="1">Exit</button>`;
 }
+function addBtns(mint) {
+  const pres = ((snap && snap.manual && snap.manual.presets_sol) || [0.05, 0.1, 0.25]).slice(0, 3);
+  return pres.map(v => `<button class="small tb-add" data-mbuy="${esc(mint)}" data-sol="${v}" title="Add ${v} SOL to this position">＋${v}</button>`).join("");
+}
 function exitsForm(p) {
   const m = p.manual || {}, d = (snap && snap.manual) || {};
   const v = (k, dk) => m[k] != null ? m[k] : (d[dk] || "");
@@ -3046,6 +3202,7 @@ function exitsForm(p) {
 }
 function renderTradePanel(s) {
   const m = s.manual || {};
+  if (TR.amt == null && !$("tr-amt").value) TR.amt = (m.presets_sol || [])[1] ?? (m.presets_sol || [])[0] ?? null;   // a sensible default size
   const pres = (m.presets_sol || []).map(v => `<button data-tramt="${v}" aria-pressed="${TR.amt === v}">${v}</button>`).join("");
   setHTML($("tr-presets"), pres);
   $("tr-sub").textContent = `your own trades · bonding-curve coins · max ${m.max_sol ?? "?"} SOL · ${s.mode.startsWith("live") ? "REAL MONEY" : "paper"}`;
@@ -3062,6 +3219,7 @@ function renderTradePanel(s) {
   setHTML($("tr-coin"), `<span class="tok" data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym, "md")}<b>${esc(sym)}</b></span>
     <span class="note">${facts}</span>${q ? `<span class="tag late">queued: buying at its first trade</span>` : ""}${p ? `<span class="tbar-row">${sellBtns(mint)}</span>` : ""}`);
   setHTML($("tr-metrics"), tradeMetrics(i));
+  $("tr-buy").textContent = p ? "＋ Add" : "Buy"; $("tr-buy").title = p ? "Add this amount to your open position" : "";
   if (S.tab === "live" && Date.now() - (TR.looked || 0) > 20000) { TR.looked = Date.now(); send({action: "lookup", mint}); }
   renderOrderForm(s);
 }
@@ -4078,7 +4236,8 @@ function ckActions() {
   const a = TABS.map(([t, l]) => ({label: `Go to ${l}`, hint: "tab", run: () => setTab(t)}));
   a.push({label: s.paused ? "▶ Resume entries" : "⏸ Pause entries", hint: "p", run: () => $("pause").click()},
     ...((s.risk && s.risk.levels) || []).map(l => ({label: `Risk dial: ${l.name}`, hint: `level ${l.level}`, run: () => setRisk(l.level)})),
-    {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
+    {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)},
+    {label: s.away ? "🚶 I'm back: take my positions back" : "🚶 Away: the bots take over my positions", run: () => $("away-btn").click()}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
     {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { setTab("calls"); setTimeout(() => $("clf-ca").focus(), 50); }},
     {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
@@ -4223,6 +4382,9 @@ $("ar-done").onclick = () => setArrange(false);
 $("ar-reset").onclick = () => resetLayout(false);
 $("ar-reset-all").onclick = () => { if (confirm("Put every page back the way it was?")) resetLayout(true); };
 $("palette").onclick = () => openPalette();
+$("away-btn").onclick = () => { const on = !(snap && snap.away);
+  if (on && !confirm("Leaving? The bots take over all your positions with their exit rules (stop loss, initials, trailing stop, sell before graduation), and anything your limit orders buy while you're away. Press I'm back to take them back.")) return;
+  send({action: "away", on}); if (on) IO.events.push({kind: "handover", n: (snap.positions || []).filter(p => p.source === "manual").length}); };
 $("ck-in").oninput = () => { CK.i = 0; renderPalette(); };
 $("cmdk").onclick = e => { if (e.target === $("cmdk")) closePalette(); };
 $("cp-cancel").onclick = () => { $("composer").hidden = true; };
@@ -4282,7 +4444,7 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-mape],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-compose],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-mape],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-compose],[data-mhand],[data-away],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -4311,6 +4473,8 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.mhand) { e.stopPropagation(); send({action: "m_hand", mint: d.mhand, on: d.on === "1"}); if (d.on === "1") IO.events.push({kind: "handover", n: 1}); return; }
+  if (d.away !== undefined) { send({action: "away", on: d.away === "1"}); return; }
   if (d.xdisc) { if (confirm("Disconnect X? You can sign in again any time.")) send({action: "x_disconnect"}); return; }
   if (d.goconn) { e.preventDefault(); $("composer").hidden = true; setTab("controls"); setTimeout(() => $(d.goconn === "keys" ? "keys-panel" : "conn-panel").scrollIntoView({behavior: "smooth", block: "start"}), 150); return; }
   if (d.memopen) { MEM.open.add(d.memopen); renderMemory(); setTimeout(() => document.querySelector(`[data-memreply="${d.memopen}"]`)?.focus(), 30); return; }
