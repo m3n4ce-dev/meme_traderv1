@@ -34,7 +34,7 @@ from .predictor import LogisticModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry, evaluate_late_exit,
-                       gate_checklist)
+                       exit_watch, gate_checklist, late_checklist)
 from .tracker import TokenState
 
 DUST_SOL = 0.0005
@@ -159,6 +159,12 @@ class Engine:
         self.rejects: Counter = Counter()
         self.stats = Counter()
         self.log: deque = deque(maxlen=300)
+        # the Desk: what the bots are thinking (live only; never read by a trading decision)
+        self.thoughts: deque = deque(maxlen=200)
+        self.late_view: list[dict] = []
+        self._think: dict[str, tuple[str, str, float]] = {}       # mint -> (verdict, why, when said)
+        self._last_think = 0.0
+        self.desk_reviews: deque = deque(maxlen=20)
         self.paused = False
         self.journal = log_to_journal
         # replays start from neutral caller weights: today's learned track records are future information
@@ -900,6 +906,8 @@ class Engine:
             self.reviewing.discard(s.mint)
         s.desk = v.summary
         self.say("desk", f"{s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
+        self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": kind,
+                                  "approve": v.approve, "summary": v.summary, "votes": [vars(x) for x in v.votes]})
         if not v.approve:
             self.rejects["desk passed"] += 1
             if kind == "sniper":
@@ -1341,6 +1349,9 @@ class Engine:
             self._maybe_reload_model()
         await self._maybe_callout()
         await self._maybe_late()
+        if self.feed.realtime and self.now - self._last_think >= 2:
+            self._last_think = self.now
+            self._late_think()
         if self.record_file and self.now - self._last_flush >= 30:
             self._last_flush = self.now
             self._rotate_record()
@@ -1556,6 +1567,130 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _late_red(self, s: TokenState) -> dict:
+        en = self.p.entry
+        return {"max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
+                "creator_launches": len(self.creators.get(s.creator, ())),
+                "max_creator_launches_24h": en.max_creator_launches_24h, "max_cluster_pct": en.funding.max_cluster_pct}
+
+    def think(self, agent: str, text: str, mint: str = "", symbol: str = "", mood: str = "info") -> None:
+        self.thoughts.append({"ts": self.now, "agent": agent, "text": text, "mint": mint, "symbol": symbol,
+                              "mood": mood})
+
+    def _late_think(self) -> None:
+        """The graduation scanner's view for the Desk: every token near or in its window, checked the same
+        way evaluate_late_entry checks it, plus a thought whenever a token's verdict changes."""
+        L = self.p.late
+        view, seen = [], set()
+        blocked = self.entries_blocked() if L.enabled else "graduation plays are off"
+        for s in self.tokens.values():
+            if s.migrated or not s.price_known or s.curve.progress * 100 < L.min_curve_pct - 15 \
+                    or s.age(self.now) > L.max_age_s + 120:
+                continue
+            c = late_checklist(s, self.now, L, self._late_red(s))
+            held = s.mint in self.positions or s.mint in self.pending
+            if held:
+                c["verdict"], c["why"] = "holding", "bought: the exit manager has it"
+            elif s.late_tried and c["verdict"] in ("buy", "wait"):
+                c["verdict"], c["why"] = "done", "already tried once (no re-buys)"
+            elif c["verdict"] == "buy" and blocked:
+                c["verdict"], c["why"] = "blocked", f"would buy, but {blocked}"
+            view.append({"mint": s.mint, "symbol": s.symbol, "age": round(s.age(self.now)),
+                         "mcap_sol": s.market_cap_sol, "spark": s.sparkline(30), **c})
+            seen.add(s.mint)
+            prev = self._think.get(s.mint)
+            v, why = c["verdict"], c["why"]
+            if prev is None and v in ("early", "out", "holding", "done"):
+                self._think[s.mint] = (v, why, self.now)          # nothing worth saying yet
+            elif prev is None or prev[0] != v or (v == "wait" and why != prev[1] and self.now - prev[2] >= 20):
+                text = {"early": f"{s.symbol} is filling: {c['progress']:.0f}%, the window opens at {L.min_curve_pct}%",
+                        "wait": f"{s.symbol} in the window ({c['progress']:.0f}%), waiting on {why}",
+                        "buy": f"{s.symbol}: every check passes, buying",
+                        "blocked": f"{s.symbol}: {why}",
+                        "pass": f"{s.symbol}: passing, {why}",
+                        "out": f"{s.symbol} is out: {why}",
+                        "holding": f"{s.symbol}: bought, watching the exits",
+                        "done": f"{s.symbol}: already traded once, letting it go"}[v]
+                mood = {"buy": "act", "blocked": "warn", "pass": "pass", "out": "pass", "holding": "act",
+                        "done": "pass"}.get(v, "spot" if v == "early" else "wait")
+                self.think("scanner", text, s.mint, s.symbol, mood)
+                self._think[s.mint] = (v, why, self.now)
+        for m in [m for m in self._think if m not in seen]:
+            del self._think[m]
+        order = {"buy": 0, "blocked": 0, "holding": 1, "wait": 2, "early": 3, "done": 4, "pass": 5, "out": 6}
+        view.sort(key=lambda r: (order.get(r["verdict"], 9), -r["readiness"], -r["progress"]))
+        self.late_view = view
+
+    def desk_view(self) -> dict:
+        """Everything the Desk tab shows that lives in the engine."""
+        L, x = self.p.late, self.p.exit
+        holding = []
+        for m, pos in self.positions.items():
+            s = self.tokens.get(m)
+            if not s or pos.source == "callout":
+                continue
+            price = self._mark(m, pos)
+            holding.append({"mint": m, "symbol": pos.symbol, "source": pos.source, "gain_pct": pos.gain_pct(price),
+                            "peak_gain_pct": pos.gain_pct(pos.peak_price), "held_s": round(self.now - pos.opened_at),
+                            "value_sol": pos.tokens * price, "watch": exit_watch(pos, s, self.now, L, x)})
+        agent_log = [l for l in self.log if l["level"] in ("buy", "sell", "close", "desk", "agent", "error")][-60:]
+        d = self.desk
+        return {"now": self.now, "blocked": self.entries_blocked(), "paused": self.paused,
+                "strategies": {"sniper": self.p.entry.enabled, "copy": self.p.copy.enabled,
+                               "callouts": self.p.callouts.enabled, "late": L.enabled},
+                "late": {"window": [L.min_curve_pct, L.max_curve_pct], "max_age_s": L.max_age_s,
+                         "flow_window_s": L.flow_window_s, "min_net_flow_sol": L.min_net_flow_sol,
+                         "min_buyers": L.min_buyers, "scan_interval_s": L.get("scan_interval_s", 2),
+                         "candidates": self.late_view[:14], "in_window": sum(1 for r in self.late_view
+                                                                             if r["verdict"] in ("wait", "buy", "blocked")),
+                         "tracked": len(self.tokens)},
+                "holding": holding, "thoughts": list(self.thoughts)[-80:], "log": agent_log,
+                "rejects": self.rejects.most_common(5),
+                "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled),
+                         "personas": list(self.p.desk.personas), "model": self.p.desk.model,
+                         "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
+                         "reviews": list(self.desk_reviews)[::-1]},
+                "risk": self.risk_info(), "day_pnl": self.book.day_pnl,
+                "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
+                           "kill_dd_pct": self.p.capital.max_drawdown_pct,
+                           "max_open": self.p.capital.max_open_positions},
+                "drawdown_pct": (1 - self.equity() / self.book.start_sol) * 100 if self.book.start_sol else 0.0,
+                "open": len(self.positions), "defense": {"on": self._defensive(), "reason": self.defense_reason},
+                "feed": {"host": getattr(self.feed, "host", ""), "lag_s": getattr(self.feed, "lag_s", None),
+                         "gap_pct": getattr(self.feed, "gap_pct", None),
+                         "degraded": bool(getattr(self.feed, "degraded", False)),
+                         "degraded_reason": getattr(self.feed, "degraded_reason", "")}}
+
+    def set_desk(self, on: bool) -> str:
+        """Wake or rest the AI desk at runtime. '' or the reason it can't."""
+        import os
+
+        if on:
+            if not os.environ.get("ANTHROPIC_API_KEY"):
+                return "add an Anthropic API key first (Controls -> API keys)"
+            if not (self.desk and self.desk.client):
+                try:
+                    from .desk import Desk
+
+                    self.p.desk["enabled"] = True
+                    self.desk = Desk(self.p.desk)
+                except Exception as e:                      # e.g. the anthropic package is missing
+                    self.p.desk["enabled"] = False
+                    return f"couldn't start the desk: {type(e).__name__}: {e}"[:200]
+            self.p.desk["enabled"] = True
+            self.desk.enabled = True
+            self.say("info", "AI desk is on: its personas now vote on every entry (Anthropic API, billed per call)")
+        else:
+            self.p.desk["enabled"] = False
+            if self.desk:
+                self.desk.enabled = False
+            self.say("info", "AI desk is resting")
+        return ""
+
+    def token_uri(self, mint: str) -> str:
+        s = self.tokens.get(mint)
+        return (s.launch.uri if s and s.launch else "") or ""
 
     # ------------------------------------------------------------------ callouts
     async def _maybe_callout(self) -> None:

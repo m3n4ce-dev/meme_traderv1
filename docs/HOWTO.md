@@ -31,17 +31,33 @@ scripts/start.sh demo
 The dashboard opens at **http://127.0.0.1:8787** with a simulated market and fake money. No keys are needed. Press **Ctrl + C** in the terminal to stop.
 
 ## 2. Read the dashboard
-Four views. Switch with the tabs or the keys **1–4**:
+Seven views. Switch with the tabs or the keys **1–7**:
 
 - **Live**: money, open positions, the launch radar and every event.
   - Click any token, position, closed trade or log line to open its **detail panel**.
   - The coloured chips under the numbers turn whole strategies on and off.
+- **Desk**: what each bot is thinking, as a row of agent cards.
+  - **Graduation scanner:** every coin near its 55–85% window, checked rule by rule (the same check that decides a buy), with what it's still waiting for.
+  - **Exit manager:** how close each open position is to each of its exits.
+  - **Risk officer** and **feed watchdog:** the loss limit, drawdown and data health.
+  - **AI desk:** four Claude personas who vote on each entry. Asleep until you add an Anthropic API key, then **Wake the desk**. It bills your Anthropic account, roughly $0.04 per vote set, and adds a few seconds before each buy.
+  - **Wallet recorder:** pause it, pause it for 1, 4 or 12 hours, or set daily quiet hours. Every pause is logged so the wallet study knows about the gap.
+  - **Thought stream:** every decision as it happens.
+  - **𝕏 feed:** public posts from accounts and searches you pick, plus each coin the bot holds. It reads public posts through FxTwitter, so no X login or paid API is needed. Contract addresses in posts are clickable.
+  - **Research:** progress of the running tests.
+- **Chat**: talk to Claude about the bot (see [14](#14-let-claude-operate-the-bot)).
+- **Portfolio**: watch-only wallets, yours or anyone's.
+  - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
+  - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
+  - Balances use your `SOLANA_RPC_URL` if you set one. The public endpoint is slow for big wallets.
 - **Analytics**: what is working, in plain English, plus charts:
   - equity and drawdown;
   - a projection of the next 100 trades;
   - breakdowns by strategy, exit, hour and model score;
   - the gate audit.
-- **Controls**: live settings. See [6](#6-change-settings-while-it-runs).
+- **Controls**: live settings, plus **API keys & connections**. See [6](#6-change-settings-while-it-runs).
+  - Paste a key and press Save: it goes into `.env` (readable only by you), is never shown again, and is never given to Claude.
+  - Some keys work immediately (Anthropic, RPC URL); the rest after `systemctl --user restart meme-sniper`.
 - **Guide**: the same tour inside the app, plus keyboard shortcuts.
 
 Badges in the header:

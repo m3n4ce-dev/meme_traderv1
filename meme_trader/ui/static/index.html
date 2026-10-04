@@ -417,6 +417,144 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
 .b-zz { opacity: 0; font: 700 13px system-ui; fill: var(--muted); }
 .buddy[data-state="sleep"] .b-zz { animation: b-zz 2.4s infinite; }
 @media (prefers-reduced-motion: reduce) { .buddy * { animation: none !important; } }
+/* ---- polish */
+html, body { background: radial-gradient(1100px 380px at 8% -8%, var(--accent-soft), transparent 70%),
+  radial-gradient(900px 320px at 95% -10%, var(--series-soft), transparent 70%), var(--page); background-attachment: fixed; }
+header { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: saturate(1.4) blur(10px); }
+.brand { display: inline-flex; align-items: center; gap: 8px; }
+.mark { width: 22px; height: 22px; border-radius: 7px; flex: none; box-shadow: 0 0 0 3px var(--accent-soft);
+  background: conic-gradient(from 210deg, var(--accent), var(--series), var(--good-mark), var(--accent)); }
+.panel { border-radius: 14px; box-shadow: 0 1px 0 rgba(0,0,0,.03), 0 12px 28px -22px rgba(0,0,0,.35); }
+.kpi { position: relative; overflow: hidden; border-radius: 14px; }
+.kpi::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; opacity: .65;
+  background: linear-gradient(90deg, var(--accent), var(--series)); }
+.tabs .ic { margin-right: 5px; opacity: .75; }
+@media (max-width: 1700px) { .tabs kbd { display: none; } }
+@media (max-width: 1600px) { #model-badge, #feed-badge { display: none; } }
+@media (max-width: 1360px) { .tabs .ic { display: none; } }
+/* token logos */
+.logo { --h: 220; position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none;
+  vertical-align: middle; margin-right: 6px; overflow: hidden; color: #fff; font: 700 10px/1 system-ui, sans-serif;
+  background: linear-gradient(135deg, hsl(var(--h) 62% 52%), hsl(calc(var(--h) + 40) 62% 38%)); box-shadow: 0 0 0 1px var(--ring); }
+.logo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s; }
+.logo img.ok { opacity: 1; }
+.logo.md { width: 30px; height: 30px; font-size: 12px; }
+.logo.lg { width: 46px; height: 46px; font-size: 18px; border-radius: 12px; margin-right: 0; }
+.tok { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+.tok b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* desk */
+.desk-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--ring);
+  background: linear-gradient(120deg, var(--accent-soft), var(--series-soft) 60%, transparent), var(--surface); }
+.desk-hero h1 { margin: 0; font-size: 21px; letter-spacing: -.01em; } .desk-hero p { margin: 3px 0 0; color: var(--ink-2); font-size: 13px; }
+.agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+.agent { display: grid; gap: 8px; align-content: start; padding: 12px; border-radius: 14px; border: 1px solid var(--ring); background: var(--surface); min-width: 0;
+  box-shadow: 0 12px 28px -24px rgba(0,0,0,.4); }
+.agent.dim { opacity: .66; }
+.agent .hd { display: flex; gap: 10px; align-items: center; }
+.av { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 20px; flex: none;
+  background: linear-gradient(135deg, var(--accent-soft), var(--series-soft)); box-shadow: inset 0 0 0 1px var(--ring); }
+.agent.working .av { animation: breathe 2.6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 0 var(--accent-soft); }
+  50% { box-shadow: inset 0 0 0 1px var(--ring), 0 0 0 7px var(--accent-soft); } }
+.agent .nm { min-width: 0; flex: 1; } .agent .nm b { display: block; } .agent .nm small { color: var(--muted); font-size: 12px; }
+.pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--surface-2); color: var(--ink-2); }
+.pill.working { background: var(--good-soft); color: var(--good); } .pill.blocked, .pill.waiting { background: var(--warn-soft); color: var(--warn); }
+.pill.trouble { background: var(--bad-soft); color: var(--bad); } .pill.resting, .pill.off, .pill.asleep { color: var(--muted); }
+.thought { font-size: 12.5px; line-height: 1.42; color: var(--ink); background: var(--surface-2); border-radius: 10px; padding: 7px 10px; }
+.thought::before { content: "💭 "; }
+.agent .stats { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); }
+.agent .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.personas { display: flex; gap: 5px; flex-wrap: wrap; }
+.personas span { padding: 2px 8px 2px 4px; border-radius: 8px; background: var(--surface-2); font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.agent.dim .personas span { filter: grayscale(1); }
+.cands, .holds { display: grid; gap: 8px; }
+.cand { display: grid; grid-template-columns: minmax(0, 170px) minmax(0, 1fr); gap: 12px; padding: 10px; border-radius: 12px;
+  border: 1px solid var(--ring); background: var(--surface-2); cursor: pointer; }
+.cand:hover, .hold:hover { border-color: var(--axis); }
+.cand.v-buy, .cand.v-blocked, .cand.v-holding { border-color: var(--good-mark); box-shadow: 0 0 0 1px var(--good-mark) inset; }
+.cand.v-pass, .cand.v-out, .cand.v-done { opacity: .58; }
+@media (max-width: 700px) { .cand { grid-template-columns: 1fr; } }
+.cand .who { display: grid; gap: 5px; align-content: start; justify-items: start; min-width: 0; }
+.cand.mini { padding: 7px 10px; } .cand.mini .who { grid-auto-flow: column; align-items: center; gap: 8px; justify-content: start; }
+.cand.mini .why { margin-top: 4px; }
+.cand .why { max-width: none; white-space: normal; margin-top: 6px; }
+.v-pill { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 999px; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+.v-pill.buy, .v-pill.holding { background: var(--good-mark); color: #fff; } .v-pill.blocked { background: var(--warn-mark); color: #1a1a1a; }
+.v-pill.wait { background: var(--series-soft); color: var(--series); } .v-pill.early { color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ring); }
+.v-pill.pass, .v-pill.out, .v-pill.done { background: var(--bad-soft); color: var(--bad); }
+.cwin { position: relative; height: 12px; border-radius: 6px; background: var(--grid); overflow: hidden; }
+.cwin .band { position: absolute; top: 0; bottom: 0; background: var(--good-soft); border-left: 1px dashed var(--good-mark); border-right: 1px dashed var(--good-mark); }
+.cwin .fill { position: absolute; left: 0; top: 3px; bottom: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--series), var(--accent)); }
+.mbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 12px; margin-top: 8px; }
+.mb { display: grid; gap: 3px; font-size: 11.5px; color: var(--ink-2); min-width: 0; }
+.mb .t { display: flex; justify-content: space-between; gap: 6px; } .mb .t b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.mb .tr { height: 6px; border-radius: 3px; background: var(--grid); position: relative; overflow: hidden; }
+.mb .tr i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--warn-mark); }
+.mb.ok .tr i { background: var(--good-mark); }
+.mb.gauge .tr i { background: var(--series); } .mb.gauge.warm .tr i { background: var(--warn-mark); } .mb.gauge.hot .tr i { background: var(--bad); }
+.flagrow { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 7px; }
+.flagrow span { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--good-soft); color: var(--good); }
+.flagrow span.no { background: var(--bad-soft); color: var(--bad); }
+.hold { padding: 10px; border-radius: 12px; border: 1px solid var(--ring); background: var(--surface-2); cursor: pointer; }
+.hold .top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 12px; margin-top: 8px; }
+.thoughts { display: grid; gap: 1px; max-height: 560px; overflow: auto; font-size: 12.5px; align-content: start; }
+.th { display: grid; grid-template-columns: 58px 22px minmax(0, 1fr); gap: 6px; align-items: center; padding: 5px 6px; border-radius: 8px;
+  border-left: 3px solid transparent; }
+.th:hover { background: var(--surface-2); } .th[data-open] { cursor: pointer; }
+.th time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.th.m-act { border-left-color: var(--good-mark); } .th.m-wait { border-left-color: var(--series); } .th.m-pass { border-left-color: var(--axis); color: var(--ink-2); }
+.th.m-warn { border-left-color: var(--warn-mark); } .th.m-bad { border-left-color: var(--bad); } .th.m-spot { border-left-color: var(--accent); }
+.th .logo { width: 18px; height: 18px; font-size: 9px; margin-right: 5px; }
+.review { padding: 10px; border-radius: 12px; border: 1px solid var(--ring); background: var(--surface-2); display: grid; gap: 8px; }
+.votes { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.vote { background: var(--surface); border-radius: 10px; padding: 8px; font-size: 12px; display: grid; gap: 4px; border: 1px solid var(--ring); align-content: start; }
+.vote.buy { border-color: var(--good-mark); } .vote.err { opacity: .6; }
+.vote .t { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.vote ul { margin: 0; padding-left: 16px; color: var(--ink-2); }
+.rs { display: grid; gap: 5px; padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: 12.5px; }
+.rs:last-child { border-bottom: 0; }
+.prog { height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+.prog i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--series)); }
+.xsrc { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.xsrc span { font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--ring);
+  display: inline-flex; gap: 2px; align-items: center; }
+.xsrc span.err { border-color: var(--bad); color: var(--bad); }
+.xsrc button { border: 0; background: transparent; padding: 0 5px; font-size: 13px; color: var(--muted); }
+.posts { display: grid; gap: 8px; max-height: 760px; overflow: auto; align-content: start; }
+.post { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+.post .av2 { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--grid); display: grid; place-items: center; font-weight: 700; color: var(--ink-2); }
+.post .hd { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; } .post .hd span { color: var(--muted); }
+.post p { margin: 4px 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.45; }
+.post .ph { display: flex; gap: 6px; } .post .ph img { max-width: 49%; max-height: 190px; border-radius: 10px; object-fit: cover; }
+.post .ft { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); }
+.cash { color: var(--accent); font-weight: 650; }
+input[type="text"], input[type="password"], input[type="time"] { font: inherit; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--ring);
+  background: var(--surface); color: var(--ink); min-width: 0; }
+.form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* portfolio */
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+@media (max-width: 520px) { .pf-grid { grid-template-columns: 1fr; } }
+.wcard { padding: 0; overflow: hidden; }
+.wc-head { display: flex; gap: 12px; align-items: center; padding: 12px 14px; flex-wrap: wrap;
+  background: linear-gradient(120deg, var(--series-soft), var(--accent-soft)); }
+.wc-head .tot { margin-left: auto; text-align: right; } .wc-head .tot b { font-size: 21px; display: block; }
+.wc-av { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-size: 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--ring); }
+.wc-body { padding: 10px 14px 14px; display: grid; gap: 10px; }
+.hrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 6px 0;
+  border-bottom: 1px solid var(--grid); font-size: 13px; }
+.hrow .r { text-align: right; } .hrow small { color: var(--muted); display: block; font-size: 11.5px; }
+.alloc { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--grid); }
+.alloc i { display: block; height: 100%; }
+.acts { display: grid; gap: 1px; font-size: 12px; }
+.acts a { text-decoration: none; color: var(--ink-2); display: flex; gap: 8px; justify-content: space-between; padding: 3px 5px; border-radius: 6px; }
+.acts a:hover { background: var(--surface-2); }
+/* keys */
+.keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+.key { display: grid; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid var(--ring); background: var(--surface-2); align-content: start; }
+.key.set { border-color: var(--good-mark); }
+.key .t { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.key .form-row input { flex: 1; }
 /* guide */
 .guide { max-width: 980px; display: grid; gap: 16px; }
 .guide h3 { margin: 0 0 8px; font-size: 16px; }
@@ -436,18 +574,20 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
 </head>
 <body>
 <header>
-  <div class="brand">MEME_TRADER <span>/ sniper console</span></div>
+  <div class="brand"><span class="mark" aria-hidden="true"></span>MEME_TRADER <span>/ sniper console</span></div>
   <span id="mode" class="badge paper">PAPER</span>
   <button id="risk-badge" class="badge" data-tab-link="controls" title="Risk dial (Controls tab)">risk</button>
   <span class="status"><span id="dot" class="dot off"></span><span id="state">connecting…</span></span>
   <button id="model-badge" class="badge" data-tab-link="analytics" title="Prediction model">model: –</button>
   <span id="feed-badge" class="badge hide-sm" title="Market data feed">feed</span>
   <nav class="tabs" role="tablist" aria-label="Views">
-    <button role="tab" data-tab="live" aria-selected="true">Live<kbd class="hide-sm">1</kbd></button>
-    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">2</kbd></button>
-    <button role="tab" data-tab="analytics" aria-selected="false">Analytics<kbd class="hide-sm">3</kbd></button>
-    <button role="tab" data-tab="controls" aria-selected="false">Controls<kbd class="hide-sm">4</kbd></button>
-    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">5</kbd></button>
+    <button role="tab" data-tab="live" aria-selected="true"><span class="ic">◉</span>Live<kbd class="hide-sm">1</kbd></button>
+    <button role="tab" data-tab="desk" aria-selected="false"><span class="ic">◆</span>Desk<kbd class="hide-sm">2</kbd></button>
+    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">3</kbd></button>
+    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">4</kbd></button>
+    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">5</kbd></button>
+    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">6</kbd></button>
+    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">7</kbd></button>
   </nav>
   <div class="spacer"></div>
   <span class="note num hide-sm" id="clock"></span>
@@ -550,6 +690,52 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
     </div>
   </section>
 
+  <!-- ============================================================ DESK -->
+  <section class="view" data-view="desk" hidden>
+    <div class="desk-hero">
+      <div style="flex:1;min-width:240px"><h1>Trading desk</h1><p id="dk-sum">Loading…</p></div>
+      <button class="small" data-ask="Do a desk check: feed, P&amp;L, positions, radar and analytics. Act only if something clearly needs it, then sum up in a few lines.">✦ Ask Claude for a desk check</button>
+    </div>
+    <div class="agents" id="dk-agents"></div>
+    <div class="grid">
+      <div class="stack">
+        <section class="panel"><h2>Graduation scanner <small id="dk-scan-sub"></small></h2><div id="dk-scan" class="cands"></div></section>
+        <section class="panel"><h2>Exit manager <small>how close each exit is</small></h2><div id="dk-hold" class="holds"></div></section>
+        <section class="panel"><h2>AI desk votes <small id="dk-votes-sub"></small></h2><div id="dk-votes" class="stack" style="gap:10px"></div></section>
+      </div>
+      <div class="stack">
+        <section class="panel"><h2>Thought stream <small>newest first · click a coin</small></h2><div id="dk-thoughts" class="thoughts"></div></section>
+        <section class="panel">
+          <h2>𝕏 feed <small id="xf-sub">public posts via FxTwitter · no login needed</small></h2>
+          <div class="form-row">
+            <input id="xf-in" type="text" placeholder="@handle, or a search like $WIF or pump.fun" style="flex:1;min-width:180px" aria-label="Add an X account or search">
+            <button class="small" id="xf-add">Add</button>
+            <label class="minisw" title="Also search X for the contract address of each coin the bot holds"><span class="switch"><input type="checkbox" id="xf-auto"><i></i></span>coins we hold</label>
+          </div>
+          <div class="xsrc" id="xf-src"></div>
+          <div class="posts" id="xf-posts"><div class="empty">Loading…</div></div>
+        </section>
+        <section class="panel"><h2>Research <small>tests running in the background</small></h2><div id="dk-research"></div></section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ PORTFOLIO -->
+  <section class="view" data-view="portfolio" hidden>
+    <div class="kpis" id="pf-kpis"></div>
+    <section class="panel">
+      <h2>Watch a wallet <small>addresses only: nothing here can move funds · saved on this machine (data/portfolio.json)</small></h2>
+      <div class="form-row">
+        <input id="pf-addr" type="text" placeholder="Solana wallet address" style="flex:2;min-width:250px" aria-label="Wallet address" spellcheck="false">
+        <input id="pf-label" type="text" placeholder="Label (Phantom, a whale…)" style="flex:1;min-width:150px" aria-label="Label">
+        <label class="minisw" title="Mine: counts toward your total. Off: just watching someone"><span class="switch"><input type="checkbox" id="pf-mine" checked><i></i></span>mine</label>
+        <button class="primary small" id="pf-add">Add wallet</button>
+        <button class="small" id="pf-refresh">Refresh all</button>
+      </div>
+    </section>
+    <div class="pf-grid" id="pf-wallets"></div>
+  </section>
+
   <!-- ============================================================ CHAT -->
   <section class="view" data-view="chat" hidden>
     <div class="chatgrid">
@@ -642,6 +828,10 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
 
   <!-- ============================================================ CONTROLS -->
   <section class="view" data-view="controls" hidden>
+    <section class="panel" id="keys-panel">
+      <h2>API keys &amp; connections <small>saved to .env on this machine (owner-only file) · never shown again · never given to Claude</small></h2>
+      <div class="keys" id="keys"><div class="empty">Loading…</div></div>
+    </section>
     <section class="panel">
       <h2>Risk dial <small>scales trade size, open positions and the daily loss limit together · saved · Claude can lower it, and raise it only with your Approve</small></h2>
       <div class="tablewrap"><table><thead><tr><th>Level</th><th class="r">Per trade</th><th class="r">Open positions</th><th class="r">Daily loss limit</th><th></th></tr></thead>
@@ -732,7 +922,7 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
     <section class="panel">
       <h3>Keyboard</h3>
       <div class="tablewrap"><table><tbody>
-        <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> <kbd>5</kbd></td><td>Live · Chat · Analytics · Controls · Guide</td></tr>
+        <tr><td><kbd>1</kbd> … <kbd>7</kbd></td><td>Live · Desk · Chat · Portfolio · Analytics · Controls · Guide</td></tr>
         <tr><td><kbd>c</kbd></td><td>Chat with Claude (Enter sends, Shift+Enter new line)</td></tr>
         <tr><td><kbd>/</kbd></td><td>Filter the launch radar</td></tr>
         <tr><td><kbd>p</kbd></td><td>Pause / resume new entries (open positions are still managed)</td></tr>
@@ -758,7 +948,7 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
 
 <div id="scrim" class="scrim"></div>
 <aside id="drawer" class="drawer" aria-hidden="true" aria-label="Token details">
-  <div class="dr-head"><h3 id="dr-title">–</h3><span id="dr-status" class="badge"></span><div class="spacer"></div>
+  <div class="dr-head"><span id="dr-logo"></span><h3 id="dr-title">–</h3><span id="dr-status" class="badge"></span><div class="spacer"></div>
     <button class="small" id="dr-close" aria-label="Close (Esc)">✕</button></div>
   <div class="dr-body" id="dr-body"></div>
 </aside>
@@ -906,6 +1096,7 @@ function render(s) {
   renderRisk(s);
   logToasts(s);
   if (S.tab === "chat") renderChatSide(s);
+  if (S.tab === "portfolio" && PF.data) renderPortfolio();
   if (S.tab === "controls") $("paper-panel").hidden = s.mode.startsWith("live");
   if (S.tab !== "live") return;
   renderLiveVisuals(s);
@@ -923,7 +1114,7 @@ function render(s) {
   $("k-fun-sub").textContent = `entries / launches (${sm.launches ? (sm.entries / sm.launches * 100).toFixed(1) : 0}%) · ${s.tracked_tokens} tracked now`;
   const dk = s.desk;
   $("k-desk").textContent = dk.enabled ? dk.calls + " votes" : "off";
-  $("k-desk-sub").textContent = dk.enabled ? `${dk.personas.join(" · ")} · ~$${dk.cost_usd.toFixed(2)}` : "set ANTHROPIC_API_KEY + --desk";
+  $("k-desk-sub").textContent = dk.enabled ? `${dk.personas.join(" · ")} · ~$${dk.cost_usd.toFixed(2)}` : "asleep · wake it on the Desk tab";
   const bs = sm.by_source || {};
   $("k-pnl-sub").textContent = Object.keys(bs).length
     ? Object.entries(bs).map(([k, v]) => `${k} ${signed(v.realized_pnl_sol)}`).join(" · ")
@@ -970,7 +1161,7 @@ function render(s) {
     if (pe.dataset.keys !== keys) {
       pe.dataset.keys = keys;
       pe.innerHTML = s.positions.map(p => `<div class="pos" id="p-${esc(p.mint)}" data-open="${esc(p.mint)}" tabindex="0" role="button" aria-label="${esc(p.symbol)} details">
-        <div class="top"><span class="sym">${esc(p.symbol)}</span><span class="gain num"></span></div>
+        <div class="top"><span class="sym">${logo(p.mint, p.symbol, "md")}${esc(p.symbol)}</span><span class="gain num"></span></div>
         <div class="meta num"></div><canvas height="90"></canvas>
         <div class="top" style="margin-top:6px"><div class="bar" style="flex:1" title="bonding curve"><i></i></div>
           <button class="small" data-sell="${esc(p.mint)}">Sell all</button></div></div>`).join("");
@@ -1006,7 +1197,7 @@ function render(s) {
   if ($("closed").dataset.keys !== ck) {
     $("closed").dataset.keys = ck;
     $("closed").innerHTML = s.closed.map((c, i) => `<tr class="click ${i < newClosed ? "flash" : ""}" data-open="${esc(c.mint)}" tabindex="0">
-      <td title="${esc(c.mint)}"><b>${esc(c.symbol)}</b></td>
+      <td title="${esc(c.mint)}">${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b></td>
       <td><span class="tag ${(c.source || "").startsWith("copy") ? "copy" : c.source === "late" ? "late" : ""}">${esc(c.source)}</span></td>
       <td class="r">${dur(c.closed - c.opened)}</td><td class="r">${c.cost.toFixed(3)}</td>
       <td class="r ${cls(c.pnl)}">${signed(c.pnl)} (${pct(c.pnl_pct)})</td><td class="r">${pct(c.peak_gain_pct)}</td>
@@ -1046,7 +1237,7 @@ function renderRadar(s) {
   $("radar").innerHTML = rows.map(w => {
     const lk = w.lk || [0, 0, 0];
     return `<tr class="click ${w.status === "watching" ? "" : "dim"}" data-open="${esc(w.mint)}" tabindex="0">
-    <td title="${esc(w.mint)}"><b>${esc(w.symbol)}</b><span class="lk" title="social links: X · Telegram · website"><b class="${lk[0] ? "on" : ""}">T</b><b class="${lk[1] ? "on" : ""}">G</b><b class="${lk[2] ? "on" : ""}">W</b></span>${w.socials ? ' <span class="tag" title="calls / smart wallets">📣 ' + w.socials + "</span>" : ""}</td>
+    <td title="${esc(w.mint)}">${logo(w.mint, w.symbol)}<b>${esc(w.symbol)}</b><span class="lk" title="social links: X · Telegram · website"><b class="${lk[0] ? "on" : ""}">T</b><b class="${lk[1] ? "on" : ""}">G</b><b class="${lk[2] ? "on" : ""}">W</b></span>${w.socials ? ' <span class="tag" title="calls / smart wallets">📣 ' + w.socials + "</span>" : ""}</td>
     <td class="r">${dur(w.age)}</td>
     <td title="${(w.progress * 100).toFixed(1)}% · MC ${w.mcap_sol.toFixed(0)} SOL"><div class="bar"><i style="width:${(w.progress * 100).toFixed(1)}%"></i></div></td>
     <td class="r">${w.buyers}</td>
@@ -1066,7 +1257,7 @@ async function openDrawer(mint) {
   if (!mint) return;
   S.drawer = mint;
   $("drawer").classList.add("open"); $("scrim").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false");
-  $("dr-title").textContent = short(mint); $("dr-status").textContent = "";
+  $("dr-title").textContent = short(mint); $("dr-status").textContent = ""; $("dr-logo").innerHTML = logo(mint, "", "md");
   $("dr-body").innerHTML = `<div class="empty">Loading…</div>`;
   await refreshDrawer();
   $("dr-close").focus();
@@ -1095,6 +1286,7 @@ async function refreshDrawer() {
 }
 function renderDrawer(d) {
   $("dr-title").textContent = d.symbol + (d.name ? " · " + d.name : "");
+  if (S.drawer) setHTML($("dr-logo"), logo(S.drawer, d.symbol, "md"));
   const held = !!d.position;
   $("dr-status").textContent = held ? "HELD" : d.status.length > 28 ? d.status.slice(0, 27) + "…" : d.status;
   $("dr-status").className = "badge " + (held ? "paper" : d.status.startsWith("rejected") ? "bad" : "");
@@ -1403,6 +1595,255 @@ function buddyOnTrade(l) {
   else buddyFlash("sad", `Ouch, ${l.text.split(" ")[0]} closed ${v.toFixed(3)} SOL.`, l.text.match(/\[(\w+)/)?.[1] || "", 3000);
 }
 
+// ---------------------------------------------------------------- token logos
+const LOGO = {ok: new Set(), bad: new Map()};
+const hue = m => { let h = 0; for (const c of String(m || "")) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+function logo(mint, sym, size = "") {
+  const ini = esc(((sym || "").replace(/^\$/, "").trim()[0] || "?").toUpperCase());
+  const bad = LOGO.bad.get(mint), skip = !mint || (bad && Date.now() - bad < 120000);
+  const img = skip ? "" : `<img src="/api/logo/${encodeURIComponent(mint)}" alt="" loading="lazy" decoding="async" data-logo="${esc(mint)}"${LOGO.ok.has(mint) ? ' class="ok"' : ""}>`;
+  return `<span class="logo ${size}" style="--h:${hue(mint)}" aria-hidden="true">${ini}${img}</span>`;
+}
+const tok = (mint, sym, size = "") => `<span class="tok">${logo(mint, sym, size)}<b>${esc((sym || "").trim() || short(mint))}</b></span>`;
+document.addEventListener("load", e => { const t = e.target; if (t.dataset && t.dataset.logo) { LOGO.ok.add(t.dataset.logo); t.classList.add("ok"); } }, true);
+document.addEventListener("error", e => { const t = e.target; if (t.dataset && t.dataset.logo) { LOGO.bad.set(t.dataset.logo, Date.now()); t.remove(); } }, true);
+const ago = ts => { const s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m` : s < 86400 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`; };
+const setHTML = (el, html) => { if (el && el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; } };
+
+// ---------------------------------------------------------------- desk: what the bots are thinking
+const DK = {data: null, timer: null, xtimer: null, x: null};
+const AGENT = {
+  scanner: ["🔭", "Graduation scanner", "checks every rule on coins filling their curve"],
+  exits: ["🎯", "Exit manager", "watches each open position's exits"],
+  risk: ["🛡️", "Risk officer", "sizing, daily loss limit, kill switch"],
+  feed: ["📡", "Feed watchdog", "keeps the market data fresh and complete"],
+  desk: ["🧠", "AI desk", "four Claude personas vote on each entry"],
+  operator: ["✦", "Claude operator", "your chat assistant: acts only with your OK"],
+  recorder: ["🗂️", "Wallet recorder", "records old coins' trades for the wallet study"],
+  bench: ["🪑", "On the bench", "strategies that are switched off"],
+};
+const PERSONA = {veteran: ["🎖️", "Veteran"], narrative: ["📣", "Narrative"], skeptic: ["🔍", "Skeptic"], quant: ["📐", "Quant"]};
+async function loadDesk() {
+  clearTimeout(DK.timer);
+  try { DK.data = await (await fetch("/api/desk", {cache: "no-store"})).json(); renderDesk(); } catch { /* next poll */ }
+  if (S.tab === "desk") DK.timer = setTimeout(loadDesk, 1500);
+}
+function agentCard(id, state, thought, o = {}) {
+  const [ic, name, role] = AGENT[id];
+  return `<div class="agent ${state === "working" ? "working" : ""} ${["off", "resting", "asleep"].includes(state) ? "dim" : ""}" data-agent="${id}">
+    <div class="hd"><div class="av">${ic}</div><div class="nm"><b>${name}</b><small>${role}</small></div><span class="pill ${state}">${state}</span></div>
+    ${thought ? `<div class="thought">${thought}</div>` : ""}${o.extra || ""}
+    ${o.stats ? `<div class="stats">${o.stats}</div>` : ""}${o.btns ? `<div class="btns">${o.btns}</div>` : ""}</div>`;
+}
+const tname = (mint, sym) => `<span data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym)}<b>${esc((sym || "").trim() || short(mint))}</b></span>`;
+function renderDesk() {
+  const d = DK.data; if (!d) return;
+  const L = d.late, cands = L.candidates || [], hold = d.holding || [], st = d.strategies || {};
+  const cards = {};
+  // scanner
+  const top = cands.find(c => ["buy", "blocked", "wait"].includes(c.verdict)) || cands.find(c => c.verdict === "early");
+  cards.scanner = agentCard("scanner", !st.late ? "off" : d.blocked ? "blocked" : "working",
+    !st.late ? "Graduation plays are switched off." : (d.blocked ? `Entries are blocked: ${esc(d.blocked)}. Still watching. ` : "")
+      + (top ? `${tname(top.mint, top.symbol)} ${esc(top.why)}` : `Nothing near the ${L.window[0]}–${L.window[1]}% window yet; watching ${L.tracked} coins fill.`),
+    {stats: `<span><b>${L.in_window}</b> in the window</span><span><b>${cands.length}</b> close</span><span><b>${L.tracked}</b> tracked</span><span>every ${L.scan_interval_s}s</span>`});
+  // exits
+  let hot = null;
+  for (const h of hold) for (const g of h.watch) if (g.frac != null && (!hot || g.frac > hot.g.frac)) hot = {h, g};
+  cards.exits = agentCard("exits", hold.length ? "working" : "resting",
+    hold.length ? (hot ? `${tname(hot.h.mint, hot.h.symbol)} <span class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</span>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : `Managing ${hold.length} position(s).`)
+      : "Nothing open. I take over the moment the scanner buys.",
+    {stats: hold.length ? hold.map(h => `<span>${esc(h.symbol)} <b class="${cls(h.gain_pct)}">${pct(h.gain_pct)}</b></span>`).join("") : ""});
+  // risk
+  const r = d.risk || {}, lim = d.limits, lossUsed = Math.max(0, -d.day_pnl) / (lim.daily_loss_sol || 1);
+  cards.risk = agentCard("risk", d.defense.on ? "blocked" : "working",
+    d.defense.on ? `Defense mode: ${esc(d.defense.reason)}. Sizes are cut until it lifts.`
+      : `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)} SOL of the ${lim.daily_loss_sol} SOL loss limit; drawdown ${fx(Math.max(0, d.drawdown_pct), 1)}% (kill switch at ${lim.kill_dd_pct}%).`,
+    {extra: `<div class="mb ${lossUsed < .6 ? "ok" : ""}"><div class="t"><span>daily loss limit used</span><b>${Math.round(lossUsed * 100)}%</b></div><div class="tr"><i style="width:${Math.min(lossUsed, 1) * 100}%"></i></div></div>`,
+     stats: `<span><b>${d.open}</b> / ${lim.max_open} positions</span>`, btns: `<button class="small" data-tab-link="controls">Risk dial</button>`});
+  // feed
+  const f = d.feed;
+  cards.feed = agentCard("feed", f.degraded ? "trouble" : "working",
+    !f.host ? "Simulated market (demo): no real feed to watch." :
+    f.degraded ? `Problem: ${esc(f.degraded_reason)}. Entries pause until the data is good again.`
+      : `Reading pump.fun from <b>${esc(f.host || "?")}</b>, ${fx(f.lag_s, 1)} s behind the chain, ${fx(f.gap_pct, 1)}% of trades missing.`);
+  // AI desk
+  const k = d.desk, awake = k.enabled;
+  const personas = `<div class="personas">${k.personas.map(p => `<span title="${esc(p)}">${(PERSONA[p] || ["•"])[0]} ${esc((PERSONA[p] || [0, p])[1])}</span>`).join("")}</div>`;
+  const last = (k.reviews || [])[0];
+  cards.desk = agentCard("desk", awake ? "working" : d.anthropic_key ? "resting" : "asleep",
+    awake ? (last ? `Last vote: ${tname(last.mint, last.symbol)} ${last.approve ? "approved" : "passed"}.` : "Awake. We vote when the rules pick a trade.")
+      : d.anthropic_key ? "Resting. Wake us to vote on each entry the rules pick (about $0.04 a vote, and a few seconds before each buy)."
+      : "Asleep: add an Anthropic API key in Controls to wake us.",
+    {extra: personas, stats: k.calls ? `<span>${k.calls} calls</span><span>~$${fx(k.cost_usd, 2)} spent</span><span>${esc(k.model)}</span>` : "",
+     btns: d.anthropic_key ? `<button class="small ${awake ? "" : "primary"}" data-deskwake="${awake ? 0 : 1}">${awake ? "Let them rest" : "Wake the desk"}</button>`
+       : `<button class="small primary" data-tab-link="controls">Add API key</button>`});
+  // operator
+  const ag = (d.log || []).filter(l => l.level === "agent").pop();
+  cards.operator = agentCard("operator", d.chat.available ? "resting" : "asleep",
+    ag ? `Last action: ${esc(ag.text)}` : d.chat.available ? "Ready when you are. Ask me anything about the bot, or paste a contract address." : "Claude Code isn't set up on this machine.",
+    {btns: `<button class="small" data-tab-link="chat">Open chat</button>`});
+  // recorder
+  const rc = d.recorder, q = rc.control.quiet;
+  cards.recorder = agentCard("recorder", !rc.running ? "trouble" : rc.active ? "working" : "resting",
+    !rc.running ? "The meme-wallets service isn't running (systemctl --user start meme-wallets)."
+      : rc.active ? `Recording every trade on <b>${rc.pools ?? "?"}</b> pump.fun coins at least 2 days old.`
+      : `Paused: ${esc(rc.pause_reason)}. Trades in a pause are missing from the study.`,
+    {stats: `<span>${rc.gb_today != null ? fx(rc.gb_today, 1) + " GB today" : ""}</span><span>${rc.mb_on_disk} MB on disk</span><span>${esc(rc.mode || "")}</span>`,
+     btns: (rc.active ? `<button class="small" data-rec="pause">Pause</button><button class="small" data-rech="1">1 h</button><button class="small" data-rech="4">4 h</button><button class="small" data-rech="12">12 h</button>`
+       : `<button class="small primary" data-rec="resume">Resume</button>`),
+     extra: `<div class="form-row note"><span>Quiet hours</span><input type="time" id="rq-a" value="${esc(q ? q.start : "01:00")}" aria-label="Quiet hours start">
+       <span>to</span><input type="time" id="rq-b" value="${esc(q ? q.end : "07:00")}" aria-label="Quiet hours end">
+       <button class="small" data-rec="quiet">${q ? "Update" : "Set"}</button>${q ? `<button class="small ghost" data-rec="quiet_off">Off</button>` : ""}</div>`});
+  // bench
+  const off = [["sniper", "⚡ Early sniper"], ["copy", "👥 Copy trader"], ["callouts", "📢 Callouts"]].filter(([key]) => !st[key]);
+  cards.bench = agentCard("bench", "resting", off.length ? `${off.map(x => x[1]).join(" · ")}: off, because they lost money in testing. Switch them on from the Live tab.` : "Everyone's playing.");
+  const host = $("dk-agents");
+  for (const id of Object.keys(cards)) {
+    let el = host.querySelector(`[data-slot="${id}"]`);
+    if (!el) { el = document.createElement("div"); el.dataset.slot = id; el.style.display = "contents"; host.appendChild(el); }
+    if (id === "recorder" && el.contains(document.activeElement)) continue;      // don't clobber typing
+    setHTML(el, cards[id]);
+  }
+  const working = Object.values(cards).filter(h => h.includes('pill working')).length;
+  $("dk-sum").innerHTML = `${working} of ${Object.keys(cards).length - 1} agents working · scanner watching <b>${cands.length}</b> coins near its window · <b>${hold.length}</b> open · entries ${d.blocked ? `<span style="color:var(--warn)">blocked: ${esc(d.blocked)}</span>` : "open"}`;
+  // scanner detail
+  $("dk-scan-sub").textContent = `window ${L.window[0]}–${L.window[1]}% of the curve · needs +${L.min_net_flow_sol} SOL and ${L.min_buyers} buyers in ${L.flow_window_s}s`;
+  setHTML($("dk-scan"), cands.map(c => candHTML(c, L)).join("") || `<div class="empty">No coin is near the window. Most launches never get there: that's the filter working.</div>`);
+  setHTML($("dk-hold"), hold.map(holdHTML).join("") || `<div class="empty">No open positions</div>`);
+  $("dk-votes-sub").textContent = awake ? `${(k.reviews || []).length} recent reviews` : "resting";
+  setHTML($("dk-votes"), (k.reviews || []).map(reviewHTML).join("") || `<div class="empty">${awake ? "No reviews yet: the desk votes when the rules pick a trade." : "The personas (" + k.personas.map(p => (PERSONA[p] || [0, p])[1]).join(", ") + ") vote only while the desk is awake."}</div>`);
+  // thoughts
+  const items = (d.thoughts || []).map(t => ({ts: t.ts, ic: "🔭", mood: t.mood, mint: t.mint, sym: t.symbol, text: t.text}))
+    .concat((d.log || []).map(l => ({ts: l.ts, mint: l.mint, text: l.text, ic: {buy: "🟢", sell: "💸", close: "🏁", desk: "🧠", agent: "✦", error: "⚠️"}[l.level] || "•",
+      mood: {buy: "act", sell: "act", desk: "spot", agent: "spot", error: "bad"}[l.level] || (/ \+\d/.test(l.text) ? "act" : "bad")})))
+    .sort((a, b) => b.ts - a.ts).slice(0, 90);
+  setHTML($("dk-thoughts"), items.map(t => `<div class="th m-${t.mood}" ${t.mint ? `data-open="${esc(t.mint)}"` : ""}><time>${hhmmss(t.ts)}</time><span>${t.ic}</span>
+    <span>${t.mint ? logo(t.mint, t.sym || t.text) : ""}${esc(t.text)}</span></div>`).join("") || `<div class="empty">Quiet so far.</div>`);
+  setHTML($("dk-research"), (d.research || []).map(r => `<div class="rs"><div class="toolbar"><b>${esc(r.name)}</b><span class="tag">${esc(r.stage)}</span><span class="note">${esc(r.what)}</span></div>
+    <div class="prog"><i style="width:${(r.progress * 100).toFixed(1)}%"></i></div><span class="note">${esc(r.text)}</span></div>`).join("") || `<div class="empty">No tests registered</div>`);
+}
+function candHTML(c, L) {
+  const lo = L.window[0], hi = L.window[1];
+  if (!["buy", "blocked", "wait"].includes(c.verdict)) {
+    const lbl = {early: "filling", pass: "passed", out: "out", holding: "holding", done: "done"}[c.verdict] || c.verdict;
+    return `<div class="cand mini v-${c.verdict}" data-open="${esc(c.mint)}" tabindex="0"><div class="who">${tok(c.mint, c.symbol)}<span class="v-pill ${c.verdict}">${lbl}</span></div>
+      <div><div class="cwin" title="curve ${c.progress}% · buy window ${lo}–${hi}%"><span class="band" style="left:${lo}%;width:${hi - lo}%"></span><span class="fill" style="width:${Math.min(c.progress, 100)}%"></span></div>
+      <div class="why">${esc(c.why)} · ${dur(c.age)} old</div></div></div>`;
+  }
+  const mom = c.checks.filter(x => x.group === "momentum"), flags = c.checks.filter(x => x.group === "flag");
+  const label = {buy: "buy signal", blocked: "would buy", wait: "waiting", early: "filling", pass: "passed", out: "out", holding: "holding", done: "done"}[c.verdict] || c.verdict;
+  return `<div class="cand v-${c.verdict}" data-open="${esc(c.mint)}" tabindex="0">
+    <div class="who">${tok(c.mint, c.symbol, "md")}<span class="v-pill ${c.verdict}">${label}</span><span class="note">${dur(c.age)} old · MC ${fx(c.mcap_sol, 0)} SOL</span></div>
+    <div><div class="cwin" title="curve ${c.progress}% · buy window ${lo}–${hi}%"><span class="band" style="left:${lo}%;width:${hi - lo}%"></span><span class="fill" style="width:${Math.min(c.progress, 100)}%"></span></div>
+      <div class="why">${esc(c.why)}</div>
+      ${mom.length ? `<div class="mbars">${mom.map(m => `<div class="mb ${m.ok ? "ok" : ""}"><div class="t"><span>${esc(m.label)}</span><b>${esc(m.value)} <span class="note">/ ${esc(m.limit.replace(">= ", ""))}</span></b></div><div class="tr"><i style="width:${(Math.min(m.frac ?? 0, 1) * 100).toFixed(0)}%"></i></div></div>`).join("")}</div>` : ""}
+      <div class="flagrow">${flags.map(f => `<span class="${f.ok ? "" : "no"}" title="${esc(f.value)} ${esc(f.limit)}">${f.ok ? "✓" : "✕"} ${esc(f.label)}</span>`).join("")}</div></div></div>`;
+}
+function holdHTML(h) {
+  return `<div class="hold" data-open="${esc(h.mint)}" tabindex="0"><div class="top">${tok(h.mint, h.symbol, "md")}<span class="tag ${h.source === "late" ? "late" : ""}">${esc(h.source)}</span><span class="spacer"></span>
+    <span class="num ${cls(h.gain_pct)}" style="font-weight:750;font-size:19px">${pct(h.gain_pct, 1)}</span></div>
+    <div class="note">${dur(h.held_s)} held · peak ${pct(h.peak_gain_pct)} · worth ${sol(h.value_sol)} SOL</div>
+    <div class="gauges">${h.watch.map(g => { const f = g.frac ?? 0; return `<div class="mb gauge ${f >= .85 ? "hot" : f >= .6 ? "warm" : ""}"><div class="t"><span>${esc(g.label)}</span><b>${esc(g.value)} <span class="note">/ ${esc(g.limit)}</span></b></div>${g.frac == null ? "" : `<div class="tr"><i style="width:${(f * 100).toFixed(0)}%"></i></div>`}</div>`; }).join("")}</div></div>`;
+}
+function reviewHTML(r) {
+  return `<div class="review"><div class="toolbar">${tok(r.mint, r.symbol, "md")}<span class="v-pill ${r.approve ? "buy" : "pass"}">${r.approve ? "approved" : "passed"}</span><span class="note">${hhmmss(r.ts)} · ${esc(r.kind)}</span></div>
+    <div class="votes">${r.votes.map(v => { const [ic, nm] = PERSONA[v.persona] || ["•", v.persona];
+      return `<div class="vote ${v.error ? "err" : v.vote}"><div class="t"><b>${ic} ${esc(nm)}</b><span class="v-pill ${v.vote === "buy" && !v.error ? "buy" : "pass"}">${v.error ? "error" : esc(v.vote) + " " + v.conviction}</span></div>
+        ${v.error ? `<span class="note">${esc(v.error)}</span>` : `<ul>${(v.reasons || []).map(x => `<li>${esc(x)}</li>`).join("")}${(v.red_flags || []).map(x => `<li class="down">⚑ ${esc(x)}</li>`).join("")}</ul>`}</div>`; }).join("")}</div>
+    <div class="note">${esc(r.summary)}</div></div>`;
+}
+
+// ---------------------------------------------------------------- X feed (FxTwitter)
+async function loadX() {
+  clearTimeout(DK.xtimer);
+  try { DK.x = await (await fetch("/api/xfeed", {cache: "no-store"})).json(); renderX(); } catch { /* next poll */ }
+  if (S.tab === "desk") DK.xtimer = setTimeout(loadX, 12000);
+}
+const srcLabel = s => s.startsWith("@") ? s : s.startsWith("q:") ? "🔎 " + s.slice(2) : "holding " + s.split(":")[1];
+function postText(p) {
+  let t = esc(p.text);
+  for (const m of p.mints || []) t = t.split(m).join(`<span class="mint" data-open="${esc(m)}" title="Look this coin up">${short(m)}</span>`);
+  return t.replace(/\$([A-Za-z][A-Za-z0-9_]{1,14})\b/g, '<span class="cash">$$$1</span>');
+}
+function renderX() {
+  const x = DK.x; if (!x) return;
+  $("xf-auto").checked = !!x.auto;
+  setHTML($("xf-src"), x.sources.map(s => `<span class="${s.ok === false ? "err" : ""}" title="${esc(s.error || (s.last ? "checked " + ago(s.last) + " ago" : "not checked yet"))}">${esc(srcLabel(s.source))}${s.source.startsWith("held:") ? "&nbsp;" : `<button data-xrm="${esc(s.source)}" aria-label="Remove ${esc(s.source)}">×</button>`}</span>`).join("")
+    || `<span class="note">No sources. Add an @handle or a search.</span>`);
+  setHTML($("xf-posts"), x.posts.map(p => `<div class="post">${p.author.avatar ? `<img class="av2" src="${esc(p.author.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="av2">${esc((p.author.name || "?")[0])}</span>`}
+    <div><div class="hd"><b>${esc(p.author.name)}</b>${p.author.verified ? " ☑" : ""}<span>@${esc(p.author.handle)} · ${ago(p.ts)}</span><span class="tag">${esc(srcLabel(p.source))}</span></div>
+      <p>${postText(p)}</p>${p.photos.length ? `<div class="ph">${p.photos.map(u => `<img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join("")}</div>` : ""}
+      <div class="ft"><span>💬 ${p.replies}</span><span>↻ ${p.reposts}</span><span>♥ ${p.likes}</span>${p.views != null ? `<span>👁 ${p.views}</span>` : ""}<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">open on X ↗</a></div></div></div>`).join("")
+    || `<div class="empty">${x.sources.length ? "Fetching posts… (sources refresh every few minutes)" : "Add an account or a search to start the feed."}</div>`);
+}
+function addX() {
+  const v = $("xf-in").value.trim(); if (!v) return;
+  send({action: "x_add", kind: /^@?[A-Za-z0-9_]{1,15}$/.test(v) && v.startsWith("@") ? "account" : "search", value: v});
+  $("xf-in").value = "";
+}
+
+// ---------------------------------------------------------------- portfolio (watch-only)
+const PF = {data: null, timer: null};
+async function loadPortfolio() {
+  clearTimeout(PF.timer);
+  try { PF.data = await (await fetch("/api/portfolio", {cache: "no-store"})).json(); renderPortfolio(); } catch { /* next poll */ }
+  if (S.tab === "portfolio") PF.timer = setTimeout(loadPortfolio, 5000);
+}
+const money = v => { v = +v; if (!isFinite(v)) return "–"; return (v < 0 ? "−$" : "$") + (Math.abs(v) >= 1 ? fmtUsd(Math.abs(v)) : Math.abs(v).toFixed(Math.abs(v) >= 0.01 ? 2 : 4)); };
+const usd = v => v == null ? "–" : money(v);
+function walletCard(w) {
+  const toks = w.tokens || [], priced = toks.filter(t => t.value_usd != null), tot = w.total_usd || 0;
+  const segs = (w.sol_value_usd ? [{k: "SOL", v: w.sol_value_usd, c: "var(--series)"}] : []).concat(priced.slice(0, 7).map(t => ({k: t.symbol, v: t.value_usd, c: `hsl(${hue(t.mint)} 62% 50%)`})));
+  return `<section class="panel wcard"><div class="wc-head"><div class="wc-av">${w.mine ? "👛" : "👀"}</div>
+      <div style="min-width:0"><b>${esc(w.label)}</b> <span class="tag ${w.mine ? "ok" : ""}">${w.mine ? "mine" : "watching"}</span>
+        <div class="note"><span class="mint" data-copyaddr="${esc(w.address)}" title="Copy address">${short(w.address)} ⧉</span>
+          <a href="https://solscan.io/account/${encodeURIComponent(w.address)}" target="_blank" rel="noopener noreferrer">Solscan ↗</a></div></div>
+      <div class="tot"><b class="num">${w.updated ? usd(tot) : "…"}</b><span class="note num">${w.sol != null ? fx(w.sol, 3) + " SOL" : w.loading ? "loading…" : ""}</span></div></div>
+    <div class="wc-body">${w.error ? `<div class="note" style="color:var(--bad)">${esc(w.error)}</div>` : ""}
+      ${tot > 0 ? `<div class="alloc" title="allocation">${segs.map(s => `<i style="width:${(s.v / tot * 100).toFixed(2)}%;background:${s.c}" title="${esc(s.k)} ${money(s.v)}"></i>`).join("")}</div>` : ""}
+      <div>${w.sol != null ? `<div class="hrow"><span class="tok"><span class="logo md" style="--h:265">◎</span><b>SOL</b></span><span class="r num">${fx(w.sol, 4)}</span><span class="r num"><b>${usd(w.sol_value_usd)}</b></span></div>` : ""}
+        ${priced.slice(0, 14).map(t => `<div class="hrow" data-open="${esc(t.mint)}" style="cursor:pointer"><span class="tok">${logo(t.mint, t.symbol, "md")}<span style="min-width:0"><b>${esc(t.symbol || short(t.mint))}</b><small>${t.price_usd ? "$" + fmtPrice(t.price_usd) : ""}${t.change_24h != null ? ` · <span class="${cls(t.change_24h)}">${pct(t.change_24h, 1)} 24h</span>` : ""}</small></span></span>
+          <span class="r num">${t.amount >= 1e6 ? (t.amount / 1e6).toFixed(2) + "M" : t.amount >= 1e3 ? (t.amount / 1e3).toFixed(1) + "K" : fx(t.amount, 2)}</span><span class="r num"><b>${usd(t.value_usd)}</b></span></div>`).join("")}</div>
+      ${priced.length > 14 ? `<span class="note">+ ${priced.length - 14} smaller holdings</span>` : ""}
+      ${w.unpriced ? `<span class="note">${w.unpriced} token(s) with no market price (often airdropped spam: don't interact with them)</span>` : ""}
+      ${(w.activity || []).length ? `<div><div class="note" style="margin-bottom:3px">Latest transactions</div><div class="acts">${w.activity.slice(0, 6).map(a => `<a href="https://solscan.io/tx/${encodeURIComponent(a.sig)}" target="_blank" rel="noopener noreferrer"><span>${a.ok ? "✓" : "✕"} ${short(a.sig)}</span><span>${a.ts ? ago(a.ts) + " ago" : ""}</span></a>`).join("")}</div></div>` : ""}
+      <div class="btns" style="display:flex;gap:6px"><button class="small" data-pfref="${esc(w.address)}">Refresh</button><button class="small ghost" data-pfrm="${esc(w.address)}">Remove</button>
+        <span class="note" style="margin-left:auto">${w.updated ? "updated " + ago(w.updated) + " ago" : ""}</span></div></div></section>`;
+}
+function renderPortfolio() {
+  const d = PF.data; if (!d) return;
+  const s = snap, mine = d.wallets.filter(w => w.mine);
+  $("pf-kpis").innerHTML = `<div class="kpi"><div class="label">My wallets</div><div class="value num">${mine.length ? money(d.mine_usd) : "–"}</div><div class="sub">${mine.length} wallet(s) marked mine</div></div>
+    <div class="kpi"><div class="label">Watching</div><div class="value num">${d.wallets.length - mine.length}</div><div class="sub">other wallets</div></div>
+    <div class="kpi"><div class="label">SOL price</div><div class="value num">${d.sol_usd ? money(d.sol_usd) : "–"}</div><div class="sub">used for totals</div></div>
+    <div class="kpi"><div class="label">Bot (paper)</div><div class="value num">${s ? sol(s.equity) + " SOL" : "–"}</div><div class="sub">${s ? `${s.positions.length} open · not real money` : ""}</div></div>`;
+  const bot = s ? `<section class="panel wcard"><div class="wc-head"><div class="wc-av">🤖</div><div><b>The bot</b> <span class="tag">paper</span><div class="note">simulated balance, not a wallet</div></div>
+      <div class="tot"><b class="num">${sol(s.equity)} SOL</b><span class="note num">${s.sol_usd ? money(s.equity * s.sol_usd) : ""}</span></div></div>
+    <div class="wc-body">${s.positions.map(p => `<div class="hrow" data-open="${esc(p.mint)}" style="cursor:pointer"><span class="tok">${logo(p.mint, p.symbol, "md")}<span><b>${esc(p.symbol)}</b><small>${esc(p.source)} · ${dur(p.held_s)}</small></span></span>
+      <span class="r num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span><span class="r num"><b>${sol(p.value_sol)} SOL</b></span></div>`).join("") || `<span class="note">No open positions · ${sol(s.sol)} SOL cash</span>`}</div></section>` : "";
+  if ($("pf-wallets").contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+  setHTML($("pf-wallets"), bot + d.wallets.map(walletCard).join("")
+    + (d.wallets.length ? "" : `<section class="panel"><div class="empty">Add your Phantom (or any) wallet address above to see its coins, values and activity here. Watch-only: no keys, ever.</div></section>`));
+}
+
+// ---------------------------------------------------------------- API keys
+async function loadKeys() { try { S.keys = await (await fetch("/api/keys", {cache: "no-store"})).json(); renderKeys(); } catch { /* retry on next visit */ } }
+function renderKeys() {
+  if (!S.keys || $("keys").contains(document.activeElement)) return;
+  $("keys").innerHTML = S.keys.map(k => `<div class="key ${k.set ? "set" : ""}"><div class="t"><b>${esc(k.label)}</b>
+      ${k.set ? `<span class="tag ok">✓ set${k.hint ? " · " + esc(k.hint) : ""}${k.source === "environment" ? " (from the environment)" : ""}</span>` : `<span class="tag">not set</span>`}</div>
+    <span class="note">${esc(k.help)}</span>
+    <div class="form-row"><input type="password" id="key-${esc(k.name)}" placeholder="${k.set ? "Replace…" : k.kind === "https" ? "https://…" : k.kind === "wss" ? "wss://…" : "Paste it here"}" autocomplete="off" spellcheck="false" aria-label="${esc(k.label)}">
+      <button class="small primary" data-keyset="${esc(k.name)}">Save</button>${k.set && k.source === ".env" ? `<button class="small ghost" data-keyclr="${esc(k.name)}">Remove</button>` : ""}</div>
+    <span class="note"><code>${esc(k.name)}</code> · ${k.effect === "restart" ? "used after the bot restarts" : "used right away"}</span></div>`).join("");
+}
+function saveKey(name, btn) {
+  const inp = $("key-" + name); const v = inp ? inp.value.trim() : "";
+  if (!v) { toast("Paste the key first", "bad"); return; }
+  inp.value = ""; if (btn) btn.blur(); else inp.blur();
+  send({action: "key_set", name, value: v});
+}
+
 // ---------------------------------------------------------------- small svg visuals
 const fmtUsd = v => { v = +v; if (!isFinite(v)) return "–"; const a = Math.abs(v);
   return a >= 1e9 ? (v / 1e9).toFixed(2) + "B" : a >= 1e6 ? (v / 1e6).toFixed(2) + "M" : a >= 1e3 ? (v / 1e3).toFixed(1) + "K" : a >= 1 ? v.toFixed(0) : v.toFixed(2); };
@@ -1568,7 +2009,7 @@ function tokenCard(d) {
   if (!d) return "";
   const c = d.curve, tr = d.trading, h = d.holders || {}, t = d.tracked, sym = (d.symbol || "").replace(/^\$/, "") || short(d.mint);
   const stageCls = (d.stage || "").startsWith("bonding") ? "paper" : (d.stage || "").startsWith("graduated") ? "ok" : "";
-  const img = d.image ? `<img class="tc-img" src="${esc(d.image)}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">` : `<div class="tc-img">${esc(sym[0] || "?")}</div>`;
+  const img = logo(d.mint, sym, "lg");
   const fact = (l, v, c2 = "") => `<div class="fact"><div class="l">${l}</div><div class="v num ${c2}">${v}</div></div>`;
   const chg = tr ? [["5m", tr.change_m5], ["1h", tr.change_h1], ["6h", tr.change_h6], ["24h", tr.change_h24]].filter(([, v]) => v != null)
     .map(([k, v]) => `<span class="${cls(v)}">${k} ${pct(v, 1)}</span>`).join("") : "";
@@ -1797,7 +2238,7 @@ function renderChatSide(s) {
     ${s.risk ? `<div class="note">risk dial: <b>${esc(s.risk.name)}</b> (${s.risk.level}/5) · ${esc(riskText(s.risk.levels[s.risk.level - 1]))}</div>` : ""}
     ${s.blocked ? `<div class="note" style="color:var(--warn)">entries blocked: ${esc(s.blocked)}</div>` : ""}`;
   $("cs-pos-sub").textContent = `${s.positions.length} open`;
-  $("cs-pos").innerHTML = s.positions.map(p => `<div data-open="${esc(p.mint)}"><b>${esc(p.symbol)}</b><span class="note">${esc(p.source)} · ${dur(p.held_s)}</span><span class="num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span></div>`).join("")
+  $("cs-pos").innerHTML = s.positions.map(p => `<div data-open="${esc(p.mint)}"><span class="tok">${logo(p.mint, p.symbol)}<b>${esc(p.symbol)}</b></span><span class="note">${esc(p.source)} · ${dur(p.held_s)}</span><span class="num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span></div>`).join("")
     || `<div class="empty" style="padding:6px">None open</div>`;
   renderPulse("cs-pulse", null, s);
   buddyRender();
@@ -1808,7 +2249,7 @@ function renderChatSide(s) {
 
 // ---------------------------------------------------------------- wiring
 function setTab(t) {
-  if (!["live", "chat", "analytics", "controls", "guide"].includes(t)) t = "live";
+  if (!["live", "desk", "chat", "portfolio", "analytics", "controls", "guide"].includes(t)) t = "live";
   S.tab = t; store.set("tab", t); document.body.classList.toggle("on-chat", t === "chat");
   $$("[data-view]").forEach(v => v.hidden = v.dataset.view !== t);
   $$(".tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
@@ -1820,7 +2261,9 @@ function setTab(t) {
     if (!C.loaded) loadChat(); else renderChat(true);
     if (snap) renderChatSide(snap); setTimeout(() => $("ch-in").focus(), 30); }
   if (t === "controls" && snap) $("paper-panel").hidden = snap.mode.startsWith("live");
-  if (t === "controls") loadAdvanced();
+  if (t === "controls") { loadAdvanced(); loadKeys(); }
+  if (t === "desk") { loadDesk(); loadX(); }
+  if (t === "portfolio") { loadPortfolio(); if (snap) renderPortfolio(); }
 }
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
@@ -1841,6 +2284,9 @@ function connect() {
       if (m.text) toast(esc(m.text), m.ok ? "ok" : "bad");
       if (m.controls) { S.controls = m.controls; if (S.tab === "controls") renderControls(); }
       if (m.advanced) { S.adv = m.advanced; if (S.tab === "controls") renderAdvanced(); }
+      if (m.keys) { S.keys = m.keys; renderKeys(); }
+      if (m.portfolio) { PF.data = m.portfolio; renderPortfolio(); }
+      if (m.xfeed) { DK.x = m.xfeed; renderX(); }
       return;
     }
     render(m);
@@ -1859,6 +2305,11 @@ $("dep-add").onclick = () => { const v = +$("dep-sol").value; if (!(v > 0)) { to
   const keep = $("dep-keep").checked;
   if (confirm(`Add ${v} SOL of pretend money to the paper balance${keep ? " and save it as the starting balance" : ""}?`)) send({action: "deposit", sol: v, keep}); };
 $("adv-q").oninput = renderAdvanced;
+$("xf-add").onclick = addX;
+$("xf-auto").onchange = e => send({action: "x_auto", on: e.target.checked});
+$("pf-add").onclick = () => { const a = $("pf-addr").value.trim(); if (!a) { $("pf-addr").focus(); return; }
+  send({action: "pf_add", address: a, label: $("pf-label").value, mine: $("pf-mine").checked}); $("pf-addr").value = ""; $("pf-label").value = ""; setTimeout(loadPortfolio, 2500); };
+$("pf-refresh").onclick = () => { send({action: "pf_refresh"}); setTimeout(loadPortfolio, 2000); };
 $("adv-changed").onchange = renderAdvanced;
 $("buddy").onclick = () => { B.tip = (B.tip + 1) % TIPS.length; buddyFlash("happy", TIPS[B.tip], "tip " + (B.tip + 1) + "/" + TIPS.length, 6000); };
 document.addEventListener("toggle", e => { const d = e.target; if (d.matches && d.matches("details.advsec")) { if (d.open) ADV_OPEN.add(d.dataset.sec); else ADV_OPEN.delete(d.dataset.sec); } }, true);
@@ -1879,9 +2330,19 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr]");
   if (!t) return;
   const d = t.dataset;
+  if (d.keyset) { saveKey(d.keyset, t); return; }
+  if (d.keyclr) { if (confirm("Remove this key from .env?")) { t.blur(); send({action: "key_clear", name: d.keyclr}); } return; }
+  if (d.rec) { const c = {action: "rec", op: d.rec}; if (d.rec === "quiet") { c.start = $("rq-a").value; c.end = $("rq-b").value; } t.blur(); send(c); setTimeout(loadDesk, 400); return; }
+  if (d.rech) { send({action: "rec", op: "pause_for", hours: +d.rech}); setTimeout(loadDesk, 400); return; }
+  if (d.deskwake !== undefined) { if (d.deskwake === "1" && !confirm("Wake the AI desk? Each entry the rules pick then gets four Claude votes on your Anthropic account (about $0.04 each time) and waits a few seconds for them.")) return;
+    send({action: "desk_wake", on: d.deskwake === "1"}); setTimeout(loadDesk, 400); return; }
+  if (d.pfref) { send({action: "pf_refresh"}); setTimeout(loadPortfolio, 1500); return; }
+  if (d.pfrm) { if (confirm("Stop watching this wallet?")) send({action: "pf_remove", address: d.pfrm}); return; }
+  if (d.xrm) { send({action: "x_remove", source: d.xrm}); return; }
+  if (d.copyaddr) { e.stopPropagation(); navigator.clipboard.writeText(d.copyaddr).then(() => toast("Address copied", "ok")); return; }
   if (d.lv) { setRisk(+d.lv); return; }
   if (d.advapply) { const v = $("adv-" + d.advapply).value; send({action: "set", key: d.advapply, value: v}); return; }
   if (d.decide) { send({action: "chat_decide", aid: d.decide, allow: d.allow === "1"}); t.closest(".btns")?.querySelectorAll("button").forEach(b => b.disabled = true); return; }
@@ -1901,11 +2362,15 @@ document.addEventListener("change", e => { const t = e.target; if (t.matches('.c
   if (t.matches("input[data-advkey]")) send({action: "set", key: t.dataset.advkey, value: t.checked}); });
 addEventListener("keydown", e => {
   if (e.target.matches("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); if (e.key === "Enter" && e.target.id.startsWith("in-")) send({action: "set", key: e.target.id.slice(3), value: e.target.value});
-    if (e.key === "Enter" && e.target.id.startsWith("adv-") && e.target.type === "number") send({action: "set", key: e.target.id.slice(4), value: e.target.value}); return; }
+    if (e.key === "Enter" && e.target.id.startsWith("adv-") && e.target.type === "number") send({action: "set", key: e.target.id.slice(4), value: e.target.value});
+    if (e.key === "Enter" && e.target.id.startsWith("key-")) saveKey(e.target.id.slice(4));
+    if (e.key === "Enter" && e.target.id === "xf-in") addX();
+    if (e.key === "Enter" && (e.target.id === "pf-addr" || e.target.id === "pf-label")) $("pf-add").click();
+    return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openDrawer(e.target.dataset.open); return; }
   if (e.key === "Escape") closeDrawer();
-  else if ("12345".includes(e.key)) setTab(["live", "chat", "analytics", "controls", "guide"][+e.key - 1]);
+  else if ("1234567".includes(e.key)) setTab(["live", "desk", "chat", "portfolio", "analytics", "controls", "guide"][+e.key - 1]);
   else if (e.key === "c") { e.preventDefault(); setTab("chat"); }
   else if (e.key === "/") { e.preventDefault(); setTab("live"); $("rf").focus(); }
   else if (e.key === "p") $("pause").click();
