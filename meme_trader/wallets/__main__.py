@@ -30,8 +30,11 @@ def _status() -> None:
     age = time.time() - s["updated"]
     d = s.get("discovery") or {}
     print(f"updated {age:.0f}s ago; running {(s['updated'] - s['started']) / 3600:.1f} h")
-    print(f"pools: {s['pools_known']} known, {s['pools_eligible']} in the universe, {s['pools_polled']} polled, "
-          f"{s['overdue']} overdue; GeckoTerminal calls last hour {s['gt_calls_last_hour']}")
+    if s.get("mode") == "stream":
+        print(f"mode: stream (every swap); pools: {s['pools_known']} known, {s['pools_eligible']} in the universe")
+    else:
+        print(f"pools: {s['pools_known']} known, {s['pools_eligible']} in the universe, {s['pools_polled']} polled, "
+              f"{s['overdue']} overdue; GeckoTerminal calls last hour {s['gt_calls_last_hour']}")
     print(f"trades this run: {s['rows_this_run']} {s['rows_by_day']}; overflow gaps {s['gaps']}")
     if s.get("stream_gb_by_day"):
         run_h = max((s["updated"] - s["started"]) / 3600, 1e-6)
