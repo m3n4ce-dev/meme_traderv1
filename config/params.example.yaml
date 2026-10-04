@@ -71,7 +71,7 @@ sniper:
     max_open_positions: 4        # TBD
     daily_loss_limit_sol: 0.2    # TBD
     max_drawdown_pct: 30         # TBD - kill switch (sells everything, stops entries)
-    min_sol_reserve: 0.03
+    min_sol_reserve: 0.03        # never spend below this much SOL (fees, rent, exits)
 
   sizing:                        # sizing agent (intel §5): $ per buy from signal strength
     enabled: true
@@ -95,17 +95,17 @@ sniper:
     max_creator_launches_24h: 2  # serial deployers are farming, not building
     max_symbol_dupes_1h: 3       # copycat tickers
     min_unique_buyers: 15        # TBD
-    flow_window_s: 20
+    flow_window_s: 20            # seconds of trades used for the net-inflow check
     min_net_flow_sol: 1.0        # TBD - net SOL into the curve over flow_window_s
     full_marks_buyers: 20        # unique buyers in flow window for full velocity score
-    full_marks_flow_sol: 5
+    full_marks_flow_sol: 5       # net inflow (SOL) that earns the full flow score
     min_score: 55                # TBD
     min_fees_paid_sol: 0.1       # real buyers pay fees; bundle rugs barely do (intel: 0.1 degen / 1-3 SOL later tabs)
     sniper_window_s: 10          # buys this soon after launch count as snipes
     max_sniper_pct: 20           # snipers still holding > this % of supply -> wait (intel: Turtle's audit)
     max_insider_pct: 30          # dev + bundle wallets still holding > this % -> wait
     funding:                     # insider clusters via the wallet funding graph (sniper/funding.py)
-      enabled: true
+      enabled: true              # look up who funded early buyers to spot insider clusters
       backend: rpc               # rpc = any SOLANA_RPC_URL (cheap) | helius = HELIUS_API_KEY funded-by (paid, labels exchanges)
       cohort_size: 20            # first N buyers (+ current top 10) are checked
       max_cluster_pct: 15        # reject if dev-/co-funded early wallets still hold more than this % of supply
@@ -120,9 +120,9 @@ sniper:
     profile: trail               # trail = initials at 2x + tightening trailing stop | ladder = fixed ladder below
     ladder:                      # David's rules: 2x sell half, 5x sell rest, 0.3x stop; ratchet after 3x
       steps: [{at_x: 2, sell_frac: 0.5}, {at_x: 5, sell_frac: 1.0}]
-      stop_x: 0.3
+      stop_x: 0.3                # ladder profile: sell everything below this multiple of entry (0.3 = -70%)
       trail_after_x: 3           # once 3x was reached, never let it round-trip back to entry
-      trail_pct: 30
+      trail_pct: 30              # ladder profile: trailing stop % off the peak after the last rung
     initials_at_pct: 100         # TBD - at 2x, sell enough to recover cost
     initials_multiple: 1.0       # 1.0 = exactly cost; 1.2 = cost + 20%
     trail_tiers:                 # TBD - trailing stop from peak, tightens as gain grows
@@ -131,15 +131,15 @@ sniper:
       - {above_gain_pct: 400, trail_pct: 20}
       - {above_gain_pct: 1000, trail_pct: 15}
     stop_loss_pct: 30            # TBD
-    decay_window_s: 15
+    decay_window_s: 15           # seconds of trades the momentum-decay exit looks at
     decay_net_outflow_sol: 1.5   # net SOL leaving the curve in decay_window_s ...
     decay_min_drop_pct: 12       # ... while price is this far off the peak -> exit
     stall_s: 90                  # in profit but no new high for this long -> exit
     no_progress_s: 60            # never got above +no_progress_min_gain_pct in this time -> exit
-    no_progress_min_gain_pct: 10
-    max_hold_s: 1800
+    no_progress_min_gain_pct: 10 # gain (%) a position must reach within no_progress_s to stay
+    max_hold_s: 1800             # sell anything held longer than this (seconds)
     exit_at_curve_progress_pct: 92   # sell before migration (post-graduation dumps are common)
-    exit_on_dev_sell: true
+    exit_on_dev_sell: true       # sell everything when the creator sells
 
   execution:
     curve_fee_pct: 1.25          # pump.fun bonding-curve fee (protocol + creator)
@@ -168,8 +168,8 @@ sniper:
     buy_sol: 0.05                # TBD - SOL per copied entry
     min_leader_buy_sol: 0.5      # ignore the leader's small test buys
     max_chase_pct: 25            # skip if price is already this far above the leader's fill
-    max_curve_progress_pct: 70
-    max_copies_per_leader_per_hour: 6
+    max_curve_progress_pct: 70   # don't copy into a curve fuller than this %
+    max_copies_per_leader_per_hour: 6  # cap on copies of one leader per hour
     apply_red_flags: true        # still refuse dev-sold / bundled / serial-deployer tokens
     follow_sells: true           # mirror the leader's sells
     sell_all_when_leader_sold_pct: 50   # leader dumps >= this share of their bag -> we exit fully
@@ -192,19 +192,19 @@ sniper:
   callouts:                      # pump.fun callouts: hold the $1 minimum, post a factual card, track results
     enabled: true
     interval_s: 120              # platform allows one callout per 2 minutes
-    max_per_day: 200
+    max_per_day: 200             # most callouts in a UTC day
     position_usd: 1.10           # buy slightly over $1 so the bag stays >= $1 after fees
     priority_fee_sol: 0.00005    # a $1 bag is never urgent: minimal priority (fees would eat ~25% of it otherwise)
     min_hold_usd: 1.0            # platform minimum to call out
-    max_open_bags: 40
+    max_open_bags: 40            # most $1 bags held at once
     hold_s: 3600                 # keep the bag 1h (exit earlier only if the dev sells)
-    min_age_s: 60
-    max_age_s: 1800
+    min_age_s: 60                # token must be at least this old (seconds)
+    max_age_s: 1800              # and at most this old (seconds)
     min_curve_pct: 20            # coins people click: visibly filling but not about to migrate
-    max_curve_pct: 85
-    min_holders: 30
-    min_new_buyers_per_min: 10
-    max_top10_pct: 35
+    max_curve_pct: 85            # curve no fuller than this % (not about to migrate)
+    min_holders: 30              # at least this many holders
+    min_new_buyers_per_min: 10   # at least this many new buyers per minute
+    max_top10_pct: 35            # top 10 holders may hold at most this % of supply
     min_score: 45                # clickability score (holder growth, inflow, curve, smart wallets, near high)
     auto_post: none              # none = dashboard Copy/Open buttons | telegram = also post to TELEGRAM_CHANNEL_ID
 
@@ -255,21 +255,21 @@ sniper:
   late:                          # "graduation play": strong late-curve momentum, out before migration
     enabled: true                # on in paper to gather evidence; check its row in Analytics > By strategy before live
     buy_usd_mult: 1.0            # size relative to the sizing agent's normal answer
-    min_curve_pct: 55
-    max_curve_pct: 85
-    max_age_s: 900
-    flow_window_s: 30
+    min_curve_pct: 55            # window start: curve at least this % full
+    max_curve_pct: 85            # window end: curve at most this % full
+    max_age_s: 900               # token at most this old (seconds)
+    flow_window_s: 30            # seconds of trades the momentum checks look at
     min_net_flow_sol: 3.0        # net SOL into the curve in flow_window_s
     min_buyers: 12               # unique buyers in flow_window_s
-    min_buy_sell_ratio: 1.5
+    min_buy_sell_ratio: 1.5      # buys / sells in flow_window_s at least this
     min_near_high: 0.9           # price within 10% of its high
     scan_interval_s: 2           # how often candidates are checked (research varies it: results shouldn't hinge on it)
     entry_mode: rule             # rule = the conditions above | window = research baseline: every token entering the
                                  # curve window that passes the red-flag checks, no momentum condition
     exit_curve_pct: 94           # sell into the run-up, before migration (post-graduation liquidity drops ~57% in 25 min)
-    stop_loss_pct: 15
-    stall_s: 45
-    max_hold_s: 600
+    stop_loss_pct: 15            # graduation-play stop loss (%)
+    stall_s: 45                  # sell if no new high for this long while held (seconds)
+    max_hold_s: 600              # sell after this long regardless (seconds)
 
   predict:                       # learned probability model: `train` writes a candidate, `promote` deploys it
     enabled: true                # used only once a PROMOTED model file exists
@@ -286,15 +286,36 @@ sniper:
 
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true
-    lookback_trades: 10
+    lookback_trades: 10          # how many recent trades defense mode looks at
     loss_streak: 5               # N losses in a row ...
     window_loss_sol: 0.15        # ... or the last lookback_trades lost more than this
     size_mult: 0.5               # while defensive: half size ...
     min_score_add: 10            # ... and a higher bar
-    minutes: 30
+    minutes: 30                  # how long defense mode lasts
 
   audit:
     window_s: 600                # follow every decision 10 min: had we bought, would it double before -30%? (vs our buys)
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)
+
+# ---------------------------------------------------------------------------------------------------------
+# Wallet study recorder: python -m meme_trader.wallets record (docs/WALLETS.md). Paper research only.
+wallets:
+  mode: poll                     # poll = discovery samples + GeckoTerminal (~3.5 GB/day, partial on the busiest pools)
+                                 # stream = the whole PumpSwap stream, complete (~80 GB/day download)
+  min_pool_age_days: 2           # record trades on pump.fun coins' PumpSwap pools at least this old (younger = ~90% of trades)
+  min_liquidity_usd: 5000        # ...with at least this much liquidity
+  keep_days: 10                  # stop polling a pool after this long without a trade (rediscovery restarts it)
+  max_pools: 4000
+  discover_s: 45                 # sample the whole PumpSwap stream this long (~0.9 MB/s while sampling) ...
+  discover_every_s: 900          # ... this often, to find which pools are trading (~3.5 GB/day)
+  gt_calls_per_min: 5            # GeckoTerminal's free API sustains ~5 (measured; bursts above get 429)
+  target_trades_per_poll: 250    # poll a busy pool often enough that one call (max 300 trades) doesn't overflow
+  min_poll_s: 60
+  max_poll_s: 72000              # 20 h: GeckoTerminal keeps 24 h of trades
+  deep_min_usd: 25               # a busy pool's first poll also fetches its last 300 trades over $25 (further back)
+  meta_refresh_s: 21600          # liquidity snapshot per pool this often
+  candles_every_s: 300           # daily candles: one pool per this many seconds ...
+  candles_min_age_days: 13       # ... for pools nearly old enough to signal ...
+  candles_refresh_days: 7        # ... refreshed this often

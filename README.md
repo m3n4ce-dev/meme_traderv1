@@ -25,6 +25,8 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 The first candidate, `graduation-v1`, is collecting its holdout. On 16 h of development data it made +1.55 SOL at $20 a trade with instant fills. With orders landing 1–3 s after the decision, at the price they find (today's realistic delay), it **lost** 0.4–1.0 SOL instead: it misses most of its biggest winners, which run away before a delayed buy lands (BUILD_LOG #16, #18). The paper bot now models that delay.
 
+A second candidate, `wallets-v1`, tests the "follow wallets that were early on several runners" idea on coins at least 14 days old, where a few seconds of delay don't matter. Its rules were registered before any data. A recorder collects wallet-level trades for two weeks to pick the wallets, then two more weeks judge them against random coins and random wallets ([docs/WALLETS.md](docs/WALLETS.md)).
+
 Earlier paper sessions are below for history. They used tiny samples, and partly a feed later measured to run 12 s behind the chain.
 
 | Session | Data feed | Launches screened | Trades | Win rate | P&L |
@@ -196,6 +198,7 @@ These have been tested against simulated failures, not yet with real money.
 | [HOWTO.md](docs/HOWTO.md) | Task recipes and troubleshooting |
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
 | [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
+| [WALLETS.md](docs/WALLETS.md) | The wallet study: rules, data sources and their limits, timeline |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 

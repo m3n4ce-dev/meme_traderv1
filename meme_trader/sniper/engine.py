@@ -20,7 +20,7 @@ import time
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
-from ..config import ROOT, ConfigError, validate_sniper
+from ..config import EXAMPLE, ROOT, ConfigError, example_help, validate_sniper
 from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .copytrade import LeaderBook
@@ -72,6 +72,34 @@ CONTROLS = [
 ]
 
 
+# Every other scalar setting in these sections can be changed live from the dashboard's "All settings" (owner
+# only: the AI agent keeps to CONTROLS and its ceilings). Lists, endpoints, keys and paths are config-file only.
+ADVANCED_SECTIONS = ("capital", "sizing", "entry", "exit", "late", "callouts", "copy", "execution", "risk_adapt",
+                     "predict", "signals")
+ADVANCED_SKIP = {"capital.starting_sol", "predict.enabled", "predict.model_path", "predict.checkpoints_s",
+                 "sizing.enabled", "copy.use_own_exits"}
+ADVANCED_ENUMS = {"late.entry_mode": ("rule", "window")}
+_EXAMPLE_SNIPER: dict | None = None
+
+
+def _example_sniper() -> dict:
+    global _EXAMPLE_SNIPER
+    if _EXAMPLE_SNIPER is None:
+        import yaml
+
+        _EXAMPLE_SNIPER = (yaml.safe_load(EXAMPLE.read_text()) or {}).get("sniper") or {}
+    return _EXAMPLE_SNIPER
+
+
+def _leaves(node: dict, prefix: str = ""):
+    for k, v in node.items():
+        path = f"{prefix}{k}"
+        if isinstance(v, dict):
+            yield from _leaves(v, path + ".")
+        else:
+            yield path, v
+
+
 class Book:
     """The bot's cash ledger. `sol` is cash actually held - live, what the wallet should show for the bot's
     budget (SOL locked as refundable token-account rent isn't counted until it's reclaimed). `reserved` is
@@ -108,6 +136,7 @@ class Engine:
         self.p = params.sniper
         # risk dial: the configured exposure is "Normal"; the dial level scales it (dashboard, or Claude with approval)
         self.risk_base = {k: self._get(k) for k in RISK_KEYS}
+        self._advanced_set: set[str] = set()               # "All settings" changed this run (saved by Save)
         self.risk_level = 2
         lvl = int((self.p.get("risk") or {}).get("level", 2))
         if lvl != 2:
@@ -1610,10 +1639,42 @@ class Engine:
             out.append({"key": key, "type": typ, "min": lo, "max": hi, "label": label, "help": help_, "value": node})
         return out
 
+    def advanced_controls(self) -> list[dict]:
+        """Every other live-adjustable setting: type, current and default value, help text from the example file."""
+        curated = {c[0] for c in CONTROLS} | set(RISK_KEYS)
+        help_ = example_help()
+        out = []
+        for path, default in _leaves(_example_sniper()):
+            section = path.split(".")[0]
+            if section not in ADVANCED_SECTIONS or path in ADVANCED_SKIP or path in curated:
+                continue
+            if isinstance(default, bool):
+                typ = "bool"
+            elif isinstance(default, int):
+                typ = "int"
+            elif isinstance(default, float):
+                typ = "float"
+            elif path in ADVANCED_ENUMS:
+                typ = "enum:" + ",".join(ADVANCED_ENUMS[path])
+            else:
+                continue                                # lists, URLs, names: config file only
+            try:
+                cur = self._get(path)
+            except (KeyError, TypeError):
+                continue
+            out.append({"key": path, "section": section, "type": typ, "value": cur, "default": default,
+                        "changed": cur != default, "help": help_.get(f"sniper.{path}", "")})
+        return out
+
     def set_control(self, key: str, value, owner: bool = True) -> str:
         """Validate and apply one dashboard setting. Returns '' or an error message. owner=False (the AI agent):
-        the risk dial's Normal baseline stays the owner's."""
+        only the curated CONTROLS, and the risk dial's Normal baseline stays the owner's."""
         spec = next((c for c in CONTROLS if c[0] == key), None)
+        if spec is None and owner:
+            adv = next((a for a in self.advanced_controls() if a["key"] == key), None)
+            if adv is not None:
+                lo = 0 if adv["type"] in ("int", "float") and float(adv["default"]) >= 0 else None
+                spec = (key, adv["type"], lo, 1e12 if lo is not None else None, key, adv["help"])
         if spec is None:
             return f"unknown setting {key}"
         _, typ, lo, hi, label, _ = spec
@@ -1646,6 +1707,8 @@ class Engine:
         except ConfigError as e:
             node[last] = old
             return f"{label}: {e}"
+        if not any(c[0] == key for c in CONTROLS):
+            self._advanced_set.add(key)                  # saved by "Save to config" from now on
         if owner and key in self.risk_base:              # the owner set it: the dial's baseline follows
             mult = {"sizing.base_usd": 1, "sizing.max_usd": 1, "capital.max_open_positions": 2,
                     "capital.daily_loss_limit_sol": 3}[key]
@@ -1726,7 +1789,8 @@ class Engine:
         data = data or {}
         sn = data.setdefault("sniper", {}) or {}
         data["sniper"] = sn
-        for c in self.controls() + [{"key": "risk.level", "value": self.risk_level}]:
+        adv = [{"key": a["key"], "value": a["value"]} for a in self.advanced_controls() if a["key"] in self._advanced_set]
+        for c in self.controls() + adv + [{"key": "risk.level", "value": self.risk_level}]:
             *keys, last = c["key"].split(".")
             node = sn
             for k in keys:
