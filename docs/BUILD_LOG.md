@@ -4,6 +4,62 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #28: Pulse, limit orders, the call ledger, X and Telegram posting, notes the desk replies to, a real guide
+
+- **Owner's ask:**
+  - "Whatever will be most awesome and profitable"; arrange the layout; connect X and post from the terminal; a better guide; each AI reads every note and replies; more interactive UI.
+  - Mid-build: prove an edge to groups, and eventually split into several repos (plan: [EDGE_PROOF.md](EDGE_PROOF.md)).
+- **⚡ Pulse tab:** three live columns, Axiom-style, from the bot's own feed: New (under 50% of the curve), Final stretch (50–100%), Graduated.
+  - **Each row:** market cap, curve bar, buyers, buys/sells, 30 s net inflow, top-10, dev buy, socials, a sparkline, red-flag pills, and ⚡ quick buy.
+  - **Per-column filters:** age, market cap, buyers, inflow, top-10, dev, bundle, socials, dev sold, Mayhem, sort. They're saved in the UI store.
+  - Lists freeze while the mouse is over them.
+  - Engine: `pulse_view()`, plus a list of recent graduations. Endpoint: `GET /api/pulse`.
+- **Limit orders and alerts (Manual trade):**
+  - Buy when the market cap dips to a level or breaks out above one; sell part of a position at a target; or just alert. Quick buttons set the dip, breakout, 2x-alert and take-profit levels.
+  - They fire on the live curve price through the same manual buy/sell path, so the same caps and checks apply. They expire (1 h to 7 days), survive restarts (saved with the paper/live state), and a position's sell orders are cancelled when it closes.
+  - In live mode, placing one asks for confirmation.
+  - Engine: `place_order`, `cancel_order`, `_orders_tick`; coins with orders stay priced.
+- **📣 The call ledger and Calls tab** (`sniper/calls.py`, `data/calls.jsonl`):
+  - **What's recorded:** every call (yours, plus the bot's own entries) with the market cap at the time, hash-chained so nothing can be edited, deleted or reordered unnoticed. A file lock lets the bot and the command line both append safely.
+  - **Scoring:** from market data (the live curve, then DexScreener after graduation). The stats lead with fixed-hold returns at 5 m, 1 h, 6 h and 24 h after ~5% costs; the sampled 24 h peak comes second.
+  - **Proof:** Publish posts the newest hash to X and/or Telegram and records the anchor in the chain. Export downloads the ledger.
+  - **Command line:** `python -m meme_trader.sniper calls verify|stats|list [--file]`.
+- **Posting to X and Telegram** (`ui/social.py`, `ui/cards.py`, `python -m meme_trader.social`):
+  - **X API (pay-per-use since Feb 2026, no free tier):** ~$0.015 a post, $0.20 with a link (a bare `pump.fun/…` counts).
+  - **Two ways to connect X:**
+    - OAuth 1.0a keys for your own developer account (signing tested against X's published example).
+    - OAuth 2.0 PKCE "Connect X", with tokens in `data/x_auth.json` (mode 600) refreshed automatically.
+  - **Images:** v2 chunked media upload; if the image upload fails, the post goes out as text and says so.
+  - **Telegram:** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHANNEL_ID`.
+  - **Composer:** live 280-character count with X's weighting, cost, link warning, daily count, and a share-card preview.
+  - **Share cards** (1200×675 PNG) for a trade, a call or the record. Paper trades say PAPER; call cards always show the 1 h and 24 h results next to the peak.
+  - **Limits:** 25 X posts a day. Posts happen only on your click or command; the AI never posts.
+  - **Where:** Controls → Connections walks through setup, and the X keys are in API keys.
+- **The desk replies to every note:**
+  - When you save a note, link or contract address, all four personas read it (plus live metrics if the bot tracks the coin) and reply in a thread under it, with a stance.
+  - Reply back; `@skeptic …` asks one persona.
+  - In the room, each persona walks to the corkboard and says its reply.
+  - Settings: `desk.note_replies` and `desk.note_effort`.
+  - Text from the web is treated as data in the prompt.
+- **Arrange v2:**
+  - Every page becomes a 12-column board. Drag panels anywhere, drag the right edge to resize (snaps to columns), pick a width (⅓ ½ ⅔ Full) or a height (Auto/S/M/L), hide panels and restore them from the arrange bar.
+  - "Reset this page" and "Reset all".
+  - **▾ on every panel** collapses it at any time; **?** opens that panel's help.
+  - All of it is saved on the bot.
+- **Guide v2:**
+  - Searchable sections: start, live, trading, Pulse, the room, the AI desk (with the quorum maths), notes, calls and proof, posting, risk, customising, research, keyboard, a glossary and an FAQ.
+  - A 10-step spotlight tour across the tabs, offered on the first visit.
+  - Contextual help from each panel's **?**.
+- **Interaction:**
+  - **Ctrl+K command palette:** tabs, actions, risk levels, coins, every setting and guide section. Paste a contract address to trade it, call it, alert on it, save it or post about it.
+  - **Right-click any coin:** Trade, Quick buy, Call, Alert, Save to memory, Post, Copy, pump.fun, DexScreener.
+  - **Opt-in desktop notifications** for fills, alerts and closes while the tab is in the background.
+  - **Shortcuts:** `n` new post; tabs are now 1–9.
+- **Tests:** 12 new: ledger tampering, two writers, horizons; orders and alerts; restarts; Pulse; note replies and follow-ups; OAuth signature, costs and limits; cards; dashboard actions. 268 in total.
+- **Not verified against the live services:** no X or Telegram credentials exist yet, so posting was tested with X's published signing example and mocked requests. Note replies use the same API call shape as the desk's votes, which work in production.
+
+---
+
 ## 2026-10-04 — Entry #27: The trading room, click to zoom, night shift, arrange any page
 
 - **Owner's ask:** the effects felt corny; make the Desk tab a Habbo-Hotel-style trading room; click a bot to see what it's looking at; a P&L board on the wall; night at night; full metrics when a contract address is pasted; arrange each page; change the bots easily. Plus research on the best builds like this: [BUILDS_RESEARCH.md](BUILDS_RESEARCH.md).

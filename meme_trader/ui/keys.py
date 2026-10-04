@@ -34,6 +34,20 @@ KEYS: dict[str, tuple[str, str, str, str]] = {
                            "secret", "restart"),
     "TELEGRAM_BOT_TOKEN": ("Telegram bot token", "Phone alerts: create a bot with @BotFather.", "secret", "restart"),
     "TELEGRAM_ALERT_CHAT_ID": ("Telegram chat id", "Where alerts go: your id from @userinfobot.", "plain", "restart"),
+    "TELEGRAM_CHANNEL_ID": ("Telegram channel or group", "Where your posts and calls go: @yourchannel or a chat id. "
+                            "Add the bot as an admin of the channel (or a member of the group).", "plain", "now"),
+    "X_API_KEY": ("X API key", "Post to X as your own developer account: console.x.com → your app → Keys and tokens. "
+                  "Set the app's permissions to Read and write first. Posts cost ~$0.015 each ($0.20 with a link).",
+                  "secret", "now"),
+    "X_API_SECRET": ("X API key secret", "The secret next to the X API key.", "secret", "now"),
+    "X_ACCESS_TOKEN": ("X access token", "Generate it after setting Read and write (Keys and tokens → Access token).",
+                       "secret", "now"),
+    "X_ACCESS_SECRET": ("X access token secret", "The secret next to the access token.", "secret", "now"),
+    "X_USERNAME": ("X username", "Optional: your @handle without the @, so posted links point at your profile.",
+                   "plain", "now"),
+    "X_CLIENT_ID": ("X OAuth client ID", "Instead of the four keys: lets the Connect X button sign in any account. "
+                    "Add http://127.0.0.1:8787/x/callback to the app's callback URLs.", "plain", "now"),
+    "X_CLIENT_SECRET": ("X OAuth client secret", "Only for a confidential (Web App) client.", "secret", "now"),
     "X_BEARER_TOKEN": ("X API bearer token", "Optional, paid: X's own API for the social-signal stream. The Desk's X "
                        "feed works without it.", "secret", "restart"),
     "JUPITER_API_KEY": ("Jupiter API key", "Quotes for the older DexScreener bot (python -m meme_trader).", "secret",

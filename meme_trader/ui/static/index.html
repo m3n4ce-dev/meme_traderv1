@@ -430,6 +430,7 @@ header { background: color-mix(in srgb, var(--surface) 86%, transparent); backdr
   background: linear-gradient(90deg, var(--accent), var(--series)); }
 .tabs .ic { margin-right: 5px; opacity: .75; }
 @media (max-width: 1700px) { .tabs kbd { display: none; } }
+@media (max-width: 1560px) { .tabs .ic { display: none; } .tabs button { padding: 5px 9px; } #clock, .brand span { display: none; } }
 @media (max-width: 1600px) { #model-badge, #feed-badge { display: none; } }
 @media (max-width: 1360px) { .tabs .ic { display: none; } }
 /* token logos */
@@ -730,6 +731,116 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
   .drv { grid-template-columns: 110px 1fr 46px; }
   .hide-sm { display: none; }
 }
+/* pulse */
+.pulse-bar { margin-bottom: 10px; } .vh { font-size: 16px; }
+.pulse-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .pulse-cols { grid-template-columns: 1fr; } }
+.pcol h2 { display: flex; align-items: center; gap: 8px; } .pcol h2 small { margin-right: auto; }
+.pcol.paused h2::after { content: "paused while you look"; font: 600 10.5px system-ui; color: var(--warn); text-transform: none; letter-spacing: 0; }
+.pl-list { display: grid; gap: 4px; max-height: calc(100vh - 230px); overflow: auto; padding-right: 2px; }
+.pl-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid transparent; cursor: pointer; transition: border-color .15s, background .15s; }
+.pl-row:hover { border-color: var(--series); background: var(--series-soft); }
+.pl-row.fresh { animation: pl-in .9s ease-out; }
+@keyframes pl-in { from { background: color-mix(in srgb, var(--good) 22%, var(--surface-2)); } }
+.pl-main { min-width: 0; display: grid; gap: 2px; }
+.pl-top { display: flex; gap: 6px; align-items: baseline; min-width: 0; } .pl-top b { white-space: nowrap; }
+.pl-name { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.pl-sub { display: flex; flex-wrap: wrap; gap: 4px 9px; font-size: 11.5px; color: var(--ink-2); align-items: center; }
+.pl-curve { width: 48px; height: 5px; border-radius: 3px; background: var(--grid); overflow: hidden; display: inline-block; }
+.pl-curve i { display: block; height: 100%; background: linear-gradient(90deg, var(--series), var(--good)); }
+.pl-lk { font-size: 11px; color: var(--muted); letter-spacing: 2px; }
+.pf { font-size: 10.5px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--ring); }
+.pf.bad { color: var(--bad); border-color: var(--bad); } .pf.warn { color: var(--warn); border-color: var(--warn-mark); } .pf.good { color: var(--good); border-color: var(--good-mark); }
+.pl-qb { padding: 4px 9px; font-weight: 700; font-size: 12px; background: var(--surface); border-color: var(--ring); white-space: nowrap; }
+.pl-qb:hover { background: var(--good); color: #fff; border-color: transparent; }
+.pl-spark { width: 70px; } .pl-spark svg { display: block; width: 70px; height: 26px; } .pl-ext { text-decoration: none; padding: 2px 8px; }
+.pl-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px 10px; padding: 8px; margin-bottom: 8px;
+  border-radius: 10px; background: var(--surface-2); font-size: 12px; }
+.pl-filters label { display: grid; gap: 2px; } .pl-filters label.minisw { display: flex; } .pl-filters input[type=number] { width: 100%; }
+/* calls */
+.calls-hero h1 { margin: 0 0 4px; font-size: 22px; }
+.ch-top { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; } .ch-act { display: flex; gap: 6px; flex-wrap: wrap; }
+.cl-proof { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 10px 0; }
+.proof { font-weight: 800; padding: 3px 10px; border-radius: 999px; } .proof.ok { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.proof.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.cl-table td { vertical-align: top; } .cl-th { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .call-form input[type=text] { flex: 1; min-width: 180px; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; color: inherit; border: 1px solid var(--ring); border-radius: 8px; background: var(--surface); }
+a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
+/* orders */
+.ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.ord { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; border-radius: 9px; background: var(--surface-2); font-size: 12.5px; }
+.ord.done { opacity: .7; } .ord .tag.ok { color: var(--good); } .ord .tag.bad { color: var(--bad); }
+.ord-quick { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+#tr-ordform select { max-width: 150px; } #tr-ord-mc { width: 150px; } #tr-ord-frac { width: 64px; }
+.call-btn { background: linear-gradient(135deg, #7a5af8, #3c5bd6); color: #fff; border-color: transparent; font-weight: 700; }
+/* memory threads */
+.thread { display: grid; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--ring); }
+.msg { display: flex; gap: 8px; align-items: flex-start; } .msg .mb { min-width: 0; flex: 1; font-size: 12.5px; }
+.msg.me .mb { background: var(--series-soft); border-radius: 8px; padding: 4px 8px; }
+.mh { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; } .mh .tag.up { color: var(--good); } .mh .tag.down { color: var(--bad); }
+.hm-av { width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center; color: #fff; font: 800 11px system-ui; flex: none; }
+.hm-av.you { background: var(--ink-2); font-size: 8.5px; }
+.reply-row { display: flex; gap: 6px; } .reply-row input { flex: 1; min-width: 0; }
+/* composer, palette, menu */
+.compose { width: min(640px, 100%); } .compose textarea { width: 100%; min-height: 120px; margin-top: 10px; font: 14px/1.45 system-ui; }
+.cp-card { margin-top: 8px; } .cp-card img { display: block; width: 100%; border-radius: 10px; margin-top: 6px; border: 1px solid var(--ring); }
+.warn-t { color: var(--warn); }
+.cmdk { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.35); display: grid; justify-items: center; align-items: start; padding: 12vh 16px 16px; }
+.ck-box { width: min(640px, 100%); background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.ck-box input { width: 100%; border: 0; border-bottom: 1px solid var(--ring); border-radius: 0; padding: 14px 16px; font-size: 15px; background: transparent; }
+.ck-list { max-height: 52vh; overflow: auto; padding: 6px; display: grid; gap: 2px; }
+.ck-item { display: flex; gap: 8px; align-items: center; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; }
+.ck-item .ck-l { flex: 1; } .ck-item.on, .ck-item:hover { background: var(--series-soft); }
+.ck-item .logo { width: 18px; height: 18px; font-size: 8px; } .ck-foot { padding: 6px 12px; border-top: 1px solid var(--ring); }
+.ctx { position: fixed; z-index: 170; min-width: 200px; background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; box-shadow: var(--shadow); padding: 6px; display: grid; gap: 1px; }
+.ctx button { text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 7px; } .ctx button:hover { background: var(--series-soft); }
+.ctx-h { display: flex; gap: 6px; align-items: center; padding: 4px 8px 8px; border-bottom: 1px solid var(--ring); margin-bottom: 4px; }
+/* tour + help */
+.tour { position: fixed; inset: 0; z-index: 180; pointer-events: none; }
+.tour-spot { position: fixed; border-radius: 14px; box-shadow: 0 0 0 9999px rgba(8, 10, 20, .62); outline: 2px solid var(--series); transition: all .3s ease; }
+.tour-pop { position: fixed; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; padding: 14px;
+  box-shadow: var(--shadow); pointer-events: auto; transition: top .3s ease, left .3s ease; }
+.tour-pop h3 { margin: 4px 0 6px; } .tour-pop p { margin: 0 0 10px; font-size: 13.5px; }
+.help { position: fixed; right: 16px; bottom: 16px; z-index: 140; width: min(440px, calc(100vw - 32px)); max-height: 70vh; display: grid; grid-template-rows: auto 1fr;
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.help-h { display: flex; gap: 6px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--ring); }
+.help-body { overflow: auto; padding: 4px 14px 12px; font-size: 13.5px; }
+.phelp-btn, .pcol-btn { margin-left: 4px; padding: 0 6px !important; min-width: 22px; line-height: 18px; font-size: 11px !important; color: var(--muted); }
+h2 .phelp-btn { margin-left: auto; } h2 .phelp-btn ~ .pcol-btn { margin-left: 2px; }
+.panel.collapsed > h2 .pcol-btn { transform: rotate(-90deg); }
+.panel.collapsed > :not(h2):not(h3):not(.ar-bar):not(.ar-rh) { display: none !important; }
+.panel.ph { max-height: var(--ph); overflow: auto; }
+/* guide */
+.guide2 .gd-hero { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.gd-hero h1 { margin: 0; } .gd-hero p { margin: 2px 0 0; color: var(--ink-2); } .gd-hero input { flex: 1; min-width: 220px; max-width: 420px; padding: 9px 12px; }
+.gd-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .gd-layout { grid-template-columns: 1fr; } .gd-nav { position: static !important; flex-direction: row !important; flex-wrap: wrap; } }
+.gd-nav { position: sticky; top: calc(70px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 2px; }
+.gd-nav a { padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--ink); font-size: 13px; } .gd-nav a:hover { background: var(--series-soft); }
+.gd-nav a.dim { opacity: .35; } .gd-body { display: grid; gap: 12px; max-width: 900px; } .gd-sec h3 { margin-top: 0; }
+.gd-sec li { margin: 4px 0; } ol.steps li { margin: 6px 0; }
+dl.gloss { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; } dl.gloss dt { font-weight: 700; } dl.gloss dd { margin: 0; color: var(--ink-2); }
+details summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+/* connections */
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.conn { padding: 12px; border-radius: 12px; border: 1px solid var(--ring); background: var(--surface-2); }
+.conn.on { border-color: var(--good-mark); } .conn-h { display: flex; gap: 8px; align-items: center; } .conn-ic { font-size: 18px; }
+.conn-h .tag.ok { color: var(--good); } .conn-steps { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; } .conn-steps li { margin: 4px 0; }
+.posts-log { display: grid; gap: 4px; font-size: 12.5px; } .posts-log > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* arrange v2 */
+.board { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; align-items: start; grid-auto-flow: row dense; }
+.board > [data-pid] { grid-column: span var(--span, 6); min-width: 0; position: relative; }
+@media (max-width: 900px) { .board > [data-pid] { grid-column: 1 / -1; } }
+.ar-empty { display: none !important; }
+body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 6px; border-radius: 12px; }
+.ar-seg button { padding: 1px 7px; font-size: 11px; }
+.ar-rh { position: absolute; top: 10%; right: -9px; width: 12px; height: 80%; cursor: ew-resize; border-radius: 6px; z-index: 3;
+  background: repeating-linear-gradient(90deg, transparent 0 4px, var(--series) 4px 5px, transparent 5px 7px, var(--series) 7px 8px, transparent 8px); opacity: .55; }
+.ar-rh:hover { opacity: 1; }
+#arrange-bar { flex-wrap: wrap; max-width: calc(100vw - 32px); } #ar-hidden { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .pl-row.fresh { animation: none; } .tour-spot, .tour-pop { transition: none; } }
 </style>
 </head>
 <body>
@@ -742,15 +853,18 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
   <span id="feed-badge" class="badge hide-sm" title="Market data feed">feed</span>
   <nav class="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="live" aria-selected="true"><span class="ic">◉</span>Live<kbd class="hide-sm">1</kbd></button>
-    <button role="tab" data-tab="desk" aria-selected="false"><span class="ic">◆</span>Desk<kbd class="hide-sm">2</kbd></button>
-    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">3</kbd></button>
-    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">4</kbd></button>
-    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">5</kbd></button>
-    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">6</kbd></button>
-    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">7</kbd></button>
+    <button role="tab" data-tab="pulse" aria-selected="false"><span class="ic">⚡</span>Pulse<kbd class="hide-sm">2</kbd></button>
+    <button role="tab" data-tab="desk" aria-selected="false"><span class="ic">◆</span>Desk<kbd class="hide-sm">3</kbd></button>
+    <button role="tab" data-tab="calls" aria-selected="false"><span class="ic">📣</span>Calls<kbd class="hide-sm">4</kbd></button>
+    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">5</kbd></button>
+    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">6</kbd></button>
+    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">7</kbd></button>
+    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">8</kbd></button>
+    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">9</kbd></button>
   </nav>
   <div class="spacer"></div>
   <span class="note num hide-sm" id="clock"></span>
+  <button id="palette" class="ghost small" title="Command palette (Ctrl+K)">⌘K</button>
   <button id="arrange" class="ghost small" title="Arrange this page: drag panels, hide some (a)" aria-pressed="false">✎ Arrange</button>
   <button id="theme" class="ghost small" title="Theme (t)" aria-label="Switch theme">◐</button>
   <button id="pause" title="Stop/start opening new positions (p). Open positions keep being managed.">Pause entries</button>
@@ -790,8 +904,19 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
       <div class="tr-row"><span class="note">Amount (SOL)</span><div class="seg" id="tr-presets" role="group" aria-label="Amount presets"></div>
         <input id="tr-amt" type="number" min="0" step="0.01" placeholder="custom" aria-label="Custom amount in SOL">
         <button class="buy-btn" id="tr-buy">Buy</button><button class="ape-btn" id="tr-ape" title="One click: buy the Ape size">🦍 APE</button>
+        <button class="call-btn" id="tr-call" title="Put this coin on your record at today's market cap">📣 Call</button>
         <span class="note">Sell, take initials or exit from the position cards below. Your positions only exit on rules you set.</span></div>
+      <div id="tr-callrow" hidden></div>
+      <div class="tr-row" id="tr-ordform"><span class="note">Limit / alert</span>
+        <select id="tr-ord-side" aria-label="Order type"><option value="buy" title="Buys the amount picked above">Limit buy</option><option value="sell">Limit sell</option><option value="alert">Alert me</option></select>
+        <span class="note">when MC</span><select id="tr-ord-op" aria-label="Condition"><option value="le">≤</option><option value="ge">≥</option></select>
+        <input id="tr-ord-mc" type="number" min="100" step="any" placeholder="$ market cap" aria-label="Market cap in dollars">
+        <span id="tr-ord-fracw" hidden><input id="tr-ord-frac" type="number" min="1" max="100" value="100" aria-label="Percent to sell">%</span>
+        <select id="tr-ord-ttl" title="Expires after" aria-label="Expires after"><option value="1">1 h</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="72">3 days</option><option value="168">7 days</option></select>
+        <button id="tr-ord-go">Place</button><span id="tr-ord-quick" class="ord-quick"></span></div>
+      <div id="tr-orders" class="ord-list"></div>
     </section>
+    <section class="panel" id="orders"><h2>Orders &amp; alerts <small id="ord-sub"></small></h2><div id="ord-list" class="ord-list"></div></section>
     <section class="panel"><h2>Recent trades <small id="rib-sub"></small></h2><div id="ribbon"></div></section>
 
     <div class="grid">
@@ -861,6 +986,42 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
     </div>
   </section>
 
+  <!-- ============================================================ PULSE -->
+  <section class="view" data-view="pulse" hidden>
+    <div class="toolbar pulse-bar"><b class="vh">⚡ Pulse</b><span class="note hide-sm">live from the bot's own feed · click a coin for details · right-click for actions · lists freeze under your mouse</span><div class="spacer"></div>
+      <span class="note">Quick buy (SOL)</span><div class="seg" id="pl-qb" role="group" aria-label="Quick buy amount"></div></div>
+    <div class="pulse-cols">
+      <section class="panel pcol" id="pl-new"><h2>🌱 New <small id="pl-new-n"></small><button class="small ghost pl-fbtn" data-plfilt="new">⚙ Filters</button></h2><div id="pl-new-f"></div><div class="pl-list" id="pl-new-list"><div class="empty">Loading…</div></div></section>
+      <section class="panel pcol" id="pl-stretch"><h2>🔥 Final stretch <small id="pl-stretch-n"></small><button class="small ghost pl-fbtn" data-plfilt="stretch">⚙ Filters</button></h2><div id="pl-stretch-f"></div><div class="pl-list" id="pl-stretch-list"><div class="empty">Loading…</div></div></section>
+      <section class="panel pcol" id="pl-graduated"><h2>🎓 Graduated <small id="pl-graduated-n"></small><button class="small ghost pl-fbtn" data-plfilt="graduated">⚙ Filters</button></h2><div id="pl-graduated-f"></div><div class="pl-list" id="pl-graduated-list"><div class="empty">Loading…</div></div></section>
+    </div>
+  </section>
+
+  <!-- ============================================================ CALLS -->
+  <section class="view" data-view="calls" hidden>
+    <section class="panel calls-hero" id="cl-hero">
+      <div class="ch-top"><div style="flex:1;min-width:260px"><h1>📣 Track record</h1>
+        <p class="note">Every call is timestamped and hash-chained, then scored from market data. Fixed-hold returns after costs come first; peaks are sampled (nobody sells the top).</p></div>
+        <div class="ch-act"><button class="small" data-share="record:">↗ Share the record</button><a class="btn small" href="/api/calls/export" download>⬇ Export ledger</a><button class="small ghost" data-help="calls">How it works</button></div></div>
+      <div id="cl-proof" class="cl-proof"></div>
+      <div class="form-row" id="cl-anchor"><span class="note">Publish the proof (the newest hash) so the record can't be rewritten:</span>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-x"><i></i></span>𝕏</label>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-tg" checked><i></i></span>Telegram</label>
+        <button class="small primary" data-anchor="1">🔏 Publish</button></div>
+    </section>
+    <div class="kpis" id="cl-kpis"></div>
+    <section class="panel" id="cl-make"><h2>Make a call <small>on the record at the current market cap</small></h2><div id="clf"></div></section>
+    <section class="panel" id="cl-ledger"><h2>Ledger <small>newest first · right-click a row for actions</small></h2>
+      <div class="toolbar" style="margin-bottom:8px"><div class="seg" id="cl-callers" role="group" aria-label="Whose calls"></div></div>
+      <div class="tablewrap"><table class="cl-table"><thead><tr><th>#</th><th>When</th><th>Coin</th><th>Caller</th><th class="r">MC at call</th><th class="r">Now</th><th class="r">Peak</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th>Hash</th><th></th></tr></thead>
+        <tbody id="cl-rows"><tr><td colspan="12" class="empty">Loading…</td></tr></tbody></table></div></section>
+    <section class="panel" id="cl-edge"><h2>What counts as an edge</h2>
+      <ul><li><b>Sample size first.</b> A handful of calls proves nothing: judge the 1-hour median and win rate over 100+ calls, and compare yours with the bot's.</li>
+        <li><b>Fixed horizons, after costs.</b> "Held 1 hour" assumes you bought at the call's market cap and sold an hour later, minus ~5% for fees and slippage. Peaks flatter everyone.</li>
+        <li><b>Published before the outcome.</b> Post calls as you make them, and publish the ledger head regularly: anyone can then check that nothing was added, edited or deleted later (<code>python -m meme_trader.sniper calls verify</code>).</li>
+        <li><b>The bot's own edge</b> is judged by its frozen research test, on data it was never tuned on (Desk → Research).</li></ul></section>
+  </section>
+
   <!-- ============================================================ DESK -->
   <section class="view" data-view="desk" hidden>
     <div class="desk-hero">
@@ -890,7 +1051,7 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
       <div class="stack">
         <section class="panel"><h2>Thought stream <small>newest first · click a coin</small></h2><div id="dk-thoughts" class="thoughts"></div></section>
         <section class="panel">
-          <h2>𝕏 feed <small id="xf-sub">public posts via FxTwitter · no login needed</small></h2>
+          <h2>𝕏 feed <small id="xf-sub">public posts via FxTwitter · no login needed</small><button class="small" data-compose="1" title="Post to X or Telegram (n)">✎ Post</button></h2>
           <div class="form-row">
             <input id="xf-in" type="text" placeholder="@handle, or a search like $WIF or pump.fun" style="flex:1;min-width:180px" aria-label="Add an X account or search">
             <button class="small" id="xf-add">Add</button>
@@ -1012,10 +1173,12 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
 
   <!-- ============================================================ CONTROLS -->
   <section class="view" data-view="controls" hidden>
+    <section class="panel" id="conn-panel"><h2>Connections <small>post calls, trade cards and proofs to X and Telegram · every post is your click</small></h2><div id="conn-body"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="keys-panel">
       <h2>API keys &amp; connections <small>saved to .env on this machine (owner-only file) · never shown again · never given to Claude</small></h2>
       <div class="keys" id="keys"><div class="empty">Loading…</div></div>
     </section>
+    
     <section class="panel">
       <h2>Risk dial <small>scales trade size, open positions and the daily loss limit together · saved · Claude can lower it, and raise it only with your Approve</small></h2>
       <div class="tablewrap"><table><thead><tr><th>Level</th><th class="r">Per trade</th><th class="r">Open positions</th><th class="r">Daily loss limit</th><th></th></tr></thead>
@@ -1051,87 +1214,11 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
   </section>
 
   <!-- ============================================================ GUIDE -->
-  <section class="view guide" data-view="guide" hidden>
-    <section class="panel">
-      <h3>The 60-second tour</h3>
-      <ol>
-        <li><b>Chat</b> (<kbd>c</kbd>): ask Claude anything about the bot, have it act for you (each action waits for your Approve), or paste a contract address for an instant metrics card plus Claude's read. It runs on your Claude plan through Claude Code, not an API key.</li>
-        <li><b>Live</b>: your money and positions. Every token is clickable and opens its detail panel: gate checklist, the model’s P(2x), why it says so, holders, and the live tape.</li>
-        <li><b>Desk</b>: the bots' trading room. Watch them work and hand coins to each other; click a bot, the P&amp;L board or the corkboard to zoom into its screen. 👕 Wardrobe renames and dresses them. It gets dark at night.</li>
-        <li><b>Launch radar</b>: new pump.fun launches, best first. <i>Score</i> is the rule engine’s rating. <i>P(2x)</i> is the trained model’s chance the token doubles before it falls 30%. The <code>T G W</code> marks show which social links (X, Telegram, website) the launch has.</li>
-        <li><b>Analytics</b>: what is and isn’t working, with highlights in plain English, a projection of the next 100 trades, and an audit of every filter.</li>
-        <li><b>Controls</b>: the <b>risk dial</b> (also on Live) scales trade size, positions and the daily loss limit in one move; turn strategies on or off and adjust the main limits while it runs. In Chat, “more risk” asks Claude to raise the dial, and you approve it.</li>
-      </ol>
-    </section>
-    <section class="panel">
-      <h3>How a trade happens</h3>
-      <ol>
-        <li><b>Gates</b> drop launches with red flags: the dev sold or bought too much, bundled supply, serial deployers, copycat tickers, or an insider wallet cluster found from the funding graph.</li>
-        <li><b>Confirmation</b> waits for real demand: enough unique buyers, fees paid and net SOL inflow. The rule score must clear <i>Min entry score</i>. If <i>Min P(2x)</i> is set, the model must clear it too.</li>
-        <li><b>Sizing</b> buys $5–$20 depending on signal strength and the model’s quarter-Kelly edge, and never more than the hard cap. Defense mode halves size after a losing run.</li>
-        <li><b>Exits</b>: take initials (sell enough to recover the cost) at the first target, then ride with a trailing stop that tightens as the run grows. Leave on momentum decay or a stall, and get out before graduation. Red flags (dev sells, an insider cluster grows) sell everything at once.</li>
-        <li><b>Graduation plays</b> (on in paper; check their row in Analytics before going live) buy strong momentum late on the curve and sell before migration. <b>Copy trading</b> mirrors leader wallets. <b>Callouts</b> hold a $1 bag so a coin can be called out on pump.fun.</li>
-      </ol>
-    </section>
-    <section class="panel">
-      <h3>What P(2x) means, and when to trust it</h3>
-      <p>It is a calibrated probability from a model trained on <i>your recorded feed</i>: given everything visible right now (curve, flow, holders, socials, insider share), how often did tokens like this double before falling 30% within 10 minutes? “Calibrated” means 30% should come true about 30% of the time. The calibration chart in Analytics checks exactly that on launches the model never saw.</p>
-      <ul>
-        <li>Train it: <code>scripts/start.sh train</code> (uses everything in <code>data/feed-*</code>). Retrain weekly: pump.fun behaviour drifts, and published research finds models don’t carry over well across time.</li>
-        <li>Trust it only when the held-out <b>AUC is above 0.65</b> on your own data. Below that, leave <i>Min P(2x)</i> at 0 and it is display-only.</li>
-        <li>A model trained on the simulated market is meaningless for real money. It only proves the pipeline works.</li>
-      </ul>
-    </section>
-    <section class="panel">
-      <h3>Tune without fooling yourself</h3>
-      <ol>
-        <li>Change one thing at a time, in paper mode.</li>
-        <li>Prove it on data first: <code>scripts/start.sh sweep --grid exit.stop_loss_pct=20,30,40</code> tunes on older launches and tests on newer ones it never saw. It only recommends a change that wins on the unseen part.</li>
-        <li>Check the <b>gate audit</b>. A gate whose rejects double more often than your buys is too strict. One whose rejects rarely double is earning its keep.</li>
-        <li>Watch <b>capture</b> (how much of each run you keep) and the <b>MAE</b> highlight (how far winners dip before running) before moving stops.</li>
-      </ol>
-    </section>
-    <section class="panel">
-      <h3>Commands</h3>
-      <div class="tablewrap"><table>
-        <thead><tr><th>Run</th><th>What it does</th></tr></thead>
-        <tbody>
-          <tr><td><code>scripts/start.sh demo</code></td><td>Simulated market with fake money: try the dashboard.</td></tr>
-          <tr><td><code>scripts/start.sh paper</code></td><td>Real pump.fun feed, fake money. Records the feed to <code>data/</code> for backtests and training.</td></tr>
-          <tr><td><code>scripts/start.sh doctor</code></td><td>Checks keys, feed, RPC and wallet.</td></tr>
-          <tr><td><code>scripts/start.sh train</code></td><td>Fits and grades the P(2x) model on your recordings and writes <code>data/model.json</code>.</td></tr>
-          <tr><td><code>scripts/start.sh sweep --grid key=a,b,c</code></td><td>Walk-forward tuning on all CPU cores.</td></tr>
-          <tr><td><code>scripts/start.sh report</code></td><td>Shareable HTML report and CSV of your paper/live trades, in <code>data/report.html</code>.</td></tr>
-          <tr><td><code>scripts/start.sh backtest</code></td><td>Replays recordings with the current settings.</td></tr>
-          <tr><td><code>scripts/start.sh leaders</code></td><td>Ranks wallets worth copying from the recordings.</td></tr>
-          <tr><td><code>scripts/start.sh review</code></td><td>AI post-mortem; its proposals are backtested before you apply any.</td></tr>
-        </tbody></table></div>
-    </section>
-    <section class="panel">
-      <h3>Keyboard</h3>
-      <div class="tablewrap"><table><tbody>
-        <tr><td><kbd>1</kbd> … <kbd>7</kbd></td><td>Live · Desk · Chat · Portfolio · Analytics · Controls · Guide</td></tr>
-        <tr><td><kbd>c</kbd></td><td>Chat with Claude (Enter sends, Shift+Enter new line)</td></tr>
-        <tr><td><kbd>/</kbd></td><td>Filter the launch radar</td></tr>
-        <tr><td><kbd>p</kbd></td><td>Pause / resume new entries (open positions are still managed)</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>Close the token panel</td></tr>
-        <tr><td><kbd>m</kbd></td><td>Mute / unmute pop-up notifications</td></tr>
-        <tr><td><kbd>t</kbd></td><td>Theme: auto · light · dark</td></tr>
-        <tr><td><kbd>a</kbd></td><td>Arrange this page: drag panels, hide some</td></tr>
-        <tr><td><kbd>?</kbd></td><td>This guide</td></tr>
-      </tbody></table></div>
-      <p class="note">KILL has no shortcut on purpose.</p>
-    </section>
-    <section class="panel">
-      <h3>Safety</h3>
-      <ul>
-        <li>Use a <b>dedicated hot wallet</b> holding only the bot’s budget, never your main wallet. The key stays in a file that only the signing code reads. It is never logged, never typed into chat, and never committed.</li>
-        <li>Live trading needs <code>MEME_TRADER_CONFIRM_LIVE=yes</code> on purpose. Paper is the default.</li>
-        <li>Limits always on: the per-trade dollar hard cap, the daily loss limit, the drawdown kill switch, and defense mode after a losing run.</li>
-        <li>This dashboard only answers on 127.0.0.1. Reach it from another machine through an SSH tunnel, never by opening the port.</li>
-        <li>Most pump.fun tokens go to zero. Only trade money you can afford to lose. Nothing here is financial advice.</li>
-      </ul>
-    </section>
+  <section class="view guide2" data-view="guide" hidden>
+    <div class="gd-hero"><div><h1>Guide</h1><p>Everything this cockpit does, in plain words. Search it, or take the tour.</p></div>
+      <input id="gd-q" type="search" placeholder="Search: initials, quorum, limit order, proof, X…" aria-label="Search the guide">
+      <button class="primary" data-tour="1">▶ Take the tour</button></div>
+    <div class="gd-layout board-skip"><nav id="gd-nav" class="gd-nav" aria-label="Guide sections"></nav><div id="gd-body" class="gd-body"></div></div>
   </section>
 </main>
 
@@ -1146,8 +1233,26 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
   <div class="toolbar"><h2 style="margin:0;font-size:16px">👕 Wardrobe</h2><span class="note">Rename, recolour and re-hat the bots. Saved on the bot, so every browser sees it.</span>
     <div class="spacer"></div><button class="small" id="wd-cancel">Cancel</button><button class="small primary" id="wd-save">Save</button></div>
   <div class="wd-grid" id="wardrobe-body"></div></div></div>
-<div id="arrange-bar" hidden><b>Arranging this page</b><span class="note">Drag panels by their bar · Hide what you don't need</span>
-  <button class="small" id="ar-reset">Reset to default</button><button class="small primary" id="ar-done">Done</button></div>
+<div class="modal" id="composer" hidden><div class="modal-box compose" role="dialog" aria-label="New post">
+  <div class="toolbar"><h2 style="margin:0;font-size:16px">✎ New post</h2><div class="spacer"></div>
+    <label class="minisw"><span class="switch"><input type="checkbox" id="cp-x" checked><i></i></span><span id="cp-x-l">𝕏</span></label>
+    <label class="minisw"><span class="switch"><input type="checkbox" id="cp-tg"><i></i></span><span id="cp-tg-l">Telegram</span></label></div>
+  <textarea id="cp-text" rows="5" placeholder="What's the call?" aria-label="Post text"></textarea>
+  <div class="note" id="cp-count"></div>
+  <div id="cp-card" class="cp-card" hidden><label class="minisw"><span class="switch"><input type="checkbox" id="cp-cardon" checked><i></i></span>Attach this card</label><img id="cp-img" alt="Share card preview"></div>
+  <div class="note" id="cp-help"></div>
+  <div class="toolbar" style="margin-top:10px"><span class="note">Posted under your name. Paper results are labelled as paper.</span><div class="spacer"></div><button id="cp-cancel">Cancel</button><button class="primary" id="cp-post">Post</button></div>
+</div></div>
+<div class="cmdk" id="cmdk" hidden><div class="ck-box" role="dialog" aria-label="Command palette">
+  <input id="ck-in" type="text" placeholder="Search tabs, coins, settings, the guide… or paste a contract address" spellcheck="false" aria-label="Command">
+  <div id="ck-list" class="ck-list"></div><div class="note ck-foot">↑↓ move · Enter run · Esc close</div></div></div>
+<div class="ctx" id="ctx" hidden role="menu"></div>
+<div id="tour" class="tour" hidden><div id="tour-spot" class="tour-spot"></div>
+  <div id="tour-pop" class="tour-pop" role="dialog" aria-label="Tour"><div class="note" id="tour-n"></div><h3 id="tour-t"></h3><p id="tour-x"></p>
+    <div class="toolbar"><button class="small ghost" id="tour-skip">Skip</button><div class="spacer"></div><button class="small" id="tour-back">← Back</button><button class="small primary" id="tour-next">Next →</button></div></div></div>
+<aside id="help" class="help" hidden aria-label="Help"><div class="help-h"><b id="help-title"></b><div class="spacer"></div><button class="small" data-gdopen="1">Open the guide</button><button class="small ghost" id="help-x" aria-label="Close help">×</button></div><div id="help-body" class="help-body"></div></aside>
+<div id="arrange-bar" hidden><b>Arranging this page</b><span class="note">Drag panels by their bar · drag the right edge to resize · ▾ collapses</span>
+  <span id="ar-hidden"></span><button class="small" id="ar-reset">Reset this page</button><button class="small ghost" id="ar-reset-all">Reset all pages</button><button class="small primary" id="ar-done">Done</button></div>
 <div id="tip" class="tip"></div>
 
 <script>
@@ -1252,8 +1357,9 @@ function logToasts(s) {
   if (S.seen.size > 3000) S.seen = new Set([...S.seen].slice(-1500));
   if (S.tab === "chat") { const c = fresh.filter(l => l.level === "close").pop(); if (c) buddyOnTrade(c); }
   fresh.filter(l => ["buy", "sell", "close"].includes(l.level)).slice(-3).forEach(fxFromLog);
-  fresh.reverse().filter(l => ["buy", "sell", "close", "error", "callout", "agent"].includes(l.level)).slice(-3)
-    .forEach(l => toast(`<b>${l.level.toUpperCase()}</b> ${esc(l.text)}`, l.level, l.mint || null));
+  fresh.reverse().filter(l => ["buy", "sell", "close", "error", "callout", "agent", "alert"].includes(l.level)).slice(-3)
+    .forEach(l => { toast(`<b>${l.level.toUpperCase()}</b> ${esc(l.text)}`, l.level === "alert" ? "callout" : l.level, l.mint || null);
+      if (["buy", "close", "alert"].includes(l.level)) notify(l.level === "alert" ? "🔔 Alert" : l.level === "buy" ? "Bought" : "Closed", l.text); });
 }
 
 // ---------------------------------------------------------------- header / banners (every snapshot)
@@ -1294,6 +1400,7 @@ function render(s) {
   if (S.tab === "chat") renderChatSide(s);
   if (S.tab === "portfolio" && PF.data) renderPortfolio();
   if (S.tab === "controls") $("paper-panel").hidden = s.mode.startsWith("live");
+  renderOrdersPanel(s);
   if (S.tab !== "live") return;
   renderLiveVisuals(s);
   renderTradePanel(s);
@@ -2412,6 +2519,19 @@ function relay(ev) {
     hsay("exits", ev.win ? `Closed <b>${esc(ev.sym)}</b> <b class="up">${ev.v.toFixed(3)} SOL</b> ✓` : `<b>${esc(ev.sym)}</b> <b class="down">${ev.v.toFixed(3)} SOL</b>. Next one.`,
       {force: true, kind: ev.win ? "act" : "alert"});
     floatOver(ex, `${ev.v > 0 ? "+" : ""}${ev.v.toFixed(3)}`, ev.win ? "up" : "down");
+  } else if (ev.kind === "noteReply") {               // a persona walks to the corkboard and gives its take
+    const b = IO.bots[ev.persona]; if (!b) return;
+    const st = {bullish: ` <b class="up">bullish</b>`, bearish: ` <b class="down">bearish</b>`}[ev.stance] || "";
+    const line = `On “${esc(String(ev.title).slice(0, 40))}”${st}: ${esc(String(ev.text).slice(0, 120))}`;
+    if (b.busy) { hsay(ev.persona, line, {force: true}); return; }
+    b.busy = "cork";
+    goTo(b, STOPS.cork.map(v => v + (Math.random() - .5) * .9), () => { setProp(b, "📌"); hsay(ev.persona, line, {force: true});
+      setTimeout(() => { if (b.busy === "cork") goHome(b); }, 6500); });
+  } else if (ev.kind === "call") {
+    hsay("operator", `📣 You called <b>${esc(ev.sym)}</b> at $${fmtUsd(ev.mc)}. It's on the record.`, {force: true, kind: "act"});
+  } else if (ev.kind === "order") {
+    hsay(ev.side === "alert" ? "risk" : "exits", ev.side === "alert" ? `🔔 <b>${esc(ev.sym)}</b> just hit $${fmtUsd(ev.mc)}.`
+      : `Your limit ${ev.side} on <b>${esc(ev.sym)}</b> fired at $${fmtUsd(ev.mc)}.`, {force: true, kind: "act"});
   } else if (ev.kind === "memory") {
     const rd = IO.bots.operator.busy ? Object.values(IO.bots).find(o => DESK_AT[o.id] && !o.busy) : IO.bots.operator;
     if (!rd) return;
@@ -2497,67 +2617,150 @@ function saveWardrobe() {
 }
 function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat = []; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
 
-// ---------------------------------------------------------------- arrange: drag panels around any page, hide some, reset
-const AR = {on: false, layout: {}, drag: null, saveT: 0};
+// ---------------------------------------------------------------- arrange: every page is a 12-column board you can rearrange
+// Saved per page in the bot's UI store: {board: true, order: [pid], span: {pid: 1-12}, height: {pid: s|m|l}, hidden: [pid]}.
+// Collapsing a panel (its ▾ button) works any time and is saved the same way.
+const AR = {on: false, layout: {}, drag: null, saveT: 0, resize: null};
 const slug = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+const SPANS = [3, 4, 6, 8, 12], HEIGHTS = {s: 260, m: 420, l: 640};
 function arrangeIds() {
-  // stable ids: the panel's own id, else its heading; containers by their position in the view
   for (const view of $$("[data-view]")) {
     const v = view.dataset.view;
-    [view, ...view.querySelectorAll(".stack, .two, .desk-side")].forEach((c, i) => { if (!c.dataset.cid) c.dataset.cid = `${v}:${i}`; });
     view.querySelectorAll("section.panel, aside.panel").forEach((p, i) => {
-      if (p.dataset.pid) return;
-      const h = p.querySelector("h2"), label = h ? (h.childNodes[0]?.textContent || h.textContent) : "";
+      if (p.dataset.pid || p.closest(".board-skip")) return;
+      const h = p.querySelector(":scope > h2, :scope > h3"), label = h ? (h.childNodes[0]?.textContent || h.textContent) : "";
       p.dataset.pid = `${v}:${p.id || slug(label) || "p" + i}`;
-      p.dataset.label = label.trim() || p.id || "Panel";
+      p.dataset.label = label.trim() || (p.classList.contains("inspector") ? "Agent card" : p.id || "Panel");
+      if (h && !h.querySelector(".pcol-btn")) {
+        const hb = document.createElement("button"); hb.className = "phelp-btn ghost small"; hb.dataset.help = HELP_PID[p.dataset.pid] || HELP_FOR[v] || "start";
+        hb.title = "What is this?"; hb.setAttribute("aria-label", "Help for this panel"); hb.textContent = "?"; h.appendChild(hb);
+        const b = document.createElement("button"); b.className = "pcol-btn ghost small"; b.dataset.pcollapse = p.dataset.pid;
+        b.title = "Collapse / expand"; b.setAttribute("aria-label", "Collapse or expand this panel"); b.textContent = "▾"; h.appendChild(b); }
     });
   }
 }
+function conf(v) { return AR.layout[v] || (AR.layout[v] = {}); }
+function toBoard(view) {
+  const v = view.dataset.view;
+  let board = view.querySelector(":scope > .board");
+  if (board) return board;
+  const panels = $$("[data-pid]", view);
+  const vw = view.clientWidth || 1200;
+  const c = conf(v);
+  if (!c.span) {                                         // first time: keep today's widths and reading order
+    c.span = {};
+    const geo = panels.map(p => { const r = p.getBoundingClientRect(); return {p, top: r.top, left: r.left, w: r.width}; });
+    for (const g of geo) { const raw = Math.round(g.w / vw * 12); c.span[g.p.dataset.pid] = SPANS.reduce((a, b) => Math.abs(b - raw) < Math.abs(a - raw) ? b : a, 12); }
+    if (!c.order) c.order = geo.filter(g => g.w > 0).sort((a, b) => Math.round(a.top / 40) - Math.round(b.top / 40) || a.left - b.left).map(g => g.p.dataset.pid)
+      .concat(geo.filter(g => !g.w).map(g => g.p.dataset.pid));
+  }
+  board = document.createElement("div"); board.className = "board"; board.dataset.cid = v + ":board";
+  const first = panels[0] && [...view.children].find(ch => ch === panels[0] || ch.contains(panels[0]));
+  view.insertBefore(board, first || null);
+  c.board = true;
+  return board;
+}
 function applyLayout() {
   arrangeIds();
-  for (const [v, conf] of Object.entries(AR.layout || {})) {
-    for (const [cid, pids] of Object.entries(conf.order || {})) {
-      const c = document.querySelector(`[data-cid="${cid}"]`); if (!c) continue;
-      for (const pid of pids) { const p = document.querySelector(`[data-pid="${pid}"]`); if (p && p.closest("[data-view]")?.dataset.view === v) c.appendChild(p); }
+  for (const view of $$("[data-view]")) {
+    const v = view.dataset.view, c = AR.layout[v];
+    const panels = $$("[data-pid]", view);
+    for (const p of panels) {
+      p.classList.toggle("ar-hidden", !!(c && (c.hidden || []).includes(p.dataset.pid)));
+      p.classList.toggle("collapsed", !!(c && (c.collapsed || []).includes(p.dataset.pid)));
+      const hh = c && c.height && c.height[p.dataset.pid];
+      p.style.setProperty("--ph", hh ? HEIGHTS[hh] + "px" : ""); p.classList.toggle("ph", !!hh);
     }
-    for (const p of $$(`[data-view="${v}"] [data-pid]`)) p.classList.toggle("ar-hidden", (conf.hidden || []).includes(p.dataset.pid));
+    if (!c || !c.board) continue;
+    const board = toBoard(view), byId = Object.fromEntries(panels.map(p => [p.dataset.pid, p]));
+    const order = (c.order || []).filter(id => byId[id]).concat(panels.map(p => p.dataset.pid).filter(id => !(c.order || []).includes(id)));
+    for (const id of order) { const p = byId[id]; p.style.setProperty("--span", (c.span && c.span[id]) || 6); board.appendChild(p); }
+    view.querySelectorAll(".stack, .two, .grid, .desk-side, .floor-wrap").forEach(el => el.classList.toggle("ar-empty", !el.querySelector("[data-pid]")));
   }
 }
-function captureLayout() {
-  const out = {};
-  for (const view of $$("[data-view]")) {
-    const v = view.dataset.view, order = {};
-    for (const c of [view, ...view.querySelectorAll("[data-cid]")]) { const pids = [...c.children].filter(x => x.dataset && x.dataset.pid).map(x => x.dataset.pid); if (pids.length) order[c.dataset.cid] = pids; }
-    out[v] = {order, hidden: [...view.querySelectorAll(".ar-hidden[data-pid]")].map(p => p.dataset.pid)};
-  }
-  AR.layout = out;
-  clearTimeout(AR.saveT); AR.saveT = setTimeout(() => send({action: "ui_set", key: "layout", value: out}), 600);
+function captureLayout(view) {
+  const v = view.dataset.view, c = conf(v);
+  c.board = true;
+  c.order = $$("[data-pid]", view).map(p => p.dataset.pid);
+  c.hidden = $$(".ar-hidden[data-pid]", view).map(p => p.dataset.pid);
+  c.collapsed = $$(".collapsed[data-pid]", view).map(p => p.dataset.pid);
+  saveLayout();
+}
+function saveLayout() { clearTimeout(AR.saveT); AR.saveT = setTimeout(() => send({action: "ui_set", key: "layout", value: AR.layout}), 500); }
+function curView() { return document.querySelector(`[data-view="${S.tab}"]`); }
+function arBar(p) {
+  const c = conf(p.closest("[data-view]").dataset.view), id = p.dataset.pid, sp = (c.span || {})[id] || 6, hh = (c.height || {})[id] || "";
+  return `<span class="ar-grip" title="Drag to move">⠿ ${esc(p.dataset.label)}</span>
+    <span class="seg ar-seg" title="Width">${[[4, "⅓"], [6, "½"], [8, "⅔"], [12, "Full"]].map(([n, l]) => `<button data-arspan="${esc(id)}" data-n="${n}" aria-pressed="${sp === n}">${l}</button>`).join("")}</span>
+    <span class="seg ar-seg" title="Height">${[["", "Auto"], ["s", "S"], ["m", "M"], ["l", "L"]].map(([k, l]) => `<button data-arh="${esc(id)}" data-k="${k}" aria-pressed="${hh === k}">${l}</button>`).join("")}</span>
+    <button class="small ghost" data-arhide="${esc(id)}">${p.classList.contains("ar-hidden") ? "Show" : "Hide"}</button>`;
 }
 function setArrange(on) {
+  const view = curView();
+  if (on && view) { toBoard(view); applyLayout(); }
   AR.on = on; arrangeIds();
   document.body.classList.toggle("arranging", on);
   for (const p of $$("[data-pid]")) {
-    p.draggable = on;
-    let bar = p.querySelector(":scope > .ar-bar");
-    if (on && !bar) { bar = document.createElement("div"); bar.className = "ar-bar";
-      bar.innerHTML = `<span class="ar-grip" title="Drag to move">⠿ ${esc(p.dataset.label)}</span><button class="small ghost" data-arhide="${esc(p.dataset.pid)}">${p.classList.contains("ar-hidden") ? "Show" : "Hide"}</button>`;
-      p.prepend(bar); }
-    if (!on && bar) bar.remove();
+    const mine = view && view.contains(p);
+    p.draggable = on && mine;
+    let bar = p.querySelector(":scope > .ar-bar"), rh = p.querySelector(":scope > .ar-rh");
+    if (on && mine) { if (!bar) { bar = document.createElement("div"); bar.className = "ar-bar"; p.prepend(bar); }
+      bar.innerHTML = arBar(p);
+      if (!rh) { rh = document.createElement("div"); rh.className = "ar-rh"; rh.title = "Drag to resize"; p.appendChild(rh); } }
+    else { bar && bar.remove(); rh && rh.remove(); }
   }
   $("arrange-bar").hidden = !on;
   $("arrange").setAttribute("aria-pressed", String(on));
+  if (on && view) renderHiddenList(view);
+  if (!on && view && conf(view.dataset.view).board) captureLayout(view);
 }
-document.addEventListener("dragstart", e => { const p = e.target.closest && e.target.closest("[data-pid]"); if (!AR.on || !p) return; AR.drag = p; p.classList.add("ar-drag"); e.dataTransfer.effectAllowed = "move"; });
-document.addEventListener("dragend", () => { if (AR.drag) AR.drag.classList.remove("ar-drag"); AR.drag = null; $$(".ar-over").forEach(x => x.classList.remove("ar-over")); });
+function renderHiddenList(view) {
+  const hid = $$(".ar-hidden[data-pid]", view);
+  setHTML($("ar-hidden"), hid.length ? "Hidden: " + hid.map(p => `<button class="small ghost" data-arhide="${esc(p.dataset.pid)}">＋ ${esc(p.dataset.label)}</button>`).join("") : "");
+}
+document.addEventListener("dragstart", e => { const p = e.target.closest && e.target.closest("[data-pid]"); if (!AR.on || !p || AR.resize) return; AR.drag = p; p.classList.add("ar-drag"); e.dataTransfer.effectAllowed = "move"; });
+document.addEventListener("dragend", () => { if (AR.drag) { AR.drag.classList.remove("ar-drag"); captureLayout(AR.drag.closest("[data-view]")); } AR.drag = null; });
 document.addEventListener("dragover", e => {
   if (!AR.on || !AR.drag) return;
-  const view = AR.drag.closest("[data-view]"), t = e.target.closest && e.target.closest("[data-pid], [data-cid]");
-  if (!t || !view.contains(t) || t === AR.drag || AR.drag.contains(t)) return;
+  const t = e.target.closest && e.target.closest("[data-pid], .board");
+  if (!t || !AR.drag.closest("[data-view]").contains(t) || t === AR.drag || AR.drag.contains(t)) return;
   e.preventDefault();
-  if (t.dataset.pid) { const r = t.getBoundingClientRect(); t.parentNode.insertBefore(AR.drag, e.clientY < r.top + r.height / 2 ? t : t.nextSibling); }
+  if (t.dataset.pid) { const r = t.getBoundingClientRect(), before = (e.clientX - r.left) / r.width + (e.clientY - r.top) / r.height < 1;
+    t.parentNode.insertBefore(AR.drag, before ? t : t.nextSibling); }
   else if (![...t.children].includes(AR.drag)) t.appendChild(AR.drag);
 });
-document.addEventListener("drop", e => { if (AR.on && AR.drag) { e.preventDefault(); captureLayout(); if (snap) render(snap); } });
+document.addEventListener("drop", e => { if (AR.on && AR.drag) { e.preventDefault(); if (snap) render(snap); } });
+document.addEventListener("pointerdown", e => {
+  const h = e.target.closest && e.target.closest(".ar-rh"); if (!h || !AR.on) return;
+  e.preventDefault(); const p = h.parentNode, board = p.parentNode, r = board.getBoundingClientRect();
+  AR.resize = {p, left: p.getBoundingClientRect().left, col: (r.width + 16) / 12}; p.draggable = false; h.setPointerCapture(e.pointerId);
+});
+document.addEventListener("pointermove", e => {
+  const z = AR.resize; if (!z) return;
+  const n = Math.max(3, Math.min(12, Math.round((e.clientX - z.left + 8) / z.col)));
+  z.p.style.setProperty("--span", n); z.n = n;
+});
+document.addEventListener("pointerup", () => {
+  const z = AR.resize; if (!z) return;
+  AR.resize = null; z.p.draggable = true;
+  if (z.n) { const v = z.p.closest("[data-view]").dataset.view; (conf(v).span ||= {})[z.p.dataset.pid] = z.n; saveLayout(); setArrange(true); if (snap) render(snap); }
+});
+function arClick(d, t) {
+  if (d.pcollapse) { const p = document.querySelector(`[data-pid="${d.pcollapse}"]`); p.classList.toggle("collapsed");
+    const view = p.closest("[data-view]"), c = conf(view.dataset.view);
+    c.collapsed = $$(".collapsed[data-pid]", view).map(x => x.dataset.pid); saveLayout(); return true; }
+  if (d.arspan) { const p = document.querySelector(`[data-pid="${d.arspan}"]`), v = p.closest("[data-view]").dataset.view;
+    (conf(v).span ||= {})[d.arspan] = +d.n; p.style.setProperty("--span", +d.n); saveLayout(); setArrange(true); if (snap) render(snap); return true; }
+  if (d.arh !== undefined) { const p = document.querySelector(`[data-pid="${d.arh}"]`), v = p.closest("[data-view]").dataset.view, c = conf(v);
+    (c.height ||= {}); if (d.k) c.height[d.arh] = d.k; else delete c.height[d.arh]; saveLayout(); applyLayout(); setArrange(true); return true; }
+  if (d.arhide) { const p = document.querySelector(`[data-pid="${d.arhide}"]`); p.classList.toggle("ar-hidden");
+    captureLayout(p.closest("[data-view]")); setArrange(AR.on); return true; }
+  return false;
+}
+function resetLayout(all) {
+  if (all) AR.layout = {}; else delete AR.layout[S.tab];
+  send({action: "ui_set", key: "layout", value: AR.layout}); setTimeout(() => location.reload(), 300);
+}
 
 // ---------------------------------------------------------------- manual trading
 const TR = {mint: "", info: null, amt: null};
@@ -2603,7 +2806,8 @@ function renderTradePanel(s) {
   $("tr-sub").textContent = `your own trades · bonding-curve coins · max ${m.max_sol ?? "?"} SOL · ${s.mode.startsWith("live") ? "REAL MONEY" : "paper"}`;
   $("tr-ape").textContent = `🦍 APE ${m.ape_sol ?? ""}`;
   const mint = TR.mint;
-  if (!isMint(mint)) { setHTML($("tr-coin"), `<span class="note">Paste a contract address, or press Trade in any coin's details.</span>`); setHTML($("tr-metrics"), ""); return; }
+  if (!isMint(mint)) { setHTML($("tr-coin"), `<span class="note">Paste a contract address, or press Trade in any coin's details.</span>`); setHTML($("tr-metrics"), "");
+    setHTML($("tr-orders"), ""); setHTML($("tr-ord-quick"), ""); return; }
   const w = s.watching.find(x => x.mint === mint), p = s.positions.find(x => x.mint === mint), q = (m.queue || []).includes(mint);
   const i = TR.info && TR.info.mint === mint ? TR.info : null;
   const sym = (w && w.symbol) || (p && p.symbol) || (i && i.symbol) || short(mint);
@@ -2614,6 +2818,7 @@ function renderTradePanel(s) {
     <span class="note">${facts}</span>${q ? `<span class="tag late">queued: buying at its first trade</span>` : ""}${p ? `<span class="tbar-row">${sellBtns(mint)}</span>` : ""}`);
   setHTML($("tr-metrics"), tradeMetrics(i));
   if (S.tab === "live" && Date.now() - (TR.looked || 0) > 20000) { TR.looked = Date.now(); send({action: "lookup", mint}); }
+  renderOrderForm(s);
 }
 function setTradeMint(mint) {
   TR.mint = mint; $("tr-ca").value = mint; TR.info = null;
@@ -2648,29 +2853,70 @@ function fxFromLog(l) {
   }
 }
 
-// ---------------------------------------------------------------- the desk's memory
-const MEM = {items: [], loaded: false};
+// ---------------------------------------------------------------- the desk's memory, and its discussion of each note
+const MEM = {items: [], loaded: false, waiting: {}, replies: {}, seenMsg: null, timer: 0, open: new Set(), drafts: {}};
 async function loadMemory() {
-  try { const d = await (await fetch("/api/memory", {cache: "no-store"})).json(); MEM.items = d.items; MEM.loaded = true; renderMemory(); } catch { /* next visit */ }
+  clearTimeout(MEM.timer);
+  try { const d = await (await fetch("/api/memory", {cache: "no-store"})).json();
+    MEM.items = d.items; MEM.waiting = d.waiting || {}; MEM.replies = d.replies || {}; MEM.loaded = true; renderMemory(); } catch { /* next visit */ }
+  const busy = Object.keys(MEM.waiting).length;
+  if (S.tab === "desk" || busy) MEM.timer = setTimeout(loadMemory, busy ? 2500 : 10000);
+}
+const STANCE = {bullish: ["up", "bullish"], bearish: ["down", "bearish"], neutral: ["", "neutral"], skip: ["", "not for us"]};
+function avatarChip(who) {
+  if (who === "you") return `<span class="hm-av you">You</span>`;
+  const l = botLook(who);
+  return `<span class="hm-av" style="background:${esc(l.color)}">${esc((l.name || who)[0])}</span>`;
+}
+function threadHTML(it) {
+  const th = it.thread || [], wait = MEM.waiting[it.id] || [];
+  const msgs = th.map(m => `<div class="msg ${m.who === "you" ? "me" : ""}">${avatarChip(m.who)}<div class="mb"><div class="mh"><b>${m.who === "you" ? "You" : esc(botLook(m.who).name || m.who)}</b>
+      ${m.stance && STANCE[m.stance] ? `<span class="tag ${STANCE[m.stance][0]}">${STANCE[m.stance][1]}</span>` : ""}<span class="note">${ago(m.ts)} ago</span></div>
+      ${m.error ? `<div class="note down">couldn't reply: ${esc(m.error)}</div>` : `<div>${esc(m.text)}</div>`}</div></div>`).join("");
+  const typing = wait.map(p => `<div class="msg">${avatarChip(p)}<div class="mb"><span class="typing"><i></i><i></i><i></i></span> <span class="note">${esc(botLook(p).name || p)} is reading…</span></div></div>`).join("");
+  const open = MEM.open.has(it.id);
+  return `<div class="thread">${msgs}${typing}
+    ${open ? `<div class="reply-row"><input type="text" data-memreply="${esc(it.id)}" placeholder="Reply to the desk… (@skeptic asks just one)" maxlength="600" value="${esc(MEM.drafts[it.id] || "")}"><button class="small primary" data-memsend="${esc(it.id)}">Send</button></div>`
+      : `<div class="reply-row"><button class="small ghost" data-memopen="${esc(it.id)}">↩ Reply</button>${!th.length && !wait.length ? `<button class="small ghost" data-memask="${esc(it.id)}">Ask the desk</button>` : ""}</div>`}</div>`;
 }
 function renderMemory() {
   renderCork(MEM.items);
   const newest = MEM.items[0] && MEM.items[0].id;
   if (IO.memSeen && newest && newest !== IO.memSeen) IO.events.push({kind: "memory", title: MEM.items[0].title});
   IO.memSeen = newest || IO.memSeen || "-";
+  // new replies walk over to the corkboard and say it in the room
+  const all = MEM.items.flatMap(it => (it.thread || []).filter(m => m.who !== "you" && !m.error).map(m => ({...m, title: it.title})));
+  const key = m => m.ts + m.who;
+  if (MEM.seenMsg) for (const m of all) if (!MEM.seenMsg.has(key(m))) IO.events.push({kind: "noteReply", persona: m.who, text: m.text, title: m.title, stance: m.stance});
+  MEM.seenMsg = new Set(all.map(key));
+  const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.memreply;
+  if (focused) return;                                         // don't redraw under your cursor
   setHTML($("mem-list"), MEM.items.slice(0, 40).map(it => `<div class="mem ${it.kind}"><div class="mem-h"><span class="mem-ic">${{ca: "🪙", x: "𝕏", web: "📰", note: "📝"}[it.kind] || "📌"}</span>
       <b>${it.mint ? `<span data-open="${esc(it.mint)}" style="cursor:pointer">${logo(it.mint, it.title.replace(/^\$/, ""))}${esc(it.title)}</span>` : esc(it.title)}</b>
       <button class="ghost small" data-memdel="${esc(it.id)}" aria-label="Forget this" title="Forget this">×</button></div>
     ${it.note ? `<div class="mem-note">“${esc(it.note)}”</div>` : ""}<div class="note">${esc((it.summary || "").slice(0, 220))}</div>
-    <div class="note">${ago(it.ts)} ago${it.url ? ` · <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : ""}</div></div>`).join("")
-    || `<div class="empty">Nothing yet. Paste an X post, an article, a contract address, or a note.</div>`);
-  $("mem-sub").textContent = `${MEM.items.length} saved · Claude reads them; the AI desk sees notes on coins it votes on`;
+    <div class="note">${ago(it.ts)} ago${it.url ? ` · <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : ""}</div>
+    ${threadHTML(it)}</div>`).join("")
+    || `<div class="empty">Nothing yet. Paste an X post, an article, a contract address, or a note: the four personas read it and reply.</div>`);
+  const r = MEM.replies || {};
+  $("mem-sub").textContent = `${MEM.items.length} saved · ` + (!r.key ? "add an Anthropic key and the personas reply to each note"
+    : r.on === false ? "replies are off (desk.note_replies)" : `the personas reply to every note${r.calls ? ` · ${r.calls} replies so far` : ""}`)
+    + (r.error ? ` · last error: ${r.error}` : "");
 }
+function memSend(id) {
+  const inp = document.querySelector(`[data-memreply="${id}"]`), v = (inp && inp.value || "").trim();
+  if (!v) { inp && inp.focus(); return; }
+  send({action: "mem_reply", id, text: v}); delete MEM.drafts[id]; MEM.open.delete(id); inp.blur();
+  setTimeout(loadMemory, 600);
+}
+document.addEventListener("input", e => { const id = e.target.dataset && e.target.dataset.memreply; if (id) MEM.drafts[id] = e.target.value; });
+document.addEventListener("keydown", e => { const id = e.target.dataset && e.target.dataset.memreply; if (id && e.key === "Enter") { e.preventDefault(); memSend(id); } }, true);
 function memAdd() {
   const t = $("mem-in").value.trim(); if (!t) { $("mem-in").focus(); return; }
   send({action: "mem_add", text: t, note: $("mem-note").value.trim()});
   $("mem-in").value = ""; $("mem-note").value = "";
   $("mem-add").disabled = true; $("mem-add").textContent = "Reading…"; setTimeout(() => { $("mem-add").disabled = false; $("mem-add").textContent = "Save to memory"; }, 2500);
+  setTimeout(loadMemory, 1500);
 }
 
 // ---------------------------------------------------------------- X feed (FxTwitter)
@@ -3168,8 +3414,497 @@ function renderChatSide(s) {
 }
 
 // ---------------------------------------------------------------- wiring
+// ---------------------------------------------------------------- Pulse: new · final stretch · graduated (Axiom-style)
+const PL = {data: null, timer: 0, hover: {}, seen: new Set(), qb: null, open: {},
+  filters: {new: {}, stretch: {}, graduated: {}}, sort: {new: "new", stretch: "curve", graduated: "new"}};
+const PL_COLS = [["new", "🌱 New", "launches under 50% of the curve"], ["stretch", "🔥 Final stretch", "50–100% of the curve: close to graduating"],
+                 ["graduated", "🎓 Graduated", "just moved to PumpSwap (the bot trades the curve only)"]];
+const PL_F = [["age_max", "Max age (min)", 0], ["mc_min", "Min MC ($K)", 0], ["mc_max", "Max MC ($K)", 0], ["buyers_min", "Min buyers", 0],
+  ["flow_min", "Min inflow 30s (SOL)", 1], ["top10_max", "Max top-10 %", 0], ["dev_max", "Max dev %", 0], ["bundle_max", "Max bundled %", 0]];
+const PL_CHK = [["socials", "Has a social link"], ["x", "Has X"], ["nodevsold", "Dev hasn't sold"], ["nomayhem", "Not Mayhem mode"]];
+async function loadPulse() {
+  clearTimeout(PL.timer);
+  if (S.tab !== "pulse") return;
+  try { PL.data = await (await fetch("/api/pulse", {cache: "no-store"})).json(); renderPulseBoard(); } catch { /* next poll */ }
+  PL.timer = setTimeout(loadPulse, document.hidden ? 6000 : 1500);
+}
+function plPass(r, f) {
+  const n = k => f[k] !== undefined && f[k] !== "" && isFinite(+f[k]);
+  if (n("age_max") && r.age != null && r.age > f.age_max * 60) return false;
+  if (n("mc_min") && r.mcap_usd < f.mc_min * 1000) return false;
+  if (n("mc_max") && +f.mc_max > 0 && r.mcap_usd > f.mc_max * 1000) return false;
+  if (n("buyers_min") && (r.buyers ?? 0) < +f.buyers_min) return false;
+  if (n("flow_min") && (r.flow30 ?? 0) < +f.flow_min) return false;
+  if (n("top10_max") && +f.top10_max > 0 && (r.top10 ?? 0) > +f.top10_max) return false;
+  if (n("dev_max") && +f.dev_max > 0 && (r.dev_pct ?? 0) > +f.dev_max) return false;
+  if (n("bundle_max") && +f.bundle_max > 0 && (r.bundle_pct ?? 0) > +f.bundle_max) return false;
+  const lk = r.lk || [0, 0, 0];
+  if (f.socials && !lk.some(Boolean)) return false;
+  if (f.x && !lk[0]) return false;
+  if (f.nodevsold && r.dev_sold) return false;
+  if (f.nomayhem && r.mayhem) return false;
+  return true;
+}
+const PL_SORT = {new: (a, b) => (a.age ?? a.graduated_s ?? 0) - (b.age ?? b.graduated_s ?? 0), mc: (a, b) => b.mcap_usd - a.mcap_usd,
+  curve: (a, b) => (b.progress ?? 0) - (a.progress ?? 0), flow: (a, b) => (b.flow30 ?? 0) - (a.flow30 ?? 0), buyers: (a, b) => (b.buyers ?? 0) - (a.buyers ?? 0)};
+function plRow(r, col) {
+  const lk = r.lk || [0, 0, 0], fresh = !PL.seen.has(r.mint);
+  PL.seen.add(r.mint);
+  const flags = [r.dev_sold ? `<span class="pf bad" title="The creator has sold">dev sold</span>` : "",
+    r.bundle_pct >= 10 ? `<span class="pf warn" title="Supply bought in the launch block">bundle ${fx(r.bundle_pct, 0)}%</span>` : "",
+    r.top10 >= 35 ? `<span class="pf warn" title="Top 10 wallets hold">top10 ${fx(r.top10, 0)}%</span>` : "",
+    r.mayhem ? `<span class="pf" title="Mayhem mode: 2B supply, the protocol's agent trades it">mayhem</span>` : "",
+    r.held ? `<span class="pf good">holding</span>` : ""].join("");
+  const socials = `<span class="pl-lk">${lk[0] ? "𝕏" : ""}${lk[1] ? "✈" : ""}${lk[2] ? "🌐" : ""}</span>`;
+  const qb = PL.qb ?? ((snap && snap.manual && snap.manual.presets_sol) || [0.1])[1] ?? 0.1;
+  if (col === "graduated") return `<div class="pl-row${fresh ? " fresh" : ""}" data-open="${esc(r.mint)}" data-ctx="${esc(r.mint)}">
+    ${logo(r.mint, r.symbol, "md")}<div class="pl-main"><div class="pl-top"><b>${esc(r.symbol)}</b>${socials}<span class="note">graduated ${ago(Date.now() / 1000 - r.graduated_s)} ago</span></div>
+    <div class="pl-sub"><span>MC at graduation <b>$${fmtUsd(r.mcap_usd)}</b></span>${r.buyers != null ? `<span>👥 ${r.buyers}</span>` : ""}${r.top10 != null ? `<span>top10 ${fx(r.top10, 0)}%</span>` : ""}${flags}</div></div>
+    <a class="small pl-ext" href="https://dexscreener.com/solana/${encodeURIComponent(r.mint)}" target="_blank" rel="noopener noreferrer" title="Chart on DexScreener" onclick="event.stopPropagation()">↗</a></div>`;
+  return `<div class="pl-row${fresh ? " fresh" : ""}" data-open="${esc(r.mint)}" data-ctx="${esc(r.mint)}">
+    ${logo(r.mint, r.symbol, "md")}<div class="pl-main">
+      <div class="pl-top"><b>${esc(r.symbol)}</b><span class="pl-name">${esc(r.name || "")}</span>${socials}<span class="note num">${age(r.age)}</span></div>
+      <div class="pl-sub"><span class="num">MC <b>$${fmtUsd(r.mcap_usd)}</b></span><span class="pl-curve" title="Bonding curve ${fx(r.progress * 100, 0)}%"><i style="width:${Math.min(100, r.progress * 100).toFixed(0)}%"></i></span>
+        <span class="num" title="Unique buyers">👥 ${r.buyers}</span><span class="num" title="Buys / sells"><span class="up">${r.buys}</span>/<span class="down">${r.sells}</span></span>
+        <span class="num ${cls(r.flow30)}" title="Net SOL in, last 30 s">${r.flow30 > 0 ? "+" : ""}${fx(r.flow30, 1)} SOL</span>
+        <span class="num" title="Top 10 holders">t10 ${fx(r.top10, 0)}%</span><span class="num" title="Dev bought at launch">dev ${fx(r.dev_pct, 0)}%</span>${flags}</div></div>
+    ${r.spark && r.spark.length > 2 ? `<span class="pl-spark">${svgSpark(r.spark, r.spark[r.spark.length - 1] >= r.spark[0] ? "var(--good)" : "var(--bad)", 26, 70)}</span>` : ""}
+    <button class="pl-qb" data-mbuy="${esc(r.mint)}" data-sol="${qb}" title="Quick buy ${qb} SOL">⚡ ${qb}</button></div>`;
+}
+function renderPulseBoard() {
+  const d = PL.data; if (!d) return;
+  const pres = (snap && snap.manual && snap.manual.presets_sol) || [0.05, 0.1, 0.25, 0.5, 1];
+  if (PL.qb == null) PL.qb = pres[1] ?? pres[0];
+  setHTML($("pl-qb"), pres.map(v => `<button data-plqb="${v}" aria-pressed="${PL.qb === v}">${v}</button>`).join(""));
+  for (const [col, title, hint] of PL_COLS) {
+    const list = $("pl-" + col + "-list");
+    const rows = (d[col] || []).filter(r => plPass(r, PL.filters[col] || {})).sort(PL_SORT[PL.sort[col]] || PL_SORT.new);
+    $("pl-" + col + "-n").textContent = `${rows.length}${rows.length !== (d[col] || []).length ? " of " + (d[col] || []).length : ""}`;
+    if (PL.hover[col]) continue;                          // rows don't jump while your mouse is on the list
+    setHTML(list, rows.slice(0, 60).map(r => plRow(r, col)).join("") || `<div class="empty">${(d[col] || []).length ? "Nothing passes these filters." : "Nothing yet: " + hint + "."}</div>`);
+  }
+  if (PL.seen.size > 5000) PL.seen = new Set([...PL.seen].slice(-2500));
+}
+function plFilterForm(col) {
+  const f = PL.filters[col] || {};
+  return `<div class="pl-filters">${PL_F.map(([k, label]) => `<label><span>${label}</span><input type="number" step="any" data-plf="${col}" data-k="${k}" value="${esc(f[k] ?? "")}" placeholder="any"></label>`).join("")}
+    ${PL_CHK.map(([k, label]) => `<label class="minisw"><span class="switch"><input type="checkbox" data-plc="${col}" data-k="${k}" ${f[k] ? "checked" : ""}><i></i></span>${label}</label>`).join("")}
+    <label><span>Sort</span><select data-pls="${col}">${[["new", "Newest"], ["mc", "Market cap"], ["curve", "Curve %"], ["flow", "Inflow"], ["buyers", "Buyers"]].map(([v, l]) => `<option value="${v}" ${PL.sort[col] === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <button class="small ghost" data-plreset="${col}">Clear filters</button></div>`;
+}
+function plSave() { clearTimeout(PL.saveT); PL.saveT = setTimeout(() => send({action: "ui_set", key: "pulse", value: {filters: PL.filters, sort: PL.sort, qb: PL.qb}}), 500); }
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (t.dataset.plf) { (PL.filters[t.dataset.plf] ||= {})[t.dataset.k] = t.value; plSave(); renderPulseBoard(); }
+});
+document.addEventListener("change", e => {
+  const t = e.target;
+  if (t.dataset.plc) { (PL.filters[t.dataset.plc] ||= {})[t.dataset.k] = t.checked; plSave(); renderPulseBoard(); }
+  if (t.dataset.pls) { PL.sort[t.dataset.pls] = t.value; plSave(); renderPulseBoard(); }
+});
+function plWire() {
+  for (const [col] of PL_COLS) {
+    const list = $("pl-" + col + "-list");
+    list.addEventListener("mouseenter", () => { PL.hover[col] = true; $("pl-" + col).classList.add("paused"); });
+    list.addEventListener("mouseleave", () => { PL.hover[col] = false; $("pl-" + col).classList.remove("paused"); renderPulseBoard(); });
+  }
+}
+
+// ---------------------------------------------------------------- Calls: the track record, every call hash-chained
+const CL = {data: null, caller: "", timer: 0};
+async function loadCalls() {
+  clearTimeout(CL.timer);
+  try { CL.data = await (await fetch("/api/calls?caller=" + encodeURIComponent(CL.caller), {cache: "no-store"})).json(); renderCalls(); } catch { /* next poll */ }
+  if (S.tab === "calls") CL.timer = setTimeout(loadCalls, 10000);
+}
+const xx = v => v == null ? "–" : `${v.toFixed(v >= 10 ? 0 : 2)}x`;
+const hz = v => v == null ? `<span class="note">–</span>` : `<span class="${cls(v)}">${pct(v, 0)}</span>`;
+function renderCalls() {
+  const d = CL.data; if (!d) return;
+  const st = d.stats, v = d.verify;
+  setHTML($("cl-proof"), `<span class="proof ${v.ok ? "ok" : "bad"}">${v.ok ? "✓ chain intact" : "✕ " + esc(v.text)}</span>
+    <span class="note">${v.records} records · head <code title="${esc(d.head)}">${esc(d.head.slice(0, 16))}…</code></span>
+    ${d.anchors.length ? `<span class="note">last published ${ago(d.anchors[0].ts)} ago on ${esc(d.anchors[0].where)}${d.anchors[0].url ? ` · <a href="${esc(d.anchors[0].url)}" target="_blank" rel="noopener noreferrer">see it ↗</a>` : ""}</span>` : `<span class="note">not published yet: publish the head so nobody can say you rewrote it</span>`}`);
+  const k = (label, value, sub, c = "") => `<div class="kpi"><div class="label">${label}</div><div class="value num ${c}">${value}</div><div class="sub">${sub}</div></div>`;
+  const h1 = st["1h"], h24 = st["24h"], pk = st.peak;
+  setHTML($("cl-kpis"), k("Calls", st.calls, `by ${esc(st.caller)}`)
+    + k("Held 1 hour", h1 ? pct(h1.median_pct, 0) : "–", h1 ? `median after ~${st.cost_pct}% costs · ${h1.n} settled` : "settles an hour after each call", h1 ? cls(h1.median_pct) : "")
+    + k("Won at 1 hour", h1 ? Math.round(h1.win_rate * 100) + "%" : "–", h1 ? `mean ${pct(h1.mean_pct, 0)}` : "")
+    + k("Held 24 hours", h24 ? pct(h24.median_pct, 0) : "–", h24 ? `median · won ${Math.round(h24.win_rate * 100)}% of ${h24.n}` : "settles a day after each call", h24 ? cls(h24.median_pct) : "")
+    + k(`Hit ${st.hit_x}x`, pk ? Math.round(pk.hit_rate * 100) + "%" : "–", pk ? `peak within 24 h · ${pk.settled} of ${pk.n} settled` : "")
+    + k("Median peak", pk ? xx(pk.median_x) : "–", pk ? `best ${xx(pk.best_x)} · sampled, nobody sells the top` : ""));
+  setHTML($("cl-callers"), ["", "you", "bot"].map(c => `<button data-clcaller="${c}" aria-pressed="${CL.caller === c}">${c ? c[0].toUpperCase() + c.slice(1) : "Everyone"}</button>`).join(""));
+  setHTML($("cl-rows"), d.rows.map(r => `<tr data-ctx="${esc(r.mint)}"><td class="num">#${r.n}</td><td class="num">${ago(r.ts)} ago</td>
+      <td><span data-open="${esc(r.mint)}" class="clk">${tok(r.mint, r.symbol)}</span>${r.thesis ? `<div class="note cl-th">${esc(r.thesis.slice(0, 90))}</div>` : ""}</td>
+      <td><span class="tag ${r.caller === "you" ? "late" : ""}">${esc(r.caller)}</span>${r.mode && r.caller === "bot" ? `<div class="note">${esc(r.source)}</div>` : ""}</td>
+      <td class="r num">$${fmtUsd(r.mcap_usd)}</td><td class="r num ${cls(r.now_x - 1)}">${xx(r.now_x)}</td><td class="r num"><b class="${r.peak_x >= 2 ? "up" : ""}">${xx(r.peak_x)}</b></td>
+      <td class="r num">${hz(r["5m"])}</td><td class="r num">${hz(r["1h"])}</td><td class="r num">${hz(r["24h"])}</td>
+      <td><code class="note" title="${esc(r.hash)}">${esc(r.hash.slice(0, 8))}</code></td>
+      <td><button class="small ghost" data-share="call:${esc(r.id)}" title="Share this call">↗ Share</button></td></tr>`).join("")
+    || `<tr><td colspan="12" class="empty">No calls yet. Paste a contract address above and press 📣 Call: it goes on the record at today's market cap.</td></tr>`);
+}
+function makeCall(mint, thesis, to) {
+  if (!isMint(mint)) { toast("Paste a contract address first", "bad"); return; }
+  const where = to.length ? ` and post it to ${to.map(t => t === "x" ? "X" : "Telegram").join(" + ")}` : "";
+  if (to.includes("x") && !confirm(`Put this call on the record${where}? X bills the post (~$0.015).`)) return;
+  send({action: "call", mint, thesis, to});
+  setTimeout(loadCalls, 1200);
+}
+function callForm(prefix, mint = "") {
+  return `<div class="call-form"><input id="${prefix}-ca" type="text" placeholder="Contract address" value="${esc(mint)}" spellcheck="false">
+    <input id="${prefix}-th" type="text" maxlength="280" placeholder="Why? (one line, goes on the record)">
+    <label class="minisw"><span class="switch"><input type="checkbox" id="${prefix}-x"><i></i></span>Post on 𝕏</label>
+    <label class="minisw"><span class="switch"><input type="checkbox" id="${prefix}-tg"><i></i></span>Telegram</label>
+    <button class="primary" data-callgo="${prefix}">📣 Call</button></div>`;
+}
+
+// ---------------------------------------------------------------- limit orders and alerts
+const ORD = {side: "buy", op: "le"};
+function orderTargets(mc) {
+  if (!mc) return "";
+  return [["Dip −20%", "buy", "le", .8], ["Dip −40%", "buy", "le", .6], ["Breakout +50%", "buy", "ge", 1.5], ["Alert 2x", "alert", "ge", 2], ["Take profit 3x", "sell", "ge", 3]]
+    .map(([l, side, op, k]) => `<button class="small" data-ordq="${side}:${op}:${Math.round(mc * k)}">${l}</button>`).join("");
+}
+function renderOrderForm(s) {
+  const mint = TR.mint, w = s.watching.find(x => x.mint === mint), p = s.positions.find(x => x.mint === mint);
+  const i = TR.info && TR.info.mint === mint ? TR.info : null;
+  const mc = w ? w.mcap_sol * s.sol_usd : p ? null : i ? i.mcap_usd : null;
+  const box = $("tr-orders");
+  if (!isMint(mint)) { setHTML(box, ""); return; }
+  const mine = (s.orders || []).filter(o => o.mint === mint);
+  setHTML($("tr-ord-quick"), orderTargets(mc || (i && i.mcap_usd)));
+  setHTML(box, mine.length ? mine.map(orderRow).join("") : `<span class="note">No orders on this coin.</span>`);
+}
+function orderRow(o) {
+  const cond = `MC ${o.op === "le" ? "≤" : "≥"} $${fmtUsd(o.mcap_usd)}`;
+  const what = o.side === "buy" ? `Buy ${o.sol} SOL` : o.side === "sell" ? `Sell ${Math.round((o.frac || 1) * 100)}%` : "🔔 Alert";
+  const st = o.status === "open" ? `<span class="note">expires in ${dur(Math.max(0, o.expires - (snap ? snap.now : 0)))}</span><button class="small ghost" data-ordx="${esc(o.id)}">Cancel</button>`
+    : `<span class="tag ${o.status === "done" ? "ok" : o.status.startsWith("failed") ? "bad" : ""}">${esc(o.status)}</span>${o.fired_mcap ? `<span class="note">at $${fmtUsd(o.fired_mcap)}</span>` : ""}`;
+  return `<div class="ord ${o.status === "open" ? "" : "done"}"><b>${esc(what)}</b><span data-open="${esc(o.mint)}" class="clk">${tok(o.mint, o.symbol)}</span><span class="num">when ${cond}</span>${st}</div>`;
+}
+function renderOrdersPanel(s) {
+  const open = (s.orders || []).filter(o => o.status === "open"), done = (s.orders || []).filter(o => o.status !== "open").slice(0, 6);
+  $("ord-sub").textContent = open.length ? `${open.length} open · they fire on the live curve price` : "limit buys and sells, and alerts, by market cap";
+  setHTML($("ord-list"), [...open, ...done].map(orderRow).join("") || `<div class="empty">No orders. In Manual trade, set a market cap to buy the dip, sell into strength, or just get pinged.</div>`);
+  for (const o of done) if (!ORD.seen?.has(o.id)) { (ORD.seen ||= new Set()).add(o.id);
+    if (ORD.ready && o.status === "done") { toast(`<b>${o.side === "alert" ? "🔔 ALERT" : "ORDER FILLED"}</b> ${esc(o.symbol)} at $${fmtUsd(o.fired_mcap || o.mcap_usd)} market cap`, o.side === "alert" ? "callout" : "ok", o.mint);
+      notify(o.side === "alert" ? `🔔 ${o.symbol} hit $${fmtUsd(o.fired_mcap)}` : `Order filled: ${o.symbol}`, `${o.side} at $${fmtUsd(o.fired_mcap || o.mcap_usd)} market cap`);
+      IO.events.push({kind: "order", side: o.side, sym: o.symbol, mc: o.fired_mcap || o.mcap_usd}); } }
+  ORD.ready = true;
+}
+function placeOrder(side, op, mcap) {
+  const mint = TR.mint;
+  if (!isMint(mint)) { toast("Paste a contract address first", "bad"); return; }
+  if (!(mcap > 0)) { toast("Set a market cap in dollars", "bad"); $("tr-ord-mc").focus(); return; }
+  const c = {action: "order_place", mint, side, op, mcap_usd: mcap, ttl_h: +$("tr-ord-ttl").value || 24};
+  if (side === "buy") c.sol = TR.amt || parseFloat($("tr-amt").value) || ((snap && snap.manual && snap.manual.presets_sol) || [0.1])[1];
+  if (side === "sell") c.frac = (+$("tr-ord-frac").value || 100) / 100;
+  if (side !== "alert" && !liveConfirm(`Place a limit ${side} that fires on its own at $${fmtUsd(mcap)} market cap`)) return;
+  send(c);
+}
+
+// ---------------------------------------------------------------- posting: X and Telegram, always your click
+const SOC = {st: null, card: null, cardOn: true};
+async function loadSocial() {
+  try { SOC.st = await (await fetch("/api/social", {cache: "no-store"})).json(); renderConnections(); } catch { /* later */ }
+}
+const LINKISH = /https?:\/\/|\b[\w-]+\.(?:com|fun|io|xyz|ai|net|org|app|gg|so|co|me|dev|trade|finance|tv|gl|ly|to|sh|cc|info|bot)\b/i;
+function xLen(t) { t = (t || "").replace(/https?:\/\/\S+/g, "x".repeat(23)); let n = 0; for (const c of t) n += c.codePointAt(0) > 0x2FFF ? 2 : 1; return n; }
+function openComposer(text = "", card = null) {
+  if (!SOC.st) loadSocial().then(() => openComposer(text, card));
+  SOC.card = card; SOC.cardOn = !!card;
+  $("cp-text").value = text; $("composer").hidden = false; renderComposer(); setTimeout(() => $("cp-text").focus(), 30);
+}
+function renderComposer() {
+  const st = SOC.st || {x: {}, telegram: {}}, t = $("cp-text").value, n = xLen(t), link = LINKISH.test(t);
+  const wantX = $("cp-x").checked, wantTg = $("cp-tg").checked;
+  $("cp-x-l").innerHTML = `𝕏 ${st.x.connected ? (st.x.user ? "@" + esc(st.x.user) : "connected") : "<span class='note'>not connected</span>"}`;
+  $("cp-tg-l").innerHTML = `Telegram ${st.telegram.configured ? esc(st.telegram.chat || "") : "<span class='note'>not set up</span>"}`;
+  $("cp-x").disabled = !st.x.connected; $("cp-tg").disabled = !st.telegram.configured;
+  if (!st.x.connected) $("cp-x").checked = false;
+  if (!st.telegram.configured) $("cp-tg").checked = false;
+  const cost = wantX && st.x.connected ? (link ? st.x.link_post_usd : st.x.post_usd) : 0;
+  $("cp-count").innerHTML = `<span class="${n > 280 ? "down" : ""}">${n}/280</span>` + (wantX && st.x.connected ? ` · X bills ~$${(cost || 0).toFixed(3)}` : "")
+    + (wantX && link ? ` · <b class="warn-t">contains a link: $${(+st.x.link_post_usd).toFixed(2)} instead of $${(+st.x.post_usd).toFixed(3)}</b>` : "")
+    + (st.x.connected ? ` · ${st.x.posts_today}/${st.x.max_per_day} today` : "");
+  $("cp-card").hidden = !SOC.card;
+  if (SOC.card) { const src = `/api/card.png?kind=${encodeURIComponent(SOC.card.kind)}&id=${encodeURIComponent(SOC.card.id || "")}`;
+    if ($("cp-img").dataset.src !== src) { $("cp-img").dataset.src = src; $("cp-img").src = src + "&t=" + Date.now(); }
+    $("cp-cardon").checked = SOC.cardOn; }
+  $("cp-help").innerHTML = st.x.connected || st.telegram.configured ? "" : `Connect an account first: <a href="#" data-tab-link="controls" data-goconn="1">Controls → Connections</a>.`;
+  $("cp-post").disabled = !((wantX && st.x.connected) || (wantTg && st.telegram.configured)) || !t.trim() || (wantX && n > 280);
+}
+function postNow() {
+  const to = [$("cp-x").checked && "x", $("cp-tg").checked && "telegram"].filter(Boolean);
+  const card = SOC.card && $("cp-cardon").checked ? SOC.card : null;
+  $("cp-post").disabled = true; $("cp-post").textContent = "Posting…";
+  send({action: "post", text: $("cp-text").value.trim(), to, card});
+  setTimeout(() => { $("cp-post").textContent = "Post"; }, 2500);
+}
+function shareText(kind, id) {
+  if (kind === "trade") { const [mint, ts] = id.split(":"); const c = (snap.closed || []).find(x => x.mint === mint && Math.abs(x.closed - +ts) < 2) || {};
+    const paper = !snap.mode.startsWith("live");
+    return `${c.pnl >= 0 ? "🟢" : "🔴"} $${c.symbol} ${pct(c.pnl_pct, 0)} (${c.pnl >= 0 ? "+" : ""}${(+c.pnl).toFixed(3)} SOL)${paper ? " [paper trade]" : ""}\nexit: ${c.exit}\n\nCA: ${mint}`; }
+  if (kind === "call") { const r = (CL.data?.rows || []).find(x => x.id === id) || {};
+    return `📣 Call #${r.n}: $${r.symbol} at $${fmtUsd(r.mcap_usd)} MC\npeak ${xx(r.peak_x)}${r["1h"] != null ? ` · held 1h ${pct(r["1h"], 0)}` : ""}${r["24h"] != null ? ` · 24h ${pct(r["24h"], 0)}` : ""}\n\nCA: ${r.mint}\nledger ${String(r.hash || "").slice(0, 12)}`; }
+  if (kind === "record") { const st = CL.data?.stats || {}; const h = st["1h"];
+    return `Track record: ${st.calls} calls, every one timestamped and hash-chained.${h ? `\nHeld 1h: median ${pct(h.median_pct, 0)} after costs, won ${Math.round(h.win_rate * 100)}%.` : ""}${st.peak ? `\n${Math.round(st.peak.hit_rate * 100)}% hit ${st.hit_x}x.` : ""}\nLedger head ${String(CL.data?.head || "").slice(0, 16)}`; }
+  return "";
+}
+function share(spec) { const [kind, ...rest] = spec.split(":"); const id = rest.join(":"); openComposer(shareText(kind, id), {kind, id}); }
+function renderConnections() {
+  const st = SOC.st; if (!st || !$("conn-body")) return;
+  const x = st.x, tg = st.telegram, cb = `${location.protocol}//${location.host}/x/callback`;
+  setHTML($("conn-body"), `<div class="conn-grid">
+    <div class="conn ${x.connected ? "on" : ""}"><div class="conn-h"><span class="conn-ic">𝕏</span><b>X</b>${x.connected ? `<span class="tag ok">connected${x.user ? " as @" + esc(x.user) : ""} · ${x.method === "oauth2" ? "signed in" : "keys"}</span>` : `<span class="tag">not connected</span>`}</div>
+      <p class="note">Pay-per-use API: ~$${(+x.post_usd).toFixed(3)} a post, $${(+x.link_post_usd).toFixed(2)} with a link. ${x.connected ? `Today: ${x.posts_today} posts, ~$${(x.spent_today_usd || 0).toFixed(3)} (max ${x.max_per_day}/day).` : ""}</p>
+      ${x.connected ? `<div class="form-row"><button class="small primary" data-compose="1">✎ New post</button>${x.method === "oauth2" ? `<button class="small" data-xdisc="1">Disconnect</button>` : ""}</div>`
+        : `<ol class="conn-steps"><li>Create an app at <a href="https://console.x.com" target="_blank" rel="noopener noreferrer">console.x.com</a> and add a little API credit.</li>
+             <li><b>Simplest:</b> set the app's permissions to <i>Read and write</i>, then under <i>Keys and tokens</i> copy the API key + secret and generate an access token + secret. Paste the four into <a href="#keys-panel" data-goconn="keys">API keys</a> below (X API key…).</li>
+             <li><b>Or sign in with X:</b> add <code>${esc(cb)}</code> as a callback URL, paste the OAuth client ID below, then ${x.can_connect ? `<a class="btn small primary" href="/x/connect">Connect X</a>` : "come back here for a Connect X button"}.</li></ol>`}</div>
+    <div class="conn ${tg.configured ? "on" : ""}"><div class="conn-h"><span class="conn-ic">✈</span><b>Telegram</b>${tg.configured ? `<span class="tag ok">posting to ${esc(tg.chat)}</span>` : `<span class="tag">not set up</span>`}</div>
+      <p class="note">Free. Calls, proofs and trade cards go to your channel or group.</p>
+      ${tg.configured ? `<div class="form-row"><button class="small primary" data-compose="1">✎ New post</button></div>`
+        : `<ol class="conn-steps"><li>Message <b>@BotFather</b> → /newbot, and copy the token into <i>Telegram bot token</i> below.</li><li>Add the bot to your channel as an admin (or to your group).</li><li>Put the channel's @name (or the chat id) into <i>Telegram channel or group</i> below.</li></ol>`}</div></div>
+    ${st.recent.length ? `<h3 style="margin:12px 0 6px">Recent posts</h3><div class="posts-log">${st.recent.map(r => `<div><span class="tag ${r.ok ? "ok" : "bad"}">${r.to === "x" ? "𝕏" : "✈"}</span><span>${esc((r.text || "").slice(0, 90))}</span><span class="note">${ago(r.ts)} ago${r.cost_usd ? ` · ~$${r.cost_usd.toFixed(3)}` : ""}</span>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open ↗</a>` : r.error ? `<span class="note down">${esc(r.error)}</span>` : ""}</div>`).join("")}</div>` : ""}`);
+}
+// ---------------------------------------------------------------- desktop notifications (opt-in)
+function notify(title, body) {
+  if (store.get("notify") !== "1" || !document.hidden || !("Notification" in window) || Notification.permission !== "granted") return;
+  try { new Notification(title, {body, tag: "mt-" + title}); } catch { /* not allowed here */ }
+}
+async function toggleNotify() {
+  if (store.get("notify") === "1") { store.set("notify", "0"); toast("Desktop notifications off", "ok"); return; }
+  if (!("Notification" in window)) { toast("This browser can't show notifications", "bad"); return; }
+  const p = await Notification.requestPermission();
+  if (p === "granted") { store.set("notify", "1"); toast("Desktop notifications on: fills, alerts and closes while this tab is in the background", "ok"); }
+  else toast("Notifications are blocked for this page in the browser's settings", "bad");
+}
+
+// ---------------------------------------------------------------- the guide: searchable sections, glossary, tour, "?" help
+const K = k => `<kbd>${k}</kbd>`;
+const GUIDE = [
+  {id: "start", icon: "🚀", title: "Start here", html: `
+    <p>This is a pump.fun trading bot with a cockpit. It watches every new coin on the bonding curve, trades by its own rules, and lets you trade by hand next to it. <b>Paper mode is the default</b>: real market data, pretend money. Live mode needs a deliberate switch.</p>
+    <ol class="steps"><li><b>Watch it work.</b> ${K("1")} Live shows money and positions. ${K("3")} Desk shows the bots in their trading room.</li>
+      <li><b>Trade by hand.</b> Paste a contract address in <i>Manual trade</i>: its metrics appear, then Buy, 🦍 APE, set a limit order or an alert.</li>
+      <li><b>Spot coins.</b> ${K("2")} Pulse lists new launches, the final stretch to graduation and fresh graduates, with filters and one-click buys.</li>
+      <li><b>Build a record.</b> ${K("4")} Calls: every 📣 call is timestamped and hash-chained, then scored honestly. Publish the proof to X or Telegram.</li>
+      <li><b>Make it yours.</b> ✎ Arrange any page, 👕 dress the bots, ${K("Ctrl")}+${K("K")} for everything else.</li></ol>
+    <p><button class="primary" data-tour="1">▶ Take the 1-minute tour</button></p>`},
+  {id: "live", icon: "◉", title: "Live: money and positions", html: `
+    <ul><li><b>Top cards:</b> equity, realized P&amp;L, today (resets 00:00 UTC, with the daily loss limit meter), win rate, drawdown (with the kill-switch meter), profit factor, the AI desk and the funnel.</li>
+      <li><b>Strategy chips</b> turn whole strategies on and off. The <b>risk dial</b> scales size, positions and the loss limit together.</li>
+      <li><b>Every coin is clickable:</b> click for its detail panel (gate checklist, P(2x), holders, live tape); right-click for quick actions.</li>
+      <li><b>The paper account carries over restarts:</b> cash, open positions, today's P&amp;L and the loss limit. Controls → Paper balance → <i>Start over</i> resets it.</li></ul>`},
+  {id: "trade", icon: "🦍", title: "Trading by hand", html: `
+    <ul><li><b>Buy / 🦍 APE:</b> pick a preset or type an amount. APE buys the preset ape size in one click. Your trades skip the bot's "paused" and seat limits, but never the kill switch, the daily loss limit or a broken feed.</li>
+      <li><b>Selling:</b> 25%, 50%, <b>Initials</b> (sell just enough to get your cost back; the rest rides free) and <b>Exit</b>, on any position.</li>
+      <li><b>Your exit rules:</b> each of your positions exits only on the stop, take profit or trail you set on its card, plus a sale at graduation (the bot trades the curve only).</li>
+      <li><b>Limit orders and alerts</b> (under the metrics): buy when the market cap dips to a level or breaks out above one, sell part of a position at a target, or just get a 🔔. The quick buttons fill sensible levels from the current market cap. Orders fire on the live curve price, survive restarts, and expire (24 h by default).</li>
+      <li><b>📣 Call</b> puts the coin on your record at today's market cap (see <a href="#" data-help="calls">Calls</a>).</li>
+      <li>In live mode every manual trade and every limit order asks you to confirm first.</li></ul>`},
+  {id: "pulse", icon: "⚡", title: "Pulse: spotting coins", html: `
+    <ul><li><b>🌱 New:</b> coins under 50% of the bonding curve, newest first. <b>🔥 Final stretch:</b> 50–100%, closest to graduating first. <b>🎓 Graduated:</b> coins that just moved to PumpSwap (view-only here: the bot trades the curve).</li>
+      <li><b>Each row:</b> market cap, a curve bar, unique buyers, buys/sells, net SOL inflow in the last 30 s, top-10 holders, the dev's launch buy, social links, a sparkline, and red flags (dev sold, bundled supply, concentrated holders, Mayhem mode).</li>
+      <li><b>⚡ Quick buy</b> buys the amount picked at the top. <b>⚙ Filters</b> per column: age, market cap, buyers, inflow, top-10, dev, bundle, socials, sort. Filters are saved.</li>
+      <li><b>Lists freeze while your mouse is on them,</b> so a row never jumps away as you click it.</li></ul>`},
+  {id: "desk", icon: "◆", title: "The trading room", html: `
+    <ul><li>Each bot is a real part of the system: the <b>scanner</b> checks coins near graduation, <b>exits</b> manages open positions, <b>risk</b> watches limits, <b>feed</b> watches the data, <b>Claude</b> is your chat operator, the <b>recorder</b> runs the wallet study, and four <b>AI personas</b> vote on trades.</li>
+      <li><b>What they say comes from the bot's data:</b> votes, fills, lag, P&amp;L. Hand-offs are real: the scanner carries a reviewed coin to the AI table, then a bought coin to the exit manager.</li>
+      <li><b>Click a bot</b> (or the P&amp;L board, or the corkboard) to zoom into its screen. ${K("Esc")} goes back.</li>
+      <li>The room follows your clock: dusk after 17:30, night after 19:30. <b>👕 Wardrobe</b> renames, recolours and re-hats any bot.</li></ul>`},
+  {id: "aidesk", icon: "🧠", title: "The AI desk", html: `
+    <ul><li>Four Claude personas (veteran, narrative, skeptic, quant) review each entry the rules pick, in parallel, in a few seconds. Billed to your Anthropic key; asleep until you wake it on the Desk tab (it stays awake after a restart).</li>
+      <li><b>How the vote works:</b> each buy vote counts its conviction (0–100) times the persona's weight; pass votes count zero. The total, divided by the desk's full weight, must reach the quorum (45% by default). So three buys at ~58 conviction (≈44%) still pass on the coin. The skeptic can veto with a pass at 75+.</li>
+      <li>Analytics → Gate audit follows every coin the desk passes ("AI desk passed: 3 of 4 said buy", …) so you can judge the quorum on data before changing <code>desk.quorum</code>.</li>
+      <li>The personas also <b>read every note you save</b> and reply (see the next section).</li></ul>`},
+  {id: "memory", icon: "📌", title: "Teach the desk", html: `
+    <ul><li>Paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory (pinned on the corkboard).</li>
+      <li><b>Every persona reads it and replies</b> in the thread under the note, with a stance (bullish, bearish, neutral). In the room, each one walks to the corkboard and says it.</li>
+      <li><b>Reply back</b> to keep the discussion going; start with <code>@skeptic</code> (or any persona) to ask just one.</li>
+      <li>Claude in Chat reads all of it with <code>get_memory</code>, and the AI desk sees your notes on any coin it votes on. Text from the web is treated as data, never as instructions.</li></ul>`},
+  {id: "calls", icon: "📣", title: "Calls and proving an edge", html: `
+    <p>Groups take a record seriously when it can't be edited after the fact. The call ledger is built for that.</p>
+    <ul><li><b>Every call is chained:</b> each record carries the SHA-256 of the one before it, so changing, deleting or reordering any call breaks every hash after it. The bot's own entries are recorded too (caller "bot").</li>
+      <li><b>Publish the head:</b> <i>Publish proof</i> posts the newest hash to X and/or Telegram (and records that it did). Anyone with your exported ledger can check it: <code>python -m meme_trader.sniper calls verify --file calls.jsonl</code>.</li>
+      <li><b>Scored from market data, honestly:</b> the market cap 5 min, 1 h, 6 h and 24 h after each call, after ~5% costs, comes first. The peak multiple (what groups usually quote) is shown too, labelled as sampled: nobody sells the exact top.</li>
+      <li><b>An edge needs a sample.</b> 20 calls prove nothing; look at the 1-hour median and win rate over 100+. For the bot itself, the frozen graduation-v1 test gives a verdict on data it was never tuned on.</li></ul>`},
+  {id: "social", icon: "𝕏", title: "Posting to X and Telegram", html: `
+    <ul><li><b>Every post is your click</b> (or your command). The AI drafts at most. Cards from paper trades say PAPER.</li>
+      <li><b>X:</b> pay-per-use API, about $0.015 a post and $0.20 if the post contains a link (a bare <code>pump.fun/…</code> counts). The composer shows the price before you post, and there's a 25-posts-a-day cap.
+        <ol><li>Create an app at console.x.com and add some credit.</li><li>Simplest: set it to <i>Read and write</i>, generate the access token, and paste the four keys in Controls → API keys.</li>
+          <li>Or add the callback URL shown in Controls → Connections, paste the OAuth client ID, and press <b>Connect X</b>.</li></ol></li>
+      <li><b>Telegram:</b> free. Make a bot with @BotFather, add it to your channel as an admin, paste the token and the channel name.</li>
+      <li><b>From a terminal:</b> <code>python -m meme_trader.social post "gm" --to x,telegram --card record</code>, and <code>… proof --to x</code> to publish the ledger head.</li></ul>`},
+  {id: "risk", icon: "🛡", title: "Risk and safety", html: `
+    <ul><li><b>Risk dial:</b> Cautious, Normal (your settings), Bold, Aggressive, Max. It scales trade size, open positions and the daily loss limit together. Claude can lower it; it raises it only with your Approve.</li>
+      <li><b>Always on:</b> the per-trade dollar cap, the daily loss limit, the drawdown kill switch, and defense mode (half size after a losing run). KILL sells everything and has no keyboard shortcut on purpose.</li>
+      <li><b>Live money:</b> use a dedicated wallet holding only the bot's budget. Live needs <code>MEME_TRADER_CONFIRM_LIVE=yes</code>. Most pump.fun coins go to zero; nothing here is financial advice.</li>
+      <li>The dashboard only answers on 127.0.0.1: reach it from another machine through an SSH tunnel.</li></ul>`},
+  {id: "arrange", icon: "✎", title: "Make it yours", html: `
+    <ul><li><b>✎ Arrange</b> (${K("a")}): every page becomes a 12-column board. Drag panels by their bar, drag a panel's right edge to resize it, pick a width (⅓ ½ ⅔ Full) and a height, hide what you don't use and bring it back from the bar at the bottom. Saved on the bot, so it follows you to any browser.</li>
+      <li><b>▾</b> on any panel's title collapses it, any time.</li>
+      <li><b>Command palette</b> (${K("Ctrl")}+${K("K")}): jump to any tab, coin, setting or guide section; paste a contract address to trade, call, alert or save it.</li>
+      <li><b>Right-click any coin</b> for Trade, Quick buy, Call, Alert, Save to memory, Post, Copy and links.</li>
+      <li><b>Desktop notifications</b> (from the palette): fills, alerts and closes while the tab is in the background.</li></ul>`},
+  {id: "research", icon: "🔬", title: "Research: is it actually working?", html: `
+    <ul><li><b>Analytics</b> explains results in plain English: by strategy, exit, hour and score, a projection of the next 100 trades, and the <b>gate audit</b> (had we bought what a rule rejected, would it have doubled first?).</li>
+      <li><b>Frozen tests:</b> a strategy version is locked before its test period, then judged only on data it never saw. Changing it means a new version, never tuning on the test.</li>
+      <li>Paper fills land 2.5 s late at the price then, with failed orders modelled, so paper results are closer to what live would get.</li></ul>`},
+  {id: "keys", icon: "⌨", title: "Keyboard", html: `<div class="tablewrap"><table><tbody>
+    <tr><td>${K("1")} … ${K("9")}</td><td>Live · Pulse · Desk · Calls · Chat · Portfolio · Analytics · Controls · Guide</td></tr>
+    <tr><td>${K("Ctrl")}+${K("K")}</td><td>Command palette</td></tr><tr><td>${K("c")}</td><td>Chat with Claude</td></tr>
+    <tr><td>${K("/")}</td><td>Filter the launch radar</td></tr><tr><td>${K("p")}</td><td>Pause / resume new entries</td></tr>
+    <tr><td>${K("a")}</td><td>Arrange this page</td></tr><tr><td>${K("n")}</td><td>New post</td></tr><tr><td>${K("Esc")}</td><td>Close whatever is open</td></tr>
+    <tr><td>${K("m")}</td><td>Mute pop-ups</td></tr><tr><td>${K("t")}</td><td>Theme</td></tr><tr><td>${K("?")}</td><td>This guide</td></tr></tbody></table></div>`},
+  {id: "glossary", icon: "📖", title: "Glossary", html: `<dl class="gloss">${[
+    ["Bonding curve", "pump.fun's built-in market: price rises as SOL comes in. At about 85 SOL the coin graduates to PumpSwap."],
+    ["Graduation", "the moment a coin fills its curve and moves to a real pool. Graduation plays buy late on the curve and sell before it."],
+    ["Market cap (MC)", "price × total supply, in dollars here."], ["Initials", "selling just enough to recover what you paid; the rest rides free."],
+    ["Ape", "a fast, fixed-size buy."], ["Dev / creator", "the wallet that launched the coin. 'Dev sold' is usually a red flag."],
+    ["Bundle", "supply bought in the launch block, often the dev's own wallets."], ["Snipers", "bots that buy in the first seconds."],
+    ["Top 10", "share of supply held by the ten biggest wallets (excluding the curve)."], ["Inflow", "SOL bought minus SOL sold over a window."],
+    ["Mayhem mode", "a pump.fun mode with 2B supply where the protocol's own agent trades."], ["P(2x)", "the model's calibrated chance a coin doubles before falling 30% within 10 minutes."],
+    ["Quorum", "the share of weighted buy conviction the AI desk needs to approve a trade."], ["Hash chain", "each ledger record includes the hash of the one before, so no record can change unnoticed."],
+    ["Holdout", "data a strategy was never tuned on, used only to judge it."], ["Paper", "real market data, pretend money."]]
+    .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join("")}</dl>`},
+  {id: "faq", icon: "❓", title: "When something looks wrong", html: `
+    <details><summary>The bot isn't buying anything</summary><p>Check the header: "entries paused", "halted", or a degraded feed stop entries. Then Desk → Graduation scanner shows what each coin is still waiting for. If the AI desk is awake, its passes show under AI desk votes.</p></details>
+    <details><summary>The feed badge is amber or red</summary><p>The trade data is behind or missing trades; entries pause until it recovers, and the watchdog moves to a better endpoint. A paid websocket endpoint (Controls → API keys) is the lasting fix.</p></details>
+    <details><summary>The AI desk says the key is invalid</summary><p>Press Test next to the key. A user key (sk-ant-usr-…) also needs the workspace ID. After three failed reviews the desk rests itself so trading isn't blocked.</p></details>
+    <details><summary>X says 403 or "can't post"</summary><p>Set the app's permissions to Read and write, then <i>regenerate</i> the access token (old tokens keep the old permissions). 402 means the API credit ran out.</p></details>
+    <details><summary>Today's P&amp;L looks wrong after a restart</summary><p>Since this version the paper account carries over restarts. Before it, each restart started a fresh 5 SOL account.</p></details>`},
+];
+const HELP_FOR = {live: "live", pulse: "pulse", desk: "desk", calls: "calls", chat: "live", portfolio: "live", analytics: "research", controls: "risk", guide: "start"};
+const HELP_PID = {"live:trade-panel": "trade", "live:orders": "trade", "desk:teach-the-desk": "memory", "desk:ai-desk-votes": "aidesk", "controls:conn-panel": "social",
+  "controls:keys-panel": "social", "controls:paper-panel": "risk", "analytics:gate-audit": "research"};
+function renderGuide() {
+  const q = ($("gd-q").value || "").toLowerCase().trim();
+  const hits = GUIDE.filter(g => !q || (g.title + " " + g.html.replace(/<[^>]+>/g, " ")).toLowerCase().includes(q));
+  setHTML($("gd-nav"), GUIDE.map(g => `<a href="#gd-${g.id}" class="${hits.includes(g) ? "" : "dim"}" data-gdjump="${g.id}">${g.icon} ${esc(g.title)}</a>`).join(""));
+  setHTML($("gd-body"), hits.map(g => `<section class="panel gd-sec" id="gd-${g.id}"><h3>${g.icon} ${esc(g.title)}</h3>${g.html}</section>`).join("")
+    || `<div class="empty">Nothing matches “${esc(q)}”. Try the glossary words, or ask Claude in Chat.</div>`);
+}
+function openHelp(id) {
+  const g = GUIDE.find(x => x.id === id) || GUIDE[0];
+  $("help-title").textContent = `${g.icon} ${g.title}`; $("help-body").innerHTML = g.html; $("help").hidden = false;
+}
+// ---------------------------------------------------------------- the interactive tour
+const TOUR = [
+  {tab: "live", sel: ".tabs", title: "Nine views", text: "Switch with the tabs or the number keys 1–9. Everything updates live."},
+  {tab: "live", sel: "#trade-panel", title: "Trade by hand", text: "Paste a contract address: its metrics appear, then Buy, 🦍 APE or 📣 Call. Sell, take initials or exit from each position card."},
+  {tab: "live", sel: "#tr-ordform", title: "Limit orders and alerts", text: "Buy the dip, sell into strength, or just get pinged when a coin reaches a market cap. They fire on the live price and survive restarts."},
+  {tab: "live", sel: "#dial", title: "The risk dial", text: "One control scales size, open positions and the daily loss limit. The kill switch and stops never move."},
+  {tab: "pulse", sel: ".pulse-cols", title: "Pulse", text: "New launches, the final stretch to graduation, and fresh graduates. Filter each column, ⚡ quick-buy, and lists freeze under your mouse."},
+  {tab: "desk", sel: "#office", title: "The trading room", text: "Each bot is a real part of the system. Click one to zoom into its screen. Hand-offs between them are real events."},
+  {tab: "desk", sel: ".teach", title: "Teach the desk", text: "Save a post, article, contract address or note. All four personas read it and reply; answer them, or @mention one."},
+  {tab: "calls", sel: "#cl-hero", title: "Your track record", text: "Every call is timestamped and hash-chained, then scored from market data. Publish the proof so the record can't be rewritten."},
+  {tab: "controls", sel: "#conn-panel", title: "Connect X and Telegram", text: "Post calls, trade cards and proofs. Every post is your click; the composer shows what X will charge."},
+  {tab: "live", sel: "#arrange", title: "Make it yours", text: "Arrange any page: drag, resize, collapse, hide. Ctrl+K opens the command palette; right-click any coin for quick actions."},
+];
+const TU = {i: -1};
+function tourStart() { TU.i = 0; store.set("toured", "1"); tourShow(); }
+function tourEnd() { TU.i = -1; $("tour").hidden = true; }
+function tourShow() {
+  const st = TOUR[TU.i]; if (!st) { tourEnd(); toast("That's the tour. The Guide (?) has the details, and Ctrl+K finds anything.", "ok"); return; }
+  if (S.tab !== st.tab) setTab(st.tab);
+  setTimeout(() => {
+    const el = document.querySelector(st.sel);
+    $("tour").hidden = false;
+    $("tour-n").textContent = `${TU.i + 1} / ${TOUR.length}`; $("tour-t").textContent = st.title; $("tour-x").textContent = st.text;
+    $("tour-back").disabled = TU.i === 0; $("tour-next").textContent = TU.i === TOUR.length - 1 ? "Done" : "Next →";
+    const spot = $("tour-spot"), pop = $("tour-pop");
+    if (!el || !el.getClientRects().length) { spot.style.cssText = "left:50%;top:40%;width:0;height:0"; pop.style.cssText = "left:50%;top:45%;transform:translateX(-50%)"; return; }
+    el.scrollIntoView({block: "center", behavior: "instant"});
+    const r = el.getBoundingClientRect(), pad = 6;
+    spot.style.cssText = `left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${Math.min(r.height, innerHeight - 40) + pad * 2}px`;
+    const below = r.bottom + 200 < innerHeight, x = Math.max(12, Math.min(innerWidth - 352, r.left));
+    pop.style.cssText = below ? `left:${x}px;top:${Math.min(r.bottom, innerHeight - 220) + 14}px` : `left:${x}px;top:${Math.max(12, r.top - 200)}px`;
+  }, 280);
+}
+
+// ---------------------------------------------------------------- command palette (Ctrl+K) and the coin menu (right-click)
+const CK = {items: [], i: 0};
+const TABS = [["live", "◉ Live"], ["pulse", "⚡ Pulse"], ["desk", "◆ Desk"], ["calls", "📣 Calls"], ["chat", "✦ Chat"], ["portfolio", "◈ Portfolio"],
+              ["analytics", "▤ Analytics"], ["controls", "⚙ Controls"], ["guide", "? Guide"]];
+function ckActions() {
+  const s = snap || {};
+  const a = TABS.map(([t, l]) => ({label: `Go to ${l}`, hint: "tab", run: () => setTab(t)}));
+  a.push({label: s.paused ? "▶ Resume entries" : "⏸ Pause entries", hint: "p", run: () => $("pause").click()},
+    ...((s.risk && s.risk.levels) || []).map(l => ({label: `Risk dial: ${l.name}`, hint: `level ${l.level}`, run: () => setRisk(l.level)})),
+    {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
+    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { setTab("calls"); setTimeout(() => $("clf-ca").focus(), 50); }},
+    {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
+    {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
+    {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
+    {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: "🧠 Wake / rest the AI desk", run: () => { setTab("desk"); }});
+  for (const g of GUIDE) a.push({label: `${g.icon} Guide: ${g.title}`, hint: "help", run: () => openHelp(g.id)});
+  for (const x of (S.adv || []).slice(0, 400)) a.push({label: `⚙ ${x.label || x.key}`, hint: x.key, run: () => { setTab("controls"); setTimeout(() => { $("adv-q").value = x.key; renderAdvanced(); $("adv-panel").scrollIntoView({block: "start"}); }, 120); }});
+  const coins = new Map();
+  for (const p of s.positions || []) coins.set(p.mint, {sym: p.symbol, note: `holding · ${pct(p.gain_pct, 0)}`});
+  for (const w of s.watching || []) if (!coins.has(w.mint)) coins.set(w.mint, {sym: w.symbol, note: `curve ${(w.progress * 100).toFixed(0)}% · ${w.status}`});
+  for (const col of ["stretch", "new", "graduated"]) for (const r of (PL.data && PL.data[col]) || []) if (!coins.has(r.mint)) coins.set(r.mint, {sym: r.symbol, note: `${col === "stretch" ? "final stretch" : col} · $${fmtUsd(r.mcap_usd)}`});
+  for (const [m, c] of coins) a.push({label: `${c.sym}`, coin: m, hint: c.note, run: () => openDrawer(m)});
+  return a;
+}
+function ckScore(label, q) {
+  const s = label.toLowerCase(); if (!q) return 1;
+  if (s.startsWith(q)) return 100; const i = s.indexOf(q); if (i >= 0) return 80 - i;
+  let j = 0, score = 0; for (const ch of s) { if (ch === q[j]) { j++; score += 2; } if (j === q.length) return score; }
+  return 0;
+}
+function openPalette(prefill = "") { $("cmdk").hidden = false; $("ck-in").value = prefill; CK.i = 0; renderPalette(); setTimeout(() => $("ck-in").focus(), 20); }
+function closePalette() { $("cmdk").hidden = true; }
+function renderPalette() {
+  const raw = $("ck-in").value.trim(), q = raw.toLowerCase();
+  let items;
+  if (isMint(raw)) {
+    const m = raw;
+    items = [{label: "Trade it (Manual trade)", run: () => { setTab("live"); setTradeMint(m); }}, {label: "Open its details", run: () => openDrawer(m)},
+      {label: "📣 Call it", run: () => { setTab("calls"); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 60); }},
+      {label: "🔔 Set an alert", run: () => { setTab("live"); setTradeMint(m); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }},
+      {label: "📌 Save to the desk's memory", run: () => send({action: "mem_add", text: m})}, {label: "✎ Post about it", run: () => openComposer(`CA: ${m}`)}];
+  } else {
+    items = ckActions().map(x => ({...x, s: ckScore(x.label + " " + (x.hint || ""), q)})).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 40);
+  }
+  CK.items = items; CK.i = Math.min(CK.i, Math.max(0, items.length - 1));
+  setHTML($("ck-list"), items.map((x, i) => `<button class="ck-item ${i === CK.i ? "on" : ""}" data-cki="${i}">${x.coin ? logo(x.coin, x.label) : ""}<span class="ck-l">${esc(x.label)}</span>${x.hint ? `<span class="note">${esc(x.hint)}</span>` : ""}</button>`).join("")
+    || `<div class="empty">No match. Paste a contract address to act on it.</div>`);
+  $("ck-list").querySelector(".on")?.scrollIntoView({block: "nearest"});
+}
+function runPalette(i) { const x = CK.items[i]; if (!x) return; closePalette(); x.run(); }
+// ---------------------------------------------------------------- right-click any coin
+function coinMenu(mint, x, y) {
+  const qb = PL.qb ?? 0.1, sym = tokenName(mint).replace(/<[^>]+>/g, "");
+  const items = [["Trade…", "trade"], [`⚡ Quick buy ${qb} SOL`, "qb"], ["📣 Call it", "call"], ["🔔 Alert…", "alert"], ["📌 Save to memory", "mem"],
+    ["✎ Post about it", "post"], ["⧉ Copy address", "copy"], ["pump.fun ↗", "pf"], ["DexScreener ↗", "dex"]];
+  setHTML($("ctx"), `<div class="ctx-h">${logo(mint, sym)}<b>${esc(sym)}</b></div>` + items.map(([l, k]) => `<button data-ctxdo="${k}" data-m="${esc(mint)}">${l}</button>`).join(""));
+  const m = $("ctx"); m.hidden = false;
+  m.style.left = Math.min(x, innerWidth - 220) + "px"; m.style.top = Math.min(y, innerHeight - 330) + "px";
+}
+function coinAction(k, mint) {
+  $("ctx").hidden = true;
+  if (k === "trade") { closeDrawer(); setTab("live"); setTradeMint(mint); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); }
+  else if (k === "qb") trBuy(mint, PL.qb ?? 0.1);
+  else if (k === "call") { setTab("calls"); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 60); }
+  else if (k === "alert") { setTab("live"); setTradeMint(mint); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }
+  else if (k === "mem") send({action: "mem_add", text: mint});
+  else if (k === "post") openComposer(`$${tokenName(mint).replace(/<[^>]+>/g, "")}\nCA: ${mint}`);
+  else if (k === "copy") navigator.clipboard.writeText(mint).then(() => toast("Address copied", "ok"));
+  else if (k === "pf") window.open(`https://pump.fun/coin/${encodeURIComponent(mint)}`, "_blank", "noopener");
+  else if (k === "dex") window.open(`https://dexscreener.com/solana/${encodeURIComponent(mint)}`, "_blank", "noopener");
+}
+document.addEventListener("contextmenu", e => {
+  const t = e.target.closest && e.target.closest("[data-open], [data-ctx]"); if (!t) return;
+  const mint = t.dataset.ctx || t.dataset.open; if (!isMint(mint)) return;
+  e.preventDefault(); coinMenu(mint, e.clientX, e.clientY);
+});
+document.addEventListener("pointerdown", e => { if (!$("ctx").hidden && !e.target.closest("#ctx")) $("ctx").hidden = true; });
+
 function setTab(t) {
-  if (!["live", "desk", "chat", "portfolio", "analytics", "controls", "guide"].includes(t)) t = "live";
+  if (!TABS.some(([x]) => x === t)) t = "live";
+  if (AR.on) setArrange(false);
   S.tab = t; store.set("tab", t); document.body.classList.toggle("on-chat", t === "chat");
   $$("[data-view]").forEach(v => v.hidden = v.dataset.view !== t);
   $$(".tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
@@ -3184,6 +3919,10 @@ function setTab(t) {
   if (t === "controls") { loadAdvanced(); loadKeys(); }
   if (t === "desk") { loadDesk(); loadX(); loadMemory(); kickIso(); }
   if (t === "portfolio") { loadPortfolio(); if (snap) renderPortfolio(); }
+  if (t === "pulse") loadPulse();
+  if (t === "calls") { if (!$("clf").innerHTML) $("clf").innerHTML = callForm("clf"); loadCalls(); }
+  if (t === "controls") loadSocial();
+  if (t === "guide") renderGuide();
 }
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
@@ -3207,7 +3946,10 @@ function connect() {
       if (m.keys) { S.keys = m.keys; renderKeys(); }
       if (m.portfolio) { PF.data = m.portfolio; renderPortfolio(); }
       if (m.xfeed) { DK.x = m.xfeed; renderX(); }
-      if (m.memory) { MEM.items = m.memory.items; renderMemory(); }
+      if (m.memory) { MEM.items = m.memory.items; MEM.waiting = m.memory.waiting || {}; MEM.replies = m.memory.replies || MEM.replies; renderMemory(); setTimeout(loadMemory, 900); }
+      if (m.social) { SOC.st = m.social; renderConnections(); if (!$("composer").hidden) renderComposer(); }
+      if (m.action === "post" && m.ok) $("composer").hidden = true;
+      if (["call", "anchor"].includes(m.action)) { setTimeout(loadCalls, 400); if (m.ok && m.call) IO.events.push({kind: "call", sym: m.call.symbol, mc: m.call.mcap_usd}); }
       if (m.action === "lookup" && m.lookup && m.mint === TR.mint) { TR.info = m.lookup; if (snap) renderTradePanel(snap); }
       return;
     }
@@ -3233,7 +3975,32 @@ $("paper-reset").onclick = () => { $("paper-reset-confirm").hidden = false; };
 $("paper-reset-no").onclick = () => { $("paper-reset-confirm").hidden = true; };
 $("paper-reset-yes").onclick = () => { $("paper-reset-confirm").hidden = true; send({action: "paper_reset"}); };
 $("ar-done").onclick = () => setArrange(false);
-$("ar-reset").onclick = () => { AR.layout = {}; send({action: "ui_set", key: "layout", value: {}}); location.reload(); };
+$("ar-reset").onclick = () => resetLayout(false);
+$("ar-reset-all").onclick = () => { if (confirm("Put every page back the way it was?")) resetLayout(true); };
+$("palette").onclick = () => openPalette();
+$("ck-in").oninput = () => { CK.i = 0; renderPalette(); };
+$("cmdk").onclick = e => { if (e.target === $("cmdk")) closePalette(); };
+$("cp-cancel").onclick = () => { $("composer").hidden = true; };
+$("cp-post").onclick = postNow;
+$("cp-text").oninput = renderComposer;
+["cp-x", "cp-tg"].forEach(id => $(id).onchange = renderComposer);
+$("cp-cardon").onchange = e => { SOC.cardOn = e.target.checked; };
+$("composer").onclick = e => { if (e.target === $("composer")) $("composer").hidden = true; };
+$("tour-next").onclick = () => { TU.i++; tourShow(); };
+$("tour-back").onclick = () => { TU.i = Math.max(0, TU.i - 1); tourShow(); };
+$("tour-skip").onclick = tourEnd;
+$("help-x").onclick = () => { $("help").hidden = true; };
+$("gd-q").oninput = renderGuide;
+function ordSide() { const sd = $("tr-ord-side").value; $("tr-ord-fracw").hidden = sd !== "sell"; if (sd === "sell" && $("tr-ord-op").value === "le") $("tr-ord-op").value = "ge"; }
+$("tr-ord-side").onchange = ordSide;
+$("tr-ord-go").onclick = () => placeOrder($("tr-ord-side").value, $("tr-ord-op").value, parseFloat($("tr-ord-mc").value));
+$("tr-call").onclick = () => { const r = $("tr-callrow"); if (!isMint(TR.mint)) { toast("Paste a contract address first", "bad"); return; }
+  r.hidden = !r.hidden; if (!r.hidden) { r.innerHTML = callForm("trc", TR.mint); setTimeout(() => $("trc-th").focus(), 30); } };
+addEventListener("hashchange", routeHash);
+function routeHash() {
+  if (location.hash === "#x-connected") { setTab("controls"); toast("𝕏 connected: you can post from the composer (n)", "ok"); history.replaceState(null, "", location.pathname); }
+  else if (location.hash === "#x-denied") { setTab("controls"); toast("X sign-in was cancelled", "bad"); history.replaceState(null, "", location.pathname); }
+}
 $("wd-save").onclick = saveWardrobe;
 $("wd-cancel").onclick = () => { $("wardrobe").hidden = true; };
 $("mem-add").onclick = memAdd;
@@ -3265,7 +4032,7 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wsw],[data-arhide],[data-mbuy],[data-mape],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wsw],[data-arhide],[data-mbuy],[data-mape],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-compose],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -3273,7 +4040,32 @@ document.addEventListener("click", e => {
   if (d.zoomout) { zoomOut(); return; }
   if (d.wardrobe) { openWardrobe(); return; }
   if (d.wsw) { t.closest(".wd-sw").querySelectorAll(".sw").forEach(x => x.classList.toggle("on", x === t)); return; }
-  if (d.arhide) { const p = document.querySelector(`[data-pid="${d.arhide}"]`); p.classList.toggle("ar-hidden"); t.textContent = p.classList.contains("ar-hidden") ? "Show" : "Hide"; captureLayout(); return; }
+  if (arClick(d, t)) { e.stopPropagation(); return; }
+  if (d.help) { e.preventDefault(); e.stopPropagation(); openHelp(d.help); return; }
+  if (d.gdjump) { e.preventDefault(); $("gd-" + d.gdjump)?.scrollIntoView({behavior: "smooth", block: "start"}); return; }
+  if (d.gdopen) { $("help").hidden = true; setTab("guide"); return; }
+  if (d.tour) { $("help").hidden = true; tourStart(); return; }
+  if (d.cki) { runPalette(+d.cki); return; }
+  if (d.ctxdo) { coinAction(d.ctxdo, d.m); return; }
+  if (d.plfilt) { const f = $("pl-" + d.plfilt + "-f"); PL.open[d.plfilt] = !PL.open[d.plfilt]; f.innerHTML = PL.open[d.plfilt] ? plFilterForm(d.plfilt) : ""; return; }
+  if (d.plqb) { PL.qb = +d.plqb; plSave(); renderPulseBoard(); return; }
+  if (d.plreset) { PL.filters[d.plreset] = {}; plSave(); $("pl-" + d.plreset + "-f").innerHTML = plFilterForm(d.plreset); renderPulseBoard(); return; }
+  if (d.clcaller !== undefined) { CL.caller = d.clcaller; loadCalls(); return; }
+  if (d.callgo) { const v = k => $(`${d.callgo}-${k}`); makeCall(v("ca").value.trim(), v("th").value.trim(), [v("x").checked && "x", v("tg").checked && "telegram"].filter(Boolean));
+    if (d.callgo === "trc") $("tr-callrow").hidden = true; else { v("ca").value = ""; v("th").value = ""; } return; }
+  if (d.anchor) { const to = [$("cla-x").checked && "x", $("cla-tg").checked && "telegram"].filter(Boolean);
+    if (!to.length) { toast("Pick X, Telegram or both", "bad"); return; }
+    if (to.includes("x") && !confirm("Post the ledger's newest hash on X? X bills the post (~$0.015).")) return;
+    send({action: "anchor", to}); return; }
+  if (d.share !== undefined) { e.stopPropagation(); share(d.share); return; }
+  if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
+  if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
+  if (d.compose) { openComposer(); return; }
+  if (d.xdisc) { if (confirm("Disconnect X? You can sign in again any time.")) send({action: "x_disconnect"}); return; }
+  if (d.goconn) { e.preventDefault(); $("composer").hidden = true; setTab("controls"); setTimeout(() => $(d.goconn === "keys" ? "keys-panel" : "conn-panel").scrollIntoView({behavior: "smooth", block: "start"}), 150); return; }
+  if (d.memopen) { MEM.open.add(d.memopen); renderMemory(); setTimeout(() => document.querySelector(`[data-memreply="${d.memopen}"]`)?.focus(), 30); return; }
+  if (d.memsend) { memSend(d.memsend); return; }
+  if (d.memask) { send({action: "mem_ask", id: d.memask}); setTimeout(loadMemory, 800); return; }
   if (d.mbuy) { e.stopPropagation(); trBuy(d.mbuy, +d.sol); return; }
   if (d.mape) { e.stopPropagation(); trBuy(d.mape, 0, true); return; }
   if (d.msell) { e.stopPropagation(); trSell(d.msell, +d.frac); return; }
@@ -3312,6 +4104,14 @@ document.addEventListener("click", e => {
 document.addEventListener("change", e => { const t = e.target; if (t.matches('.ctl input[type="checkbox"]')) send({action: "set", key: t.dataset.key, value: t.checked});
   if (t.matches("input[data-advkey]")) send({action: "set", key: t.dataset.advkey, value: t.checked}); });
 addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); $("cmdk").hidden ? openPalette() : closePalette(); return; }
+  if (!$("cmdk").hidden) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); CK.i = Math.max(0, Math.min(CK.items.length - 1, CK.i + (e.key === "ArrowDown" ? 1 : -1))); renderPalette(); return; }
+    if (e.key === "Enter") { e.preventDefault(); runPalette(CK.i); return; }
+    if (e.key === "Escape") { closePalette(); return; }
+  }
+  if (TU.i >= 0) { if (e.key === "Escape") { tourEnd(); return; } if (e.key === "ArrowRight" || (e.key === "Enter" && !e.target.matches("input, textarea"))) { TU.i++; tourShow(); return; } if (e.key === "ArrowLeft") { TU.i = Math.max(0, TU.i - 1); tourShow(); return; } }
+  if (e.key === "Escape" && !$("composer").hidden) { $("composer").hidden = true; return; }
   if (e.target.matches("input, textarea, select")) { if (e.key === "Escape") e.target.blur(); if (e.key === "Enter" && e.target.id.startsWith("in-")) send({action: "set", key: e.target.id.slice(3), value: e.target.value});
     if (e.key === "Enter" && e.target.id.startsWith("adv-") && e.target.type === "number") send({action: "set", key: e.target.id.slice(4), value: e.target.value});
     if (e.key === "Enter" && e.target.id.startsWith("key-")) saveKey(e.target.id.slice(4));
@@ -3323,9 +4123,11 @@ addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openDrawer(e.target.dataset.open); return; }
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.bot) { e.target.click(); return; }
-  if (e.key === "Escape") { if (!$("wardrobe").hidden) $("wardrobe").hidden = true; else if (!$("zscreen")?.hidden && $("zscreen")) zoomOut(); else if (AR.on) setArrange(false); else closeDrawer(); }
+  if (e.key === "Escape") { if (!$("ctx").hidden) $("ctx").hidden = true; else if (!$("help").hidden) $("help").hidden = true; else if (!$("wardrobe").hidden) $("wardrobe").hidden = true;
+    else if (!$("zscreen")?.hidden && $("zscreen")) zoomOut(); else if (AR.on) setArrange(false); else closeDrawer(); }
   else if (e.key === "a") setArrange(!AR.on);
-  else if ("1234567".includes(e.key)) setTab(["live", "desk", "chat", "portfolio", "analytics", "controls", "guide"][+e.key - 1]);
+  else if (e.key === "n") { e.preventDefault(); openComposer(); }
+  else if ("123456789".includes(e.key)) setTab(TABS[+e.key - 1][0]);
   else if (e.key === "c") { e.preventDefault(); setTab("chat"); }
   else if (e.key === "/") { e.preventDefault(); setTab("live"); $("rf").focus(); }
   else if (e.key === "p") $("pause").click();
@@ -3335,8 +4137,13 @@ addEventListener("keydown", e => {
 });
 let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => snap && render(snap), 120); });
 applyTheme(store.get("theme") === "light" || store.get("theme") === "dark" ? store.get("theme") : "");
-fetch("/api/ui", {cache: "no-store"}).then(r => r.json()).then(u => { IO.ui = {bots: u.bots || {}}; AR.layout = u.layout || {}; applyLayout(); if (IO.built) rebuildOffice(); }).catch(() => {});
+fetch("/api/ui", {cache: "no-store"}).then(r => r.json()).then(u => { IO.ui = {bots: u.bots || {}}; AR.layout = (u.layout && !u.layout.live?.order?.["live:0"]) ? u.layout : {};
+  if (u.pulse) { Object.assign(PL.filters, u.pulse.filters || {}); Object.assign(PL.sort, u.pulse.sort || {}); if (u.pulse.qb) PL.qb = u.pulse.qb; }
+  applyLayout(); if (IO.built) rebuildOffice(); }).catch(() => {});
+plWire();
 setTab(store.get("tab") || "live");
+routeHash();
+if (!store.get("toured")) setTimeout(() => toast(`New here, or new features? <button class="small primary" data-tour="1">▶ Take the 1-minute tour</button>`, "ok"), 2500);
 connect();
 </script>
 </body>

@@ -16,6 +16,7 @@ this port to the internet without putting auth in front of it.
                          1 s snapshots + chat events; actions: pause resume kill sell posted set save deposit
                          risk lookup chat chat_stop chat_new chat_decide chat_opts key_set key_clear rec
                          desk_wake pf_add pf_remove pf_refresh x_add x_remove x_auto key_test mem_add mem_del
+                         mem_reply mem_ask call anchor post x_disconnect order_place order_cancel
                          m_buy m_ape m_sell m_initials m_exits (manual trading)
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
@@ -65,6 +66,18 @@ def _json(obj, status: int = 200) -> web.Response:
                         headers={"Cache-Control": "no-store"})
 
 
+def post_summary(res: dict) -> str:
+    out = []
+    for ch, r in res.items():
+        name = {"x": "X", "telegram": "Telegram"}.get(ch, ch)
+        if r.get("ok"):
+            out.append(f"posted on {name}" + (f" (~${r['cost_usd']:.3f})" if r.get("cost_usd") else "")
+                       + (f"; {r['note']}" if r.get("note") else ""))
+        else:
+            out.append(f"{name}: {r.get('error', 'failed')}")
+    return " · ".join(out)
+
+
 def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path | None = None) -> web.Application:
     """data_dir: where the portfolio, X feed and logo cache live (tests pass a temp dir)."""
     from . import keys as keymod, sidecars
@@ -80,6 +93,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
     from ..config import ROOT
 
     ui_path = (data_dir or ROOT / "data") / "ui.json"        # page layouts and the bots' looks (any browser)
+    from . import cards
+    from .social import Social, SocialError
+
+    soc = Social(data_dir or ROOT / "data")                  # X and Telegram posting (your clicks only)
 
     def ui_read() -> dict:
         try:
@@ -151,9 +168,73 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
     async def ui_state(_):
         return _json(ui_read())
 
+    def memory_view(q: str = "", mint: str = "") -> dict:
+        return {"items": engine.memory.items(q=q, mint=mint, limit=100), "total": len(engine.memory.items_),
+                "waiting": {k: sorted(v) for k, v in engine.note_waiting.items()},
+                "replies": {**engine.note_stats, "on": bool(engine.p.desk.get("note_replies", True)),
+                            "key": bool(os.environ.get("ANTHROPIC_API_KEY"))}}
+
     async def memory(request):
-        q, mint = request.query.get("q", ""), request.query.get("mint", "")
-        return _json({"items": engine.memory.items(q=q, mint=mint, limit=100), "total": len(engine.memory.items_)})
+        return _json(memory_view(request.query.get("q", ""), request.query.get("mint", "")))
+
+    async def calls(request):
+        caller = request.query.get("caller", "")
+        L = engine.ledger
+        return _json({"rows": L.rows(caller, limit=300), "stats": L.stats(caller), "verify": L.verify(),
+                      "head": L.head, "anchors": [r for r in L.records if r.get("type") == "anchor"][-6:][::-1]})
+
+    async def calls_export(_):
+        L = engine.ledger
+        body = "".join(json.dumps(r, sort_keys=True) + "\n" for r in L.records)
+        return web.Response(text=body, content_type="application/x-ndjson", headers={
+            "Content-Disposition": f'attachment; filename="calls-{L.head[:12]}.jsonl"', "Cache-Control": "no-store"})
+
+    async def pulse_board(_):
+        return _json(engine.pulse_view())
+
+    async def social(_):
+        return _json(soc.status())
+
+    async def make_card(spec: dict) -> bytes | None:
+        kind, ident = str(spec.get("kind") or ""), str(spec.get("id") or "")
+        if kind == "trade":
+            mint, _, closed = ident.partition(":")
+            t = next((c for c in reversed(engine.book.closed) if c.get("mint") == mint
+                      and (not closed or abs(float(c.get("closed", 0)) - float(closed)) < 2)), None)
+            if t is None:
+                return None
+            return await asyncio.to_thread(cards.trade_card, t, await logos.get(mint), engine.mode)
+        if kind == "call":
+            row = next((r for r in engine.ledger.rows(limit=100_000) if r["id"] == ident), None)
+            if row is None:
+                return None
+            return await asyncio.to_thread(cards.call_card, row, await logos.get(row["mint"]))
+        if kind == "record":
+            return await asyncio.to_thread(cards.record_card, engine.ledger.stats(ident), engine.ledger.head)
+        return None
+
+    async def card_png(request):
+        png = await make_card(dict(request.query))
+        if not png:
+            return web.Response(status=404, text="no such trade or call")
+        return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
+
+    async def x_connect(request):
+        try:
+            url = soc.oauth2_start(f"http://{request.host}/x/callback")
+        except SocialError as e:
+            return web.Response(text=str(e), status=400)
+        raise web.HTTPFound(url)
+
+    async def x_callback(request):
+        if request.query.get("error"):
+            raise web.HTTPFound("/#x-denied")
+        try:
+            user = await soc.oauth2_finish(request.query.get("code", ""), request.query.get("state", ""))
+        except SocialError as e:
+            return web.Response(text=f"Couldn't connect X: {e}", status=400)
+        engine.say("info", f"X connected as @{user.get('username') or '?'}")
+        raise web.HTTPFound("/#x-connected")
 
     async def logo(request):
         img = await logos.get(request.match_info["mint"])
@@ -319,7 +400,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                                                                   "pf_refresh": "Refreshing"}[action]}
         if action == "ui_set":
             key, value = str(cmd.get("key") or ""), cmd.get("value")
-            if key not in ("layout", "bots") or not isinstance(value, dict) or len(json.dumps(value)) > 64_000:
+            if key not in ("layout", "bots", "pulse") or not isinstance(value, dict) or len(json.dumps(value)) > 64_000:
                 return {"ok": False, "text": "can't save that"}
             data = ui_read()
             data[key] = value
@@ -342,12 +423,74 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             except (MemoryError_, OSError, asyncio.TimeoutError) as e:
                 return {"ok": False, "text": f"couldn't save that: {e}"}
             engine.say("info", f"memory: saved {it['kind']} \"{it['title'][:60]}\"", it.get("mint") or "")
-            return {"ok": True, "memory": {"items": engine.memory.items(limit=100), "total": len(engine.memory.items_)},
-                    "added": it, "text": f"Saved to the desk's memory: {it['title'][:70]}"}
+            spawn(engine.discuss_note(it["id"]))                  # every persona reads it and replies
+            return {"ok": True, "memory": memory_view(), "added": it,
+                    "text": f"Saved to the desk's memory: {it['title'][:70]}"}
+        if action in ("mem_reply", "mem_ask"):
+            iid = str(cmd.get("id") or "")
+            if action == "mem_reply":
+                if not engine.memory.add_reply(iid, "you", " ".join(str(cmd.get("text") or "").split())[:600]):
+                    return {"ok": False, "text": "that note is gone"}
+                import re as _re
+
+                from ..sniper.desk import PERSONAS
+                asked = [p for p in _re.findall(r"@(\w+)", str(cmd.get("text") or "").lower()) if p in PERSONAS]
+                spawn(engine.discuss_note(iid, asked or None))
+            else:
+                spawn(engine.discuss_note(iid))
+            return {"ok": True, "memory": memory_view(), "text": "The desk is reading it"}
         if action == "mem_del":
             engine.memory.remove(str(cmd.get("id") or ""))
-            return {"ok": True, "memory": {"items": engine.memory.items(limit=100), "total": len(engine.memory.items_)},
-                    "text": "Removed from memory"}
+            return {"ok": True, "memory": memory_view(), "text": "Removed from memory"}
+        if action == "order_place":
+            err, o = await engine.place_order(str(cmd.get("mint") or ""), str(cmd.get("side") or ""),
+                                              str(cmd.get("op") or ""), cmd.get("mcap_usd"), cmd.get("sol"),
+                                              cmd.get("frac"), cmd.get("ttl_h") or 24)
+            return {"ok": not err, "text": err or f"Order placed: {engine.order_label(o)}"}
+        if action == "order_cancel":
+            err = engine.cancel_order(str(cmd.get("id") or ""))
+            return {"ok": not err, "text": err or "Order cancelled"}
+        if action == "call":
+            from ..sniper.calls import LedgerError
+            try:
+                rec = await engine.make_call(str(cmd.get("mint") or ""), str(cmd.get("thesis") or ""))
+            except (LedgerError, ValueError) as e:
+                return {"ok": False, "text": str(e)}
+            out = {"ok": True, "call": rec, "text": f"📣 Call #{rec['n']} on the record: {rec['symbol']} at "
+                                                    f"${rec['mcap_usd']:,.0f} market cap"}
+            to = tuple(t for t in (cmd.get("to") or []) if t in ("x", "telegram"))
+            if to:
+                mc = rec["mcap_usd"]
+                mc_s = f"${mc / 1e6:.2f}M" if mc >= 1e6 else f"${mc / 1e3:.1f}K"
+                text = (f"📣 ${rec['symbol']} at {mc_s} market cap" + (f"\n{rec['thesis']}" if rec["thesis"] else "")
+                        + f"\n\nCA: {rec['mint']}\nCall #{rec['n']} · ledger {rec['hash'][:12]}")
+                png = await make_card({"kind": "call", "id": rec["id"]})
+                res = await soc.post(text, png, to)
+                out["posted"] = res
+                out["text"] += " · " + post_summary(res)
+            return out
+        if action == "anchor":
+            from ..sniper.calls import proof_text
+            to = tuple(t for t in (cmd.get("to") or []) if t in ("x", "telegram"))
+            if not to:
+                return {"ok": False, "text": "pick where to publish it"}
+            res = await soc.post(proof_text(engine.ledger), None, to)
+            for ch, r in res.items():
+                if r.get("ok"):
+                    engine.ledger.anchor(ch, r.get("url", ""))
+            return {"ok": any(r.get("ok") for r in res.values()), "text": "Ledger head: " + post_summary(res),
+                    "social": soc.status()}
+        if action == "post":
+            to = tuple(t for t in (cmd.get("to") or []) if t in ("x", "telegram"))
+            if not to:
+                return {"ok": False, "text": "pick X, Telegram or both"}
+            png = await make_card(cmd["card"]) if isinstance(cmd.get("card"), dict) else None
+            res = await soc.post(str(cmd.get("text") or ""), png, to)
+            return {"ok": any(r.get("ok") for r in res.values()), "text": post_summary(res), "results": res,
+                    "social": soc.status()}
+        if action == "x_disconnect":
+            soc.disconnect()
+            return {"ok": True, "text": "X disconnected (keys in .env, if any, still work)", "social": soc.status()}
         if action in ("m_buy", "m_ape"):
             sol = engine._manual_cfg().ape_sol if action == "m_ape" else cmd.get("sol")
             mint = str(cmd.get("mint") or "").strip()
@@ -367,6 +510,8 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             err = engine.set_manual_exits(str(cmd.get("mint") or ""), cmd.get("sl"), cmd.get("tp"), cmd.get("tp_frac"),
                                           cmd.get("trail"))
             return {"ok": not err, "text": err or "Exit rules saved for that position"}
+        if action == "social_test":
+            return {"ok": True, "social": soc.status()}
         if action in ("x_add", "x_remove", "x_auto"):
             try:
                 if action == "x_add":
@@ -402,6 +547,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced),
                     web.get("/api/desk", desk), web.get("/api/keys", keys), web.get("/api/portfolio", portfolio),
                     web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory),
+                    web.get("/api/calls", calls), web.get("/api/calls/export", calls_export),
+                    web.get("/api/pulse", pulse_board), web.get("/api/social", social),
+                    web.get("/api/card.png", card_png), web.get("/x/connect", x_connect),
+                    web.get("/x/callback", x_callback),
                     web.get("/api/ui", ui_state)])
 
     async def _start_bg(_app):
