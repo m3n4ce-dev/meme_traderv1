@@ -49,7 +49,15 @@ Seven views. Switch with the tabs or the keys **1–7**:
   - **Thought stream:** every decision as it happens.
   - **𝕏 feed:** public posts from accounts and searches you pick, plus each coin the bot holds. It reads public posts through FxTwitter, so no X login or paid API is needed. Contract addresses in posts are clickable.
   - **Research:** progress of the running tests.
+  - **The office:** the agents live in a little office. They sit and type at their desks, take coffee and water breaks, chat about what's going on, and read new notes on the corkboard. Click any of them for their card and controls.
+  - **Teach the desk:** paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory: Claude in Chat can read it, and the AI desk sees your notes on any coin it votes on.
 - **Chat**: talk to Claude about the bot (see [14](#14-let-claude-operate-the-bot)).
+- **Manual trading** (Live tab, position cards, and every coin's details):
+  - Paste a contract address (or press **Trade** in a coin's details), pick an amount or type one, and press **Buy**. **🦍 APE** buys the preset size in one click.
+  - On any position, the bot's or yours: **25%**, **50%**, **Initials** (sell just enough to get your cost back; the rest rides free) and **Exit**.
+  - **Your own positions** only exit on what you set on their card (stop, take profit, trail), plus when the coin graduates, because the bot can only trade the bonding curve. Defaults are in `sniper.manual`.
+  - Pausing the bot doesn't block your trades. The kill switch, the daily loss limit and a broken feed do.
+  - In live mode every manual trade asks you to confirm first.
 - **Portfolio**: watch-only wallets, yours or anyone's.
   - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
   - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
