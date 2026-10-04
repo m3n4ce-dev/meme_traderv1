@@ -546,9 +546,13 @@ class Engine:
             asyncio.create_task(self._enrich(e))
 
     async def _enrich(self, e: Launch) -> None:
-        from .feeds import fetch_metadata
+        from .feeds import fetch_metadata, ipfs_urls
 
-        md = await fetch_metadata(e.uri)
+        md = {}
+        for url in ipfs_urls(e.uri)[:3]:                 # ipfs.io rate-limits busy IPs: try other gateways
+            md = await fetch_metadata(url)
+            if md:
+                break
         if md:
             e.twitter, e.telegram, e.website = md.get("twitter", ""), md.get("telegram", ""), md.get("website", "")
             if self.record_file:                 # stamped with its arrival time: replays mustn't know it earlier
@@ -1660,7 +1664,8 @@ class Engine:
                 "feed": {"host": getattr(self.feed, "host", ""), "lag_s": getattr(self.feed, "lag_s", None),
                          "gap_pct": getattr(self.feed, "gap_pct", None),
                          "degraded": bool(getattr(self.feed, "degraded", False)),
-                         "degraded_reason": getattr(self.feed, "degraded_reason", "")}}
+                         "degraded_reason": getattr(self.feed, "degraded_reason", ""),
+                         "non_sol_skipped": getattr(self.feed, "non_sol_skipped", 0)}}
 
     def set_desk(self, on: bool) -> str:
         """Wake or rest the AI desk at runtime. '' or the reason it can't."""

@@ -4,6 +4,18 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #24: Non-SOL coins skipped; social links survive ipfs.io's rate limit
+
+- **Non-SOL coins:**
+  - `feeds.trade_quote_mint` reads a TradeEvent's quote asset: it walks past `ix_name` and `shareholders` (variable length) to `quote_mint`.
+  - The trade feed now skips coins quoted in anything but SOL (USDC, $PUMP and others seen live) and counts them (`SolanaTradeFeed.non_sol_skipped`, shown on the Desk's feed-watchdog card).
+  - Before this they came through with 0 SOL and a price of 0.
+  - Tested on captured live events. Older, shorter events still read as SOL.
+- **Social links:** `_enrich` tries each launch's metadata through other IPFS gateways when ipfs.io refuses (`feeds.ipfs_urls`, now shared with the logo fetcher).
+- Recordings change only by leaving out the non-SOL coins' trades, which no strategy could trade. Replays of older recordings and graduation-v1's signature are unchanged.
+
+---
+
 ## 2026-10-04 — Entry #23: Open-source survey; USDC-quoted coins are invisible to the bot
 
 - Surveyed GitHub trading bots read-only ([OPEN_SOURCE_NOTES.md](OPEN_SOURCE_NOTES.md)). Most pump.fun sniper and copy-trading repos are sales pages or wallet-drainer bait.

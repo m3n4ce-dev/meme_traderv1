@@ -145,6 +145,53 @@ class PumpPortalFeed(Feed):
 
 PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 TRADE_EVENT = bytes.fromhex("bddb7fd34ee661ee")        # sha256("event:TradeEvent")[:8] (Anchor)
+WSOL = "So11111111111111111111111111111111111111112"
+
+
+def trade_quote_mint(raw: bytes) -> str:
+    """The coin's quote asset from a TradeEvent: '' = SOL, else its mint (USDC, $PUMP, ...).
+
+    pump.fun added non-SOL quotes in 2026. The current layout continues after last_update_timestamp (ends at
+    258) with ix_name (u32 length + bytes), mayhem_mode (bool), cashback and buyback fee bps + amount (4 x u64),
+    shareholders (u32 count x 34 bytes), then quote_mint. All zeros, WSOL, or an older event without the field
+    = SOL. For a non-SOL coin the event's SOL fields are 0 (measured 2026-10-04: ~3% of trades)."""
+    import struct
+
+    o = 258
+    if len(raw) < o + 4:
+        return ""
+    n = struct.unpack_from("<I", raw, o)[0]
+    o += 4 + n + 1 + 32
+    if n > 64 or len(raw) < o + 4:
+        return ""
+    k = struct.unpack_from("<I", raw, o)[0]
+    o += 4 + 34 * k
+    if k > 64 or len(raw) < o + 32:
+        return ""
+    q = raw[o:o + 32]
+    if q == bytes(32):
+        return ""
+    from solders.pubkey import Pubkey
+
+    m = str(Pubkey.from_bytes(q))
+    return "" if m == WSOL else m
+
+
+def ipfs_urls(url: str) -> list[str]:
+    """The URL, then the same IPFS content through other gateways: ipfs.io (where pump.fun metadata points)
+    and dweb.link answer 429 to busy IPs (measured 2026-10-04), these didn't."""
+    import re
+
+    url = str(url or "").strip()
+    if url.startswith("ipfs://"):
+        url = "https://ipfs.io/ipfs/" + url[len("ipfs://"):].removeprefix("ipfs/")
+    m = re.search(r"/ipfs/([A-Za-z0-9]{40,100}(?:/[^?#\s]*)?)", url)
+    if not m:
+        return [url]
+    return [url] + [g + m.group(1) for g in IPFS_GATEWAYS if not url.startswith(g)]
+
+
+IPFS_GATEWAYS = ("https://pump.mypinata.cloud/ipfs/", "https://4everland.io/ipfs/", "https://gateway.pinata.cloud/ipfs/")
 PUBLIC_WS = "wss://api.mainnet-beta.solana.com"
 # free, keyless endpoints tried after the configured ones (both throttle a 24/7 stream eventually)
 FALLBACK_WS = ["wss://solana-rpc.publicnode.com", PUBLIC_WS]
@@ -231,6 +278,7 @@ class SolanaTradeFeed(Feed):
     is free but best-effort: if trades stop arriving the feed reports degraded and entries pause.
     """
     STALL_S = 30            # no websocket message at all for this long = dead connection; reconnect
+    non_sol_skipped = 0     # trades on coins quoted in USDC/$PUMP/...: skipped, their SOL fields are 0
     EARLY_S = 15            # hold unwatched trades this long: a launch's first buys (often its insider
                             # bundle) can land before PumpPortal announces it; replay them on watch()
     RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
@@ -363,6 +411,9 @@ class SolanaTradeFeed(Feed):
             except ValueError:
                 continue
             if raw[:8] != TRADE_EVENT or len(raw) < 129:
+                continue
+            if trade_quote_mint(raw):                   # not a SOL coin: this bot prices everything in SOL
+                SolanaTradeFeed.non_sol_skipped += 1
                 continue
             # TradeEvent: mint 8, sol 40, tokens 48, is_buy 56, user 57, timestamp 89, virtual reserves 97/105,
             # real reserves 113/121, fee recipient 129, fee bps 161, fee 169, creator 177, creator fee bps 209

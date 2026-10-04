@@ -1665,7 +1665,8 @@ function renderDesk() {
   cards.feed = agentCard("feed", f.degraded ? "trouble" : "working",
     !f.host ? "Simulated market (demo): no real feed to watch." :
     f.degraded ? `Problem: ${esc(f.degraded_reason)}. Entries pause until the data is good again.`
-      : `Reading pump.fun from <b>${esc(f.host || "?")}</b>, ${fx(f.lag_s, 1)} s behind the chain, ${fx(f.gap_pct, 1)}% of trades missing.`);
+      : `Reading pump.fun from <b>${esc(f.host || "?")}</b>, ${fx(f.lag_s, 1)} s behind the chain, ${fx(f.gap_pct, 1)}% of trades missing.`
+        + (f.non_sol_skipped ? ` Skipped ${f.non_sol_skipped.toLocaleString()} trades on coins priced in USDC or other tokens (this bot trades SOL coins only).` : ""));
   // AI desk
   const k = d.desk, awake = k.enabled;
   const personas = `<div class="personas">${k.personas.map(p => `<span title="${esc(p)}">${(PERSONA[p] || ["•"])[0]} ${esc((PERSONA[p] || [0, p])[1])}</span>`).join("")}</div>`;

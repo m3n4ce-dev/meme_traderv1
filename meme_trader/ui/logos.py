@@ -20,9 +20,7 @@ MAX_BYTES = 4 * 1024 * 1024
 SIZE = 96
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 DS_TOKENS = "https://api.dexscreener.com/tokens/v1/solana/"
-# ipfs.io (where pump.fun metadata points) rate-limits busy IPs; these serve the same content (measured 2026-10-04)
-GATEWAYS = ("https://pump.mypinata.cloud/ipfs/", "https://4everland.io/ipfs/", "https://gateway.pinata.cloud/ipfs/")
-_CID = re.compile(r"/ipfs/([A-Za-z0-9]{40,100}(?:/[^?#\s]*)?)")
+from ..sniper.feeds import IPFS_GATEWAYS as GATEWAYS, ipfs_urls  # noqa: E402,F401 (one list for the bot and logos)
 
 
 def thumbnail(data: bytes, size: int = SIZE) -> bytes | None:
@@ -48,13 +46,6 @@ def thumbnail(data: bytes, size: int = SIZE) -> bytes | None:
 
 def _ipfs(url: str) -> str:
     return "https://ipfs.io/ipfs/" + url[len("ipfs://"):].removeprefix("ipfs/") if url.startswith("ipfs://") else url
-
-
-def ipfs_urls(url: str) -> list[str]:
-    """The URL, then the same IPFS content through other gateways."""
-    url = _ipfs(str(url or "").strip())
-    m = _CID.search(url)
-    return [url] + ([g + m.group(1) for g in GATEWAYS if not url.startswith(g)] if m else [])
 
 
 async def fetch_image(url: str, timeout: float = 8.0) -> bytes | None:
