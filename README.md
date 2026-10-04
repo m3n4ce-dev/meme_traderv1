@@ -128,9 +128,9 @@ The engine makes split-second decisions on its own. An AI operator works one lev
 - It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
 - Claude gets only the bot's tools here: no shell, no files, no other connectors.
 
-**Manual trading:** paste a contract address and Buy, or 🦍 APE in one click; sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Trades land with a stamp and a burst of coins (or red shards).
+**Manual trading:** paste a contract address and Buy, or 🦍 APE in one click; sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Paste any contract address to see its metrics first.
 
-**The office:** on the Desk tab the agents live in a little office. They type at their desks, take coffee breaks, chat about the market and read the notes you **teach the desk** (X posts, articles, contract addresses), which Claude and the AI desk can read too.
+**The trading room:** on the Desk tab the agents work in a Habbo-style isometric room with a P&L board on the wall, and it gets dark at night. They type, walk to the coffee machine, talk about real numbers, and hand coins to each other: the scanner carries a coin to the AI table for a vote, then to the exit manager. Click any bot to zoom into its screen. Rename and dress the bots in the wardrobe, and rearrange any page with ✎ Arrange. Teach the desk with X posts, articles and contract addresses; Claude and the AI desk can read them.
 
 **Risk dial:** five levels on the Live and Controls tabs: Cautious, Normal (your settings), Bold, Aggressive and Max. Each scales trade size, open positions and the daily loss limit together. Say "more risk" in Chat and Claude asks you to approve a higher level. It can always turn the dial down, but only raises it with your click, and never above `risk.max_level`. The kill switch, stop losses and entry rules never move.
 
@@ -206,6 +206,7 @@ These have been tested against simulated failures, not yet with real money.
 | [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
 | [WALLETS.md](docs/WALLETS.md) | The wallet study: rules, data sources and their limits, timeline |
 | [OPEN_SOURCE_NOTES.md](docs/OPEN_SOURCE_NOTES.md) | What open-source trading bots on GitHub do, which ones are bait, and what we took |
+| [BUILDS_RESEARCH.md](docs/BUILDS_RESEARCH.md) | The best "agents in a room" builds (Pixel Agents, Habbo engines, Axiom) and what the trading room took from them |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
 

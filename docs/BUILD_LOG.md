@@ -4,6 +4,24 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #27: The trading room, click to zoom, night shift, arrange any page
+
+- **Owner's ask:** the effects felt corny; make the Desk tab a Habbo-Hotel-style trading room; click a bot to see what it's looking at; a P&L board on the wall; night at night; full metrics when a contract address is pasted; arrange each page; change the bots easily. Plus research on the best builds like this: [BUILDS_RESEARCH.md](BUILDS_RESEARCH.md).
+- **The room (Desk tab):** an isometric room (2:1 tiles, SVG) replaces the side-view office.
+  - **Furniture:** six desks with monitors and name plates, the AI meeting table, a couch, a coffee counter, a water cooler and plants. On the walls: a window onto a skyline, a clock with real hands, a **P&L board** (equity, vs start, today, equity line, trades and win rate, open positions and the risk dial, the last closes) and a **corkboard** with the newest memory notes.
+  - **The bots** walk tile by tile round the furniture (a path finder; no walking through desks), sit and type when working, and take coffee, water, window, board and plant breaks. Two will meet in the aisle and talk about real numbers (the feed's lag, the risk dial, a coin that's filling, today's P&L).
+  - **Habbo-style chat:** each line appears above the speaker and older lines rise and fade.
+  - **Hand-offs are real:** when the AI desk reviews a coin, the scanner carries its folder to the AI table, asks the desk, and each persona says its vote and its main reason, then the scanner reads out the verdict. When the bot buys, the scanner walks the folder to the exit manager. When a trade closes, the exit manager reports it and a small "+0.012" rises over it. A new memory note gets pinned to the corkboard by a bot.
+- **Click to zoom:** click any bot, the P&L board or the corkboard and the camera zooms in, then shows that bot's screen: the scanner's checklists, the exit gauges, the risk dial (with its buttons), the feed's data and pulse, the operator's last actions, the recorder's controls, a persona's votes, the P&L detail with the last ten trades, or every memory note. Esc or "Back to the room" zooms out.
+- **Night shift:** day 07:30–17:30, dusk until 19:30 and from 05:30, night otherwise, by the browser's clock. At night the room darkens, the desk lamps and monitors glow, the skyline lights up under a moon and stars, and the bots have night-shift lines.
+- **Effects removed:** no more stamps, confetti, red shards or screen shake. Toasts and the position cards' flash stay.
+- **Wardrobe (👕 in the room):** rename any bot, pick its colour, and pick its hat or accessory (new: top hat, crown, beanie, none). Saved on the bot (`data/ui.json`), so every browser sees the same team.
+- **Arrange (✎ in the header, or `a`):** drag any panel to a new place on its page, or hide it. Saved on the bot too, per page. **Reset to default** puts everything back.
+- **Manual trade metrics:** pasting a contract address shows price, market cap, liquidity, volume, buys vs sells, price change, top-10 holding, holders, curve progress, age, dev holding and risk flags, with links to pump.fun, DexScreener and Solscan. It refreshes every ~20 s while the coin is in the box.
+- **Server:** `GET /api/ui` and the `ui_set` action (only the `layout` and `bots` keys, 64 KB cap, written atomically). Test: `test_page_layouts_and_bot_looks_are_saved_on_the_bot`.
+
+---
+
 ## 2026-10-04 — Entry #26: Manual trading, the office, the desk's memory, trade effects
 
 - **Manual trading (Live → Manual trade, every position card, every coin's detail drawer):**
@@ -18,7 +36,7 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **The bots** walk with swinging legs, sit and type at their desks, and take coffee, water, window and plant breaks. They chat in pairs about real data, and one walks over to read each new memory note on the corkboard. They rush back to their desk on an alert or a trade.
   - **The AI personas** nap on the couch while the desk is off, and sit at the meeting table when awake.
   - **Bubbles take turns** by neighbourhood (urgent news quiets the neighbours).
-- **Trade effects:** a "BOUGHT", "INITIALS OUT" or "+0.123 SOL" stamp, with coins and confetti for buys and wins and red shards with a screen shake for losses. The bot that made the move reacts in the office.
+- **Trade effects** (removed in #27): a "BOUGHT", "INITIALS OUT" or "+0.123 SOL" stamp, with coins and confetti for buys and wins and red shards with a screen shake for losses. The bot that made the move reacts in the office.
 - **The desk's memory (Desk → Teach the desk; `sniper/memory.py`, `data/memory.json`):** paste an X post or article link, a contract address, or a note, with an optional comment.
   - **Links:** X posts and articles come through FxTwitter, other pages through the same public-only, size-capped fetcher as token metadata.
   - **Contract addresses** get a metrics snapshot, and the bot starts watching the coin.
