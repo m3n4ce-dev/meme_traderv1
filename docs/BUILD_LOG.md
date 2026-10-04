@@ -4,6 +4,37 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-04 — Entry #29: A full health check after deploying #23/#24, and Habbo-style pixel people
+
+- **Deploy note:** #24 was stacked on #23 and merged into #23's branch (not main) seconds after #23 merged. #25 carries it to main; until then the bot runs from `habbo-room`.
+- **Full check, about 17:30 local:**
+  - **Machine:** load 1.2 on a mini PC; 21 GB of 27 GB RAM free; 713 GB disk free; journals 52 MB.
+  - **Services:** meme-sniper, meme-wallets and edge-scout all active with no crashes. Memory: 98, 171 and 119 MB.
+  - **Feed:** mainnet-beta, 1.5 s behind the chain, 0% missing, not degraded.
+  - **AI desk:** awake after the restart. `desk.enabled` was written to the config first, because it had been woken before the fix that saves that.
+  - **Paper account:** started fresh one last time (nothing had been saved before #23); it now carries over restarts.
+  - **Dashboard:** every endpoint answers in under 13 ms. The real page loads every tab with no errors and uses 10 MB of browser memory.
+  - **Wallet recorder:** streaming 2,700 pools at full coverage, about 40 GB of bandwidth today, no errors.
+  - **Research tests:** graduation-v1 is on holdout day 1.1 of 14; wallets-v1 is in period A, day 0.6 of 14.
+- **Fixed from the check:** every restart began on PublicNode, which is about 10 s behind, so entries paused until the watchdog moved on.
+  - The feed now remembers each endpoint's measured lag across restarts in `data/feed_endpoints.json` (hostnames only, never a full URL that could carry a key), and starts on the fastest one measured in the last 6 hours.
+  - The 30-minute "go back to the first endpoint" retry now applies only to endpoints you configured (`SOLANA_WS_URL`), not the free fallbacks.
+- **Pixel people (owner: "I want the bots like these guys", with Habbo screenshots):** the round robots are replaced by original Habbo-style pixel characters. No Habbo assets are used: every character is drawn in code.
+  - **Drawing:** 32×64 sprites built from layered parts (hair, hat, glasses, top, bottom, shoes, skin), each with a 1-pixel darker outline and a shaded side, cached as PNG frames.
+  - **Poses:** standing, a 4-frame walk, sitting, typing (2 frames), sleeping; front and back views, flipped for direction. Bots show their backs when walking up the room or looking at the window or board.
+  - **Each bot has its own look:**
+    - Claude: a black bob and big round glasses.
+    - Scanner: spiky hair, a headset and a hoodie.
+    - Risk: a hard hat and a safety vest.
+    - Narrative: pink hair with a bow.
+    - Skeptic: shades and a suit.
+    - Quant: an afro, glasses and a striped sweater.
+  - **Chat bubbles and note threads** show each speaker's pixel head.
+  - **Wardrobe → "Change your looks":** a bot row, categories (hair 9 styles and 14 colours, 8 hats, glasses, 7 tops, 4 bottoms, shoes, 6 skin tones), preview tiles of the selected bot, colour swatches, a turnable preview, Random, Reset and the name.
+  - Saved on the bot as `{name, look}`; looks saved before this still load.
+
+---
+
 ## 2026-10-04 — Entry #28: Pulse, limit orders, the call ledger, X and Telegram posting, notes the desk replies to, a real guide
 
 - **Owner's ask:**

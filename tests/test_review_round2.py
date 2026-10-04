@@ -1087,3 +1087,23 @@ def test_watchdog_never_moves_to_an_endpoint_measured_slower():
     f.endpoint_lag = {0: (12.0, now - f.LAG_MEMORY_S - 1)}
     assert f._check_stream(now, now - f.RETRY_PRIMARY_S - 1) == "retry"
     assert f._next_endpoint("connection closed (CLOSE)", now) == 0
+
+
+def test_feed_starts_on_the_fastest_endpoint_it_remembers(tmp_path, monkeypatch):
+    """Every restart used to begin on PublicNode (10 s behind) and pause entries until the watchdog moved on."""
+    monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    mem = tmp_path / "feed_endpoints.json"
+    f = SolanaTradeFeed(memory_path=mem)                       # nothing remembered: first in the list
+    assert f.ws_idx == 0 and f.n_configured == 0
+    now = time.time()
+    f.endpoint_lag = {0: (10.2, now), 1: (1.4, now)}
+    f._save_lags(now)
+    saved = json.loads(mem.read_text())
+    assert set(saved) == {"solana-rpc.publicnode.com", "api.mainnet-beta.solana.com"}   # hostnames only
+    g = SolanaTradeFeed(memory_path=mem)
+    assert g.ws_urls[g.ws_idx].endswith("api.mainnet-beta.solana.com")
+    mem.write_text(json.dumps({"api.mainnet-beta.solana.com": [1.4, now - 7 * 3600]}))   # too old to trust
+    assert SolanaTradeFeed(memory_path=mem).ws_idx == 0
+    # on a free fallback, the 30-minute retry of a free "primary" no longer happens
+    g.last_trade = now
+    assert g._check_stream(now, now - g.RETRY_PRIMARY_S - 1) == ""

@@ -134,7 +134,7 @@ The engine makes split-second decisions on its own. An AI operator works one lev
 
 ![Pulse: new launches, the final stretch and fresh graduates](docs/img/pulse.png)
 
-**The trading room:** on the Desk tab the agents work in a Habbo-style isometric room with a P&L board on the wall, and it gets dark at night. They type, walk to the coffee machine, talk about real numbers, and hand coins to each other: the scanner carries a coin to the AI table for a vote, then to the exit manager. Click any bot to zoom into its screen. Rename and dress the bots in the wardrobe, and rearrange any page with ✎ Arrange. Teach the desk with X posts, articles and contract addresses: each persona reads it and replies, and you can answer back.
+**The trading room:** on the Desk tab the agents, drawn as Habbo-style pixel people, work in an isometric room with a P&L board on the wall, and it gets dark at night. They type, walk to the coffee machine, talk about real numbers, and hand coins to each other: the scanner carries a coin to the AI table for a vote, then to the exit manager. Click any bot to zoom into its screen. Rename and dress the bots in the wardrobe, and rearrange any page with ✎ Arrange. Teach the desk with X posts, articles and contract addresses: each persona reads it and replies, and you can answer back.
 
 **Risk dial:** five levels on the Live and Controls tabs: Cautious, Normal (your settings), Bold, Aggressive and Max. Each scales trade size, open positions and the daily loss limit together. Say "more risk" in Chat and Claude asks you to approve a higher level. It can always turn the dial down, but only raises it with your click, and never above `risk.max_level`. The kill switch, stop losses and entry rules never move.
 

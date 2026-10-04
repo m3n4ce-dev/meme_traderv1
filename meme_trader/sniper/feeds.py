@@ -283,11 +283,17 @@ class SolanaTradeFeed(Feed):
                             # bundle) can land before PumpPortal announces it; replay them on watch()
     RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
     LAG_MEMORY_S = 1800     # how long an endpoint's measured lag counts when choosing where to go
+    STARTUP_MEMORY_S = 6 * 3600   # at startup, begin on the fastest endpoint measured this recently
 
     def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
-                 max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0):
+                 max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0, memory_path=None):
         self.ws_urls = ws_urls(ws_url)
+        raw = ws_url or os.environ.get("SOLANA_WS_URL", "")
+        # endpoints you configured (SOLANA_WS_URL / feed.ws_url) are worth going back to; the free fallbacks aren't
+        self.n_configured = len([u for u in (raw if isinstance(raw, list) else str(raw).split(",")) if u and u.strip()])
         self.ws_idx = 0
+        self.memory_path = memory_path
+        self._last_lag_save = 0.0
         # "confirmed": a fraction of a second later than "processed", but complete. Measured 2026-10-03 on
         # PublicNode: processed missed ~25% of trades (reserve-chain gaps), confirmed 0.4%.
         self.commitment = commitment
@@ -299,6 +305,7 @@ class SolanaTradeFeed(Feed):
         # for a moment, the watchdog moved to PublicNode (10 s behind), then straight back: 40 switches in
         # 35 min, each pausing entries while the new connection was measured. Never move to a known-worse one.
         self.endpoint_lag: dict[int, tuple[float, float]] = {}
+        self._load_lags()
         self.last_trade = 0.0
         self.launches = PumpPortalFeed(fallback_urls, use_key=False)
         self.watched: set[str] = set()
@@ -434,6 +441,38 @@ class SolanaTradeFeed(Feed):
                              fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps)))
         return out
 
+    def _load_lags(self) -> None:
+        """Start on the endpoint that was fastest in a recent run (seen 2026-10-04: every restart began on
+        PublicNode, 10 s behind, and paused entries until the watchdog moved on)."""
+        if not self.memory_path:
+            return
+        try:
+            saved = json.loads(open(self.memory_path).read())
+        except (OSError, ValueError):
+            return
+        now, best = time.time(), None
+        for i, u in enumerate(self.ws_urls):
+            v = saved.get(self._hostname(u))
+            if isinstance(v, list) and len(v) == 2 and now - v[1] < self.STARTUP_MEMORY_S:
+                self.endpoint_lag[i] = (float(v[0]), float(v[1]))
+                if best is None or v[0] < self.endpoint_lag[best][0]:
+                    best = i
+        if best is not None:
+            self.ws_idx = best
+
+    def _save_lags(self, now: float) -> None:
+        """Hostname -> [lag, when]: never a full URL, which can carry an API key."""
+        if not self.memory_path or now - self._last_lag_save < 60:
+            return
+        self._last_lag_save = now
+        try:
+            tmp = str(self.memory_path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({self._hostname(self.ws_urls[i]): [round(lag, 2), ts] for i, (lag, ts) in self.endpoint_lag.items()}, f)
+            os.replace(tmp, self.memory_path)
+        except OSError:
+            pass
+
     def _known_lag(self, i: int, now: float) -> float | None:
         v = self.endpoint_lag.get(i)
         return v[0] if v and now - v[1] < self.LAG_MEMORY_S else None
@@ -456,10 +495,11 @@ class SolanaTradeFeed(Feed):
             return f"{self.quality.gap_pct:.1f}% of trades missing"
         if len(self.quality.lags) >= self.quality.min_lags:
             self.endpoint_lag[self.ws_idx] = (self.quality.lag_s, now)
+            self._save_lags(now)
         if self.quality.slow and self._faster_endpoint(now) is not None:
             return f"{self.quality.lag_s:.0f}s behind the chain"
         # (slow but every other endpoint was slower: stay put; entries stay paused until it catches up)
-        if self.ws_idx != 0 and now - connected > self.RETRY_PRIMARY_S:
+        if self.ws_idx != 0 and self.n_configured and now - connected > self.RETRY_PRIMARY_S:
             first, cur = self._known_lag(0, now), self.quality.lag_s
             if first is None or (cur is not None and first < cur):
                 return "retry"
