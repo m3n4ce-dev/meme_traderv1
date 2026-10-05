@@ -1550,7 +1550,7 @@ function renderChrome(s) {
       + (flaky ? ` · ⚠ ${(f.reconnects_1h || 0) + (f.switches_1h || 0)} drops/h` : "");
     fb.className = "badge hide-sm " + (stale ? "bad" : f.degraded || flaky ? "warn" : "ok");
     fb.title = stale ? "No market data recently - entries can't trigger. Check the internet / API key."
-      : `Market data from ${f.host || "?"}: trades arrive ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s" : "?"} after they happen on chain. Last hour: ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} server switches${f.mb_per_hour != null ? `, ${f.mb_per_hour} MB/hour of data` : ""}.${f.backup ? ` Backup ${f.backup.host}${f.backup.on ? " (in use now)" : ""}: ${f.backup.mb_today} of ${f.backup.mb_per_day} MB used today.` : ""}`;
+      : `Market data from ${f.host || "?"}: trades arrive ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s" : "?"} after they happen on chain. Last hour: ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} server switches${f.mb_per_hour != null ? `, ${f.mb_per_hour} MB/hour of data` : ""}.${f.backup ? ` Backup ${f.backup.host}${f.backup.on ? " (in use now)" : ""}: ${f.backup.mb_today} of ${f.backup.mb_per_day} MB used today.` : ""}${f.backup && f.backup.last_probe ? ` Last check of ${f.backup.last_probe.host}, ${dur(f.backup.last_probe.ago_s)} ago: ${f.backup.last_probe.lag_s != null ? f.backup.last_probe.lag_s + " s behind" : "not usable"}.` : ""}`;
   }
   const b = [];
   if (s.halted) b.push(`<div class="banner bad">⛔ Halted: ${esc(s.halted)}. No new positions until you resume. <button class="small" data-unhalt="1">Resume trading…</button>${s.mode.startsWith("paper")
