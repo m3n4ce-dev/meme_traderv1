@@ -678,6 +678,7 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .cork-add { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; } .cork-add input { flex: 1 1 200px; }
 .cork-list { display: grid; gap: 6px; } .cork-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--ring); border-radius: 8px; }
 .cork-row.off { opacity: .55; } .cork-t { flex: 1; min-width: 0; } .cork-ic { font-size: 18px; }
+.xc-checks { display: grid; gap: 4px; margin: 4px 0 6px; } .xc-checks .good { color: var(--good, #22c55e); } .xc-checks .bad { color: var(--bad, #ef4444); }
 .hq-svcs { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; } .hq-rows { display: grid; gap: 6px; }
 .hq-rows > div { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .hq-rows b { min-width: 120px; }
 .hq-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--warn, #d69e2e); } .hq-dot.ok { background: var(--good, #22c55e); } .hq-dot.bad { background: var(--bad, #ef4444); }
@@ -1059,6 +1060,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
           <h2>🌐 Other chains <small id="xc-sub"></small> <button class="small ghost" data-tab-link="controls" title="Turn it on or off; its rules are under Advanced → xchain">Settings</button></h2>
           <div id="xc-pos"></div>
           <details class="xc-scan"><summary>What it's looking at <small id="xc-scansub"></small></summary><div id="xc-scan"></div></details>
+          <details class="xc-scan"><summary>Real money? <small id="xc-readysub"></small></summary><div id="xc-ready"></div></details>
         </section>
         <section class="panel">
           <h2>Equity <small>SOL, marked to curve price</small></h2>
@@ -1602,8 +1604,16 @@ function renderXchain(s) {
   (s.closed || []).forEach(c => { if (c.chain && c.url) XURL[c.mint] = c.url; });
   const names = {bsc: "BNB Chain", base: "Base", eth: "Ethereum", solana: "Solana"}, sc = x.scan || [], now = Date.now() / 1000;
   $("xc-sub").textContent = !x.enabled ? "off" : x.mode_note ? x.mode_note
-    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.blocked ? " · " + x.blocked : ""}`;
+    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.today.trades ? ` (real prices ${usdS(x.today.real_usd)})` : ""}${x.blocked ? " · " + x.blocked : ""}`;
   $("xc-scansub").textContent = x.last_scan ? `${sc.filter(r => !r.why).length} passing of the top ${sc.length} · ${dur(now - x.last_scan)} ago` : "";
+  const R = x.ready || {checks: []};
+  $("xc-readysub").textContent = `${R.passed || 0} of ${R.checks.length} checks passed${R.ready ? ": ready to talk about a wallet" : ""}`;
+  const rk = JSON.stringify(R.checks);
+  if ($("xc-ready").dataset.k !== rk) {
+    $("xc-ready").dataset.k = rk;
+    $("xc-ready").innerHTML = `<div class="xc-checks">${R.checks.map(c => `<div><span class="${c.ok ? "good" : "bad"}">${c.ok ? "✓" : "✗"}</span> ${esc(c.name)} <span class="note">${esc(c.value)}</span></div>`).join("")}</div>
+      <p class="note">Every paper buy and sell also asks a real swap router (KyberSwap, Jupiter) what the same trade would get. Real trading needs all of these, then a separate wallet you fund and your go-ahead.</p>`;
+  }
   const k = JSON.stringify([x.positions.map(p => [p.key, p.pnl_usd, p.stale_s > 120]), x.last_scan, x.active]);
   if ($("xc-pos").dataset.k === k) return;
   $("xc-pos").dataset.k = k;

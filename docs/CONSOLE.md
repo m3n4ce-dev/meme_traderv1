@@ -240,6 +240,18 @@ A separate bot trades young coins on decentralized exchanges (DEXes), so the con
   - a 20% trailing stop once it's up 20%;
   - out after 6 hours, or at once if most of the liquidity is pulled.
 - **Costs:** every paper fill pays the pool's swap fee, price impact from its liquidity, the token's tax, gas, and 0.5% extra slippage.
+- **Real prices alongside:** every paper buy and sell also asks a real swap router (KyberSwap on BNB Chain and Base, Jupiter on Solana) what the same swap would get. No wallet is needed for that.
+  - A coin no router can buy is skipped.
+  - Each closed trade shows its P&L at real router prices next to the paper P&L.
+- **Real money?** The panel's checklist has to pass completely before trading real money on other chains is on the table:
+  - at least 50 closed paper trades;
+  - a profit after every cost;
+  - 90%+ sure it isn't luck;
+  - still up without the 3 best trades;
+  - real quotes within 2% of paper fills;
+  - a profit at real router prices.
+
+  Even then it needs a separate wallet that you create and fund, and your go-ahead.
 - **Prices:** checked every 10 seconds (DexScreener), so this trades moves over minutes to hours, never launches.
 - **Trade size:** the risk dial's per-trade size, so $30 at Max.
 - **Turn it on or off:** Controls → "Other chains (paper)". Its rules are under Controls → Advanced → xchain.

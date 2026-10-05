@@ -8,7 +8,22 @@
 - **Safety:** honeypot.is or GoPlus on EVM chains, mint authorities on Solana.
 - **Costs:** fees, price impact, tax and gas in every fill.
 
-**Live trading on other chains is still on hold** until the go/no-go below is met. There's no EVM wallet or executor.
+**Live trading on other chains is still on hold.** There's no EVM wallet or executor.
+
+**The path to real money (the owner wants it "after paper"):**
+1. **Real-price check (done 2026-10-05).** Every paper fill also asks KyberSwap (EVM) or Jupiter (Solana) for a real quote. Coins with no route are skipped, and each trade records its P&L at real prices.
+   - First real-data round trips: router vs paper fills were +0.35% ($1.8M pool), +0.23% ($520k) and −1.59% ($32k).
+2. **The checklist** (Live → 🌐 Other chains → Real money?) must pass completely:
+   - 50+ trades;
+   - paper profit after costs;
+   - ≥ 90% bootstrap confidence;
+   - still up without the best 3 trades;
+   - median router gap ≤ 2%;
+   - profit at real router prices.
+3. **Then, with the owner's go-ahead:**
+   - **Wallets:** a separate wallet per chain, created and funded by the owner, with its key added by the owner (Controls → keys, never via chat).
+   - **Executor:** sends the same router's swap (KyberSwap's route build / Jupiter's swap transaction). It needs `eth-account` for EVM signing.
+   - **Guardrails:** small per-trade and daily caps, and the same kill switch.
 
 ## Verdict
 

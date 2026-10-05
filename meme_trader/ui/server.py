@@ -631,7 +631,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             n = len(engine.kols.get("kols") or {})
             return {"ok": not err, "text": err or f"{n} KOL wallets loaded: the live charts name them when they trade"}
         if action == "xchain_sell":                       # the owner sells an other-chain paper position
-            err = engine.xchain.sell_now(str(cmd.get("key") or ""))
+            err = await engine.xchain.sell_now(str(cmd.get("key") or ""))
             return {"ok": not err, "text": err or "Sold (paper)"}
         if action == "lab_add":                           # the owner queues a test for the lab
             x, err = engine.lab_add(str(cmd.get("key") or ""), cmd.get("value"), str(cmd.get("why") or "the owner's idea"), "you")
