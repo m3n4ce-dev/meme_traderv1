@@ -4,6 +4,60 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #46: The team's lab, Claude leads, the AI sets stops, a chat bar everywhere, other chains, HQ
+
+**Owner's requests:**
+- "Keep 'em learning and growing and moving… test themselves… really get an edge."
+- "Claude needs to be the ring leader."
+- "Have the AI input stop loss and buys, and a chat bar always available."
+- "Maybe get other chains on there… a personal terminal and bot HQ."
+- "Play around with it and see what we can improve."
+
+**The lab** (`meme_trader/sniper/lab.py`, Desk → 🔬 The lab):
+- **What a test is:** one graduation setting changed, replayed with the research engine against the current settings on the same recorded hours, with the same costs and fill delay, judged in 6-hour blocks.
+- **Verdicts:** better, worse, no clear difference, or no effect.
+- **Who starts tests:**
+  - the team: a routine one-step test every 6 hours;
+  - the huddles: they attach `test: {key, value}` to their plan's experiments and read results in `desk_brief.lab`;
+  - the owner: queues from the panel.
+- **Honesty:** every try is counted ("the best of many tries looks better than it is"). Results are development runs, never the graduation-v1 holdout.
+- **Measured cost:**
+  - three days of replay took over 30 minutes and ~4.8 GB per worker, so tests replay the last 24 hours;
+  - two replays take ~20 minutes on one core;
+  - each runs as its own user service (`systemd-run`, MemoryMax 6 GB, Nice 19) that survives bot restarts and is picked back up;
+  - at most 4 tests a day, and only with 8 GB free.
+- **First results on the owner's bot:**
+  - the current settings, replayed on the last 24 hours, made **150 trades for −0.87 SOL (−3.8% a trade, 27% won)**: the Oct 3–4 edge did not hold in the last day;
+  - net inflow 2 vs 3 SOL: no clear difference;
+  - exit at curve 92% vs 94%: no clear difference (−0.76 vs −0.87 SOL).
+- **The room plays it out:** Claude sends a bot to the lab bench, the lab board shows the test, and the result is announced.
+
+**Claude leads:**
+- He assigns the house tasks ("Quant, go run a backtest").
+- He makes rounds: walks to a teammate, asks a role question, and the teammate answers with live numbers.
+- He chairs huddles from the head of the table and stays on the floor.
+
+**The AI places stops and orders, with the owner's Approve:**
+- New tools: `set_position_exits` (stop, take profit with the fraction it sells, trail) on the owner's positions; `place_order` (limit buy/sell, alert by market cap; buys capped like `buy_token`); `cancel_order`.
+- The bot's own positions keep their strategy's exits.
+
+**A chat bar on every tab:** it talks to Claude, shows the last messages, and opens by itself with Approve/Decline when he needs an OK.
+
+**Other chains, read-only:**
+- 🌐 trending and new pools on Solana, BNB Chain, Base and Ethereum, from GeckoTerminal, cached 90 s.
+- "Fresh only" (under a week) is on by default. The huddles see what's trending per chain.
+- No trading on other chains until the MULTICHAIN.md go/no-go is met.
+
+**HQ (Controls → 🏠 HQ):** services, bot, market data and backup, wallet recorder, lab, AI desk, chat, and free disk and memory.
+
+**Fixes from playing with it:**
+- Analytics' Edge confidence showed NaN: the server's edge check overwrote analytics' own `edge`; it's now `edge_check`.
+- A rebuilt room left old speech bubbles frozen on screen.
+- Charts views ran off the right edge on phones.
+- The chat answered "no tool" to a how-to. Now the manual is attached to real how-to questions only ("show me my P&L" doesn't get it), and a live re-test answered with the exact clicks.
+
+---
+
 ## 2026-10-05 — Entry #45: Feed outages: stop flapping, and a budgeted Helius backup
 
 **Owner's request:** "We gotta figure out the latency… missed a few paper trades because the mainnet was down."

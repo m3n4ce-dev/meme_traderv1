@@ -39,6 +39,8 @@ Facts to keep in mind (paper results, 2026-10-03 to 10-04; see BUILD_LOG #32 and
 - Market data: free public RPC first (reconnect on hang-ups), PublicNode as fallback, the owner's Helius websocket
   as a budgeted outage backup (feed.backup_mb_per_day). The stream is ~400-800 MB/h. Don't add subscription probes
   against these endpoints.
+- The lab (sniper/lab.py) replays one graduation setting change on the last 24 h (~20 min, its own systemd-run
+  service). As of 2026-10-05 the current settings replay at -0.87 SOL over 150 trades on the last 24 h: no proven edge now.
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
 - Manual trading is the owner's: never resize or block it. Positions the owner hands to the bots "ride"
   (half out at 2x, a 30% trail, a stop 40% down). Lifting a kill-switch halt is the owner's call only.
