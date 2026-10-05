@@ -140,3 +140,23 @@ def test_callout_agent_rate_limit_bags_and_factual_text():
     # callout bags never count against trading position slots
     assert "max positions" not in eng.entries_blocked() or \
         sum(1 for p in eng.positions.values() if p.source != "callout") >= params.sniper.capital.max_open_positions
+
+
+def test_a_model_that_refuses_an_option_is_asked_again_without_it():
+    """Seen 2026-10-05: Haiku 4.5 answered 400 'This model does not support the effort parameter.'"""
+    class Picky(FakeClient):
+        async def create(self, **kw):
+            if "effort" in (kw.get("output_config") or {}):
+                self.calls.append("refused")
+                raise RuntimeError("Error code: 400 - This model does not support the effort parameter.")
+            return await super().create(**kw)
+    params = copy.deepcopy(P)
+    params["sniper"]["desk"].update(enabled=True, effort="low")
+    client = Picky()
+    d = Desk(params.sniper.desk, client=client)
+    d.caps = {"effort": True, "json": True}                 # (what the capability lookup assumes when it can't tell)
+    v = asyncio.run(d._ask("veteran", {"symbol": "X"}))
+    assert v.vote == "buy" and not v.error and d.caps["effort"] is False
+    n = len(client.calls)
+    asyncio.run(d._ask("quant", {"symbol": "X"}))
+    assert client.calls[n:] and "refused" not in client.calls[n:]     # remembered: no second refusal
