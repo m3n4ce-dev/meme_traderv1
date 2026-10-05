@@ -4,6 +4,45 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #32: Trade tips, the edge check, smarter personas, graduated coins, tightening
+
+- **Tips on your own trades, never limits** (owner: "manual trading to be manual... no restrictions"):
+  - **When a tip shows:** after a manual buy or sell goes through, a small box may show:
+    - the buy is 10%+ of the account;
+    - the coin has red flags;
+    - the coin is quiet;
+    - you've had 3 losses in a row;
+    - you sold a quick in-and-out (about 6% round-trip cost, measured on the owner's flips).
+  - **Controls:** "Don't show this one again", or turn tips off (Ctrl+K or `tips off` in the terminal).
+  - **The quiet-coin confirmation is now a tip:** nothing asks "are you sure" any more, except the REAL MONEY confirmation in live mode.
+  - **The trade panel shows the bot's take** on the coin: its status and score.
+- **Edge check** (Analytics panel, `python -m meme_trader.sniper edge`, `sniper/edge.py`):
+  - **What it shows per strategy:** the last 14 days of trades (paper and live never mixed); return per SOL staked; the average trade with a 90% bootstrap range; the result without the best 3 trades; and days up.
+  - **Verdict and caveats in plain English.** Caveats flag a short span, changing settings, profit resting on a few runners, and paper fills.
+  - **"Copy for a group":** the text leaves your own trades out and is labelled paper.
+  - **First run on the live paper data:**
+    - **Graduation plays:** +6.5% per SOL over 162 trades (90% range of the average trade +0.3% to +14.3%), "promising". But its best three trades made 92% of the profit, it covers only 1.5 days, and the settings changed 8 times.
+    - **Sniper:** −13.8%, "losing, not by bad luck".
+    - The frozen holdout test (~Oct 17) is still the real verdict.
+- **Personas answer questions** (owner: they replied "not for us, drop a CA" to "what's holding us back?"):
+  - **A briefing for each reply:** the edge check, top rejection reasons, what blocks entries, the settings, recent trades, the exit lab, the feed and your recent notes.
+  - **New instructions:** questions get answers from those numbers (stance "info", no tag), and notes like "that one" are resolved through recent notes.
+  - **Tested on the demo with Claude:** all four personas named the same losing copy leader with its trades, the positions limit blocking entries, and the sample sizes, each from its own angle.
+- **Graduated coins on paper** (owner hit "it has graduated off the bonding curve" from Pulse's Graduated column):
+  - **Paper buys:** they fill at DexScreener's PumpSwap pool price, refreshed every 10 s while held, with curve fees modelled (a bit worse than the pool's ~0.3%). A pasted address the bot never saw trading is priced the same way.
+  - **Live** refuses with a clear reason: its orders go to the bonding curve only.
+- **Endpoint keys:**
+  - **Test buttons** for the Solana RPC URL (one getSlot), the websocket URL (one slot update, then unsubscribe) and the Helius key. A result never echoes the URL, since it can hold a key.
+  - **A Helius key fills in an empty RPC URL.**
+  - **The help text** gives the exact Helius and QuickNode formats, and warns that the ~20 GB/day trade stream can use up a metered free plan in days.
+- **Fixes:**
+  - **Replies cut off:** note replies ran off the right edge of their column (a grid track sized to the reply box). They now wrap at every width, including phones.
+  - **P&L board:** the "vs start" and "today" text overlapped the chart; each now has its own line.
+  - **Coin post drafts:** "Post" on a coin made a bare `$73fL…pump / CA:` draft. It now has the symbol and name, MC, curve, buyers or holders, top 10, dev and red flags, filled in by a lookup for coins the bot isn't tracking.
+- **Tests:** 285 pass. The full browser sweep, the terminal test, the note layout at 4 widths and the post draft are all clean, with no page errors.
+
+---
+
 ## 2026-10-05 — Entry #31: Resume after the kill switch, and a terminal
 
 - **The halt that a restart couldn't clear:**
