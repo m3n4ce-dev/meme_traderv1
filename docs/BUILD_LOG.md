@@ -4,6 +4,29 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #31: Resume after the kill switch, and a terminal
+
+- **The halt that a restart couldn't clear:**
+  - **What happened:** 16 manual paper trades in 13 minutes took the account from 5 to 2.82 SOL (−43.6%), past the 40% drawdown kill switch.
+    - 1 win in 16. Two 1 SOL buys that went to zero ($SLJK −0.997, BOOCATE −0.904) were 87% of the loss.
+    - The quick in-and-outs each lost about 6–7%: fees plus the move against you on the way in and out.
+  - **Why the banner advice failed:** it said "Restart the bot to reset". That was true before the paper account carried over restarts (#29), so the halt now survived the owner's restart.
+  - **Fix:** a **Resume trading…** button in the red banner (`unhalt` in the terminal), the owner's call only (not the agent's).
+    - If the account is still past the limit, the kill switch counts from the equity at that moment (`book.kill_base`, saved with the account), so it doesn't trip again at once and still protects what's left.
+    - A paper top-up moves that line up with the cash.
+    - The drawdown card shows the new line.
+  - **Paper banner shortcuts:** Add paper SOL and Start over.
+- **>_ Terminal** (owner: "a terminal popup to do commands"): the `>_` button or the backtick key.
+  - **Commands:** `status`, `pos`, `buy <coin> <sol>`, `sell <coin|all> [pct]`, `hand`/`take`, `away`, `alert` and `limit` by market cap, `orders`/`cancel`, `pause`/`resume`, `unhalt`, `kill`, `deposit`, `reset`, `risk`, `desk on|off|test|model`, `set`/`save`/`settings`, `log`, `coin`, `ask` (Claude's answer prints in the terminal), `go <tab>`, `restart`.
+  - **Coins** are found by symbol among what the bot can see, or by contract address.
+  - **Typing:** risky commands ask for `y`. History is kept with the up arrow; Tab completes.
+  - **Bot commands only:** it sends the same actions as the buttons, so the same checks apply. It is deliberately not a system shell: the page shows coin names strangers chose, and a shell in the browser would make any slip there a way into the machine.
+- **Tests:**
+  - 277 pass, including lifting the kill switch: the agent is refused, the new line is saved and reloaded, a top-up moves it, it still trips past it, and the dashboard action works.
+  - Browser: every terminal command at 1440 px and 420 px; the banner button. No page errors and no sideways scroll.
+
+---
+
 ## 2026-10-05 — Entry #30: The couch, no APE, weather, room editor, exit lab, ↻ Restart, cheaper desk models
 
 - **Couch:** it sat on the front edge of the room facing out. It now stands against the back wall under the corkboard, facing into the room, and the napping personas face out from it.
