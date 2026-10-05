@@ -312,7 +312,7 @@ def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
     pos.peak_price = max(pos.peak_price, price)
     gain = pos.gain_pct(price)
     if s.migrated and m.get("sell_on_graduation", True):
-        return 1.0, "manual: graduated (curve only)"
+        return 1.0, "manual: graduated (live sells at graduation)"
     if m.get("sl") and gain <= -m["sl"]:
         return 1.0, f"manual stop {gain:.0f}%"
     if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:
@@ -334,7 +334,7 @@ def evaluate_ride_exit(pos: SniperPosition, s: TokenState, r: dict, live: bool =
     handed = pos.handed_price or pos.entry_price
     pos.handed_peak = max(pos.handed_peak or handed, price)
     if s.migrated and live:
-        return 1.0, "bots: graduated (live orders work on the curve only)"
+        return 1.0, "bots: graduated (live sells at graduation)"
     if price <= min(pos.entry_price, handed) * (1 - r["stop_pct"] / 100):
         return 1.0, f"bots: stop {pos.gain_pct(price):.0f}%"
     if not pos.ride_tp and r.get("take_x") and price >= pos.entry_price * r["take_x"]:
@@ -418,16 +418,35 @@ def late_checklist(s: TokenState, now: float, L, red: dict) -> dict:
                                / max(1, sum(1 for r in rows if r["group"] == "momentum")), 3)}
 
 
-def exit_watch(pos: SniperPosition, s: TokenState, now: float, L, x) -> list[dict]:
-    """How close each exit is, for the Desk. Graduation plays mirror evaluate_late_exit's order; other
-    positions show their stop, peak and time limit."""
+def exit_watch(pos: SniperPosition, s: TokenState, now: float, L, x, own: dict | None = None) -> list[dict]:
+    """How close each exit is, for the Desk. Graduation plays mirror evaluate_late_exit's order; your own
+    positions (own = {"ride": {...}} when handed over, else your stop/take profit/trail) show only the exits
+    that really apply to them; other positions show their stop, peak and time limit."""
     price = s.curve.price
     gain = pos.gain_pct(price)
     peak = max(pos.peak_price, price)
     drop = (1 - price / peak) * 100 if peak else 0.0
     held = now - pos.opened_at
     out = []
-    if pos.source == "late":
+    if own is not None and "ride" in own:                 # handed to the bots: evaluate_ride_exit's rules
+        r, handed = own["ride"], pos.handed_price or pos.entry_price
+        floor = min(pos.entry_price, handed) * (1 - r["stop_pct"] / 100)
+        out = [{"label": "stop", "value": f"{gain:+.0f}%", "limit": f"-{r['stop_pct']:g}% of the hand-over",
+                "frac": (min(pos.entry_price, handed) - price) / (min(pos.entry_price, handed) - floor) if price < min(pos.entry_price, handed) else 0.0}]
+        if not pos.ride_tp:
+            out.append({"label": f"half out at {r['take_x']:g}x", "value": f"{price / pos.entry_price:.2f}x",
+                        "limit": f"{r['take_x']:g}x", "frac": price / (pos.entry_price * r["take_x"])})
+        out.append({"label": "trailing stop", "value": f"-{(1 - price / max(pos.handed_peak or price, price)) * 100:.0f}% off its peak",
+                    "limit": f"-{r['trail_pct']:g}% once armed", "frac": None})
+    elif own is not None:                                 # yours: only the exits you set
+        if own.get("sl"):
+            out.append({"label": "your stop", "value": f"{gain:+.0f}%", "limit": f"-{own['sl']:g}%", "frac": max(0.0, -gain) / own["sl"]})
+        if own.get("tp") and not own.get("tp_done"):
+            out.append({"label": "your take profit", "value": f"{gain:+.0f}%", "limit": f"+{own['tp']:g}%", "frac": max(0.0, gain) / own["tp"]})
+        if own.get("trail"):
+            out.append({"label": "your trail", "value": f"-{drop:.0f}% off peak", "limit": f"-{own['trail']:g}%",
+                        "frac": drop / own["trail"] if gain > 0 else None})
+    elif pos.source == "late":
         prog = s.curve.progress * 100
         since_high = now - s.last_high_ts()
         flow = s.net_flow_sol(now, x.decay_window_s)

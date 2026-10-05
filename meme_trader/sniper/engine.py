@@ -1526,10 +1526,11 @@ class Engine:
 
     async def _graduated_ok(self, s: TokenState) -> str:
         """A coin that left the curve for PumpSwap: paper trades it at DexScreener's pool price (refreshed
-        every 10 s while held, curve fees modelled - a little worse than the pool's real ~0.3%). Live orders
-        here go to the bonding curve only, so live refuses. '' or why not."""
+        every 10 s while held, curve fees modelled - a little worse than the pool's real ~0.3%). Live refuses:
+        its orders would route to PumpSwap (pool=auto), but a price that updates every 10 s is too stale to
+        trade real money on. '' or why not."""
         if self.mode.startswith("live"):
-            return "it has graduated to PumpSwap: the bot's live orders go to the bonding curve only (paper can trade it)"
+            return "it has graduated to PumpSwap: live trading of graduated coins is off, since their price only updates every 10 s (paper can trade it)"
         if not self.feed.realtime:                        # a replay or demo: no pool to ask
             return "" if s.price_known else "it has graduated and there's no pool price for it here"
         if s.mint not in await self._dex_price([s.mint]):   # a fresh price to buy at
@@ -1807,9 +1808,15 @@ class Engine:
             if not s or pos.source == "callout":
                 continue
             price = self._mark(m, pos)
+            own = None
+            if pos.source == "manual":                    # yours: no time limit, only your rules (or the ride's)
+                mc = self._manual_cfg()
+                own = {"ride": self._ride_cfg()} if pos.bot else {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
+                                                                   "trail": mc.trail_pct, **(pos.manual or {})}
             holding.append({"mint": m, "symbol": pos.symbol, "source": pos.source, "gain_pct": pos.gain_pct(price),
                             "peak_gain_pct": pos.gain_pct(pos.peak_price), "held_s": round(self.now - pos.opened_at),
-                            "value_sol": pos.tokens * price, "watch": exit_watch(pos, s, self.now, L, x)})
+                            "value_sol": pos.tokens * price, "watch": exit_watch(pos, s, self.now, L, x, own),
+                            "manual": pos.source == "manual", "bot": pos.bot})
         agent_log = [l for l in self.log if l["level"] in ("buy", "sell", "close", "desk", "agent", "error")][-60:]
         d = self.desk
         return {"now": self.now, "blocked": self.entries_blocked(), "paused": self.paused,
@@ -2780,6 +2787,16 @@ class Engine:
                 "per_review_usd": round(per_vote * len(self.p.desk.personas), 4), "measured": bool(calls),
                 "providers": {k: {kk: v[kk] for kk in ("label", "key", "base_url", "model", "note")} for k, v in PROVIDERS.items()},
                 "claude_models": {k: v[0] for k, v in CLAUDE_MODELS.items()}}
+
+    def set_desk_prices(self, pin: float, pout: float, who: str = "dashboard") -> None:
+        """Another provider's price for its cost estimate ($ per million tokens), saved with the model."""
+        self.p.desk["other_price_in_per_mtok"], self.p.desk["other_price_out_per_mtok"] = round(pin, 4), round(pout, 4)
+        if who == "dashboard" and self.persist:
+            try:
+                for k in ("other_price_in_per_mtok", "other_price_out_per_mtok"):
+                    self.save_setting(f"desk.{k}", self.p.desk[k])
+            except OSError:
+                pass
 
     def set_desk_brain(self, provider: str, model: str = "", base_url: str = "", who: str = "dashboard") -> str:
         from .desk import PROVIDERS
