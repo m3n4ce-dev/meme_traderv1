@@ -93,3 +93,24 @@ def as_text(rep: dict, include_manual: bool = False) -> str:
         lines.append(f"  verdict: {s['verdict']}")
         lines.extend(f"  note: {c}" for c in s["caveats"])
     return "\n".join(lines)
+
+
+def exit_whatifs(trades: list[dict], source: str = "late", cost_pct: float = 7.0) -> dict:
+    """Rough what-ifs for other exits on a strategy's past trades, from each trade's recorded peak: "sell all at +X%"
+    and "bank part at +X%, the rest as traded". Approximate (peaks are sampled, ~7% round trip assumed) and in-sample:
+    a hint for the team, which the exit lab then tests forward."""
+    rows = [t for t in trades if (t.get("source") or "").split(":")[0] == source and t.get("cost")]
+    if not rows:
+        return {}
+    def total(rule):
+        xs = [rule(t) for t in rows]
+        return {"mean_pct": round(statistics.fmean(xs), 1), "won_pct": round(sum(x > 0 for x in xs) / len(xs) * 100),
+                "total_sol": round(sum(x / 100 * t["cost"] for x, t in zip(xs, rows)), 2)}
+    pk = lambda t: t.get("peak_gain_pct") or 0
+    out = {"trades": len(rows), "as traded": total(lambda t: t["pnl_pct"])}
+    for tp in (30, 50, 100):
+        out[f"sell all at +{tp}%"] = total(lambda t, tp=tp: (tp - cost_pct) if pk(t) >= tp else t["pnl_pct"])
+    for frac, tp in ((.5, 30), (.5, 50), (1 / 3, 30)):
+        out[f"bank {'half' if frac == .5 else 'a third'} at +{tp}%, rest as traded"] = total(
+            lambda t, f=frac, tp=tp: (f * (tp - cost_pct) + (1 - f) * t["pnl_pct"]) if pk(t) >= tp else t["pnl_pct"])
+    return out

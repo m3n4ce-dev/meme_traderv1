@@ -477,6 +477,20 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             except Exception:
                 ids = []
             return {"ok": True, "action": "desk_models", "models": ids[:300]}
+        if action == "huddle":                            # the owner calls a team meeting
+            from ..sniper import desk as deskmod
+
+            why = deskmod.provider_ready(engine.p.desk)
+            if why:
+                return {"ok": False, "text": why}
+            asyncio.ensure_future(engine.huddle("the owner called a meeting"))
+            return {"ok": True, "text": "The team is gathering at the AI table…"}
+        if action == "huddle_apply":                      # the owner approves one of the team's setting changes
+            try:
+                err = engine.apply_huddle_action(str(cmd.get("id") or ""), int(cmd.get("i")))
+            except (TypeError, ValueError):
+                err = "which change?"
+            return {"ok": not err, "text": err or "Applied and saved"}
         if action == "desk_test":
             from ..config import Params
             from ..sniper import desk as deskmod

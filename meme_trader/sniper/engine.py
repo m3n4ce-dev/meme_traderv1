@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import heapq
 import json
+import secrets
 import re
 import time
 from collections import Counter, defaultdict, deque
@@ -228,6 +229,22 @@ class Engine:
         self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
+        self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
+        self._last_huddle, self._huddling, self.huddle_error = 0.0, False, ""
+        self.plan: dict = {}                                 # the team's growth plan, updated at every huddle
+        if self.persist and (DATA / "desk_plan.json").exists():
+            try:
+                self.plan = json.loads((DATA / "desk_plan.json").read_text())
+            except (OSError, ValueError):
+                pass
+        if self.persist and (DATA / "huddles.jsonl").exists():
+            try:
+                for line in (DATA / "huddles.jsonl").read_text().splitlines()[-20:]:
+                    self.huddles.append(json.loads(line))
+                if self.huddles:
+                    self._last_huddle = self.huddles[-1]["ts"]
+            except (OSError, ValueError):
+                pass
         self._load_funders()
         self._last_price_refresh = -1e12
         # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
@@ -1460,6 +1477,7 @@ class Engine:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
         await self._price_fallback()
+        self._maybe_huddle()
         cleanup = self.now - self._last_cleanup >= 10       # deletions only need a 10 s cadence
         if cleanup:
             self._last_cleanup = self.now
@@ -1832,6 +1850,8 @@ class Engine:
                          "tracked": len(self.tokens)},
                 "holding": holding, "thoughts": list(self.thoughts)[-80:], "log": agent_log,
                 "rejects": self.rejects.most_common(5),
+                "huddles": list(self.huddles)[::-1][:5], "huddle_minutes": float(self.p.desk.get("huddle_minutes", 30) or 0), "plan": self.plan,
+                "huddle_error": self.huddle_error, "huddling": self._huddling,
                 "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled), "brain": self.desk_brain(),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
@@ -2360,10 +2380,96 @@ class Engine:
         self.say("desk", f"the desk replied to “{it.get('title', '')[:60]}”")
         return ""
 
+    async def huddle(self, reason: str = "scheduled") -> str:
+        """The team meets: one model call writes a discussion between the bots from the bot's real state, which the
+        room plays out at the AI table. Measurement and talk only: a suggestion is for the owner, never applied.
+        '' or why not."""
+        from . import desk as deskmod
+        from ..config import Params
+
+        pd = self.p.desk
+        why = deskmod.provider_ready(pd)
+        if why:
+            return why + " so the desk can meet"
+        if self._huddling:
+            return "the team is already meeting"
+        self._huddling = True
+        try:
+            brief = await self.desk_brief("")
+            brain = deskmod.Desk(Params({**pd, "enabled": True}))
+            r = await deskmod.run_huddle(brain, pd, brief, [h.get("takeaway", "") for h in self.huddles], reason, self.plan)
+            pin, pout = brain.prices()
+            cost = r.get("input_tokens", 0) / 1e6 * pin + r.get("output_tokens", 0) / 1e6 * pout
+            self.note_stats["calls"] += 1
+            self.note_stats["input_tokens"] += r.get("input_tokens", 0)
+            self.note_stats["output_tokens"] += r.get("output_tokens", 0)
+            self._last_huddle = self.now
+            if r.get("error"):
+                self.huddle_error = deskmod.friendly_error(r["error"])
+                self.say("error", f"desk huddle failed: {self.huddle_error}")
+                return self.huddle_error
+            self.huddle_error = ""
+            known = {c["key"] for c in self.controls()} | {c["key"] for c in self.advanced_controls()}
+            actions = [{**a, "applied": False} for a in r.get("actions", []) if a["key"] in known]   # real settings only
+            if r.get("plan") and r["plan"].get("goal"):
+                self.plan = {**r["plan"], "updated": time.time()}
+                if self.persist:
+                    try:
+                        (DATA / "desk_plan.json").write_text(json.dumps(self.plan))
+                    except OSError:
+                        pass
+            h = {"id": secrets.token_hex(4), "ts": self.now, "wall": time.time(), "reason": reason, "lines": r["lines"],
+                 "takeaway": r["takeaway"], "suggestion": r["suggestion"], "actions": actions,
+                 "model": deskmod.model_of(pd), "cost_usd": round(cost, 4)}
+            self.huddles.append(h)
+            if self.persist:
+                try:
+                    with open(DATA / "huddles.jsonl", "a") as f:
+                        f.write(json.dumps(h) + "\n")
+                except OSError:
+                    pass
+            self.say("desk", f"desk huddle: {h['takeaway'][:160]}")
+            return ""
+        finally:
+            self._huddling = False
+
+    def apply_huddle_action(self, hid: str, i: int, who: str = "dashboard") -> str:
+        """The owner approves one of the team's setting changes: applied now and saved. Never the agent's call. '' or why not."""
+        if who != "dashboard":
+            return "only the owner can apply the team's changes"
+        h = next((x for x in self.huddles if x.get("id") == hid), None)
+        acts = (h or {}).get("actions") or []
+        if not h or not 0 <= i < len(acts):
+            return "that suggestion is gone"
+        a = acts[i]
+        if a.get("applied"):
+            return "already applied"
+        err = self.set_control(a["key"], a["value"])
+        if err:
+            return err
+        err = self.save_controls() if self.persist else ""
+        a["applied"] = True
+        self.say("info", f"the owner applied the team's change: {a['key']} = {a['value']} ({a['why'][:80]})")
+        if self.persist:
+            try:
+                (DATA / "huddles.jsonl").write_text("".join(json.dumps(x) + "\n" for x in self.huddles))
+            except OSError:
+                pass
+        return err
+
+    def _maybe_huddle(self) -> None:
+        """Every desk.huddle_minutes while the AI desk is awake (0 = only when the owner calls one)."""
+        mins = float(self.p.desk.get("huddle_minutes", 30) or 0)
+        if mins <= 0 or not self.feed.realtime or self._huddling or not (self.desk and self.desk.enabled):
+            return
+        if self.now - self._last_huddle >= mins * 60:
+            self._last_huddle = self.now                         # (also on failure: no retry storm)
+            asyncio.ensure_future(self.huddle("scheduled"))
+
     async def desk_brief(self, item_id: str = "") -> dict:
         """The bot's real state, compact, so the personas can answer questions about it ("what's holding us
         back?") with numbers instead of guessing. Only facts the dashboard already shows; no keys or wallets."""
-        from .edge import check
+        from .edge import check, exit_whatifs
 
         if self.persist:
             from .report import load_trades
@@ -2377,8 +2483,17 @@ class Engine:
                 edge.append({k: (round(x, 3) if isinstance(x, float) else x) for k, x in v.items()
                              if k in ("label", "n", "ret_pct", "mean_pct", "median_pct", "win_rate", "lo_pct", "hi_pct",
                                       "without_best3_sol", "pnl_sol", "verdict", "caveats", "span_days")})
+        whatifs = await asyncio.to_thread(exit_whatifs, rows, "late")
+        mine = [t for t in rows if t.get("source") == "manual"]
+        owner = {} if not mine else {
+            "trades": len(mine), "total_sol": round(sum(t["pnl"] for t in mine), 3),
+            "sold_at_50pct_plus": {"trades": sum(1 for t in mine if t["pnl_pct"] >= 50), "sol": round(sum(t["pnl"] for t in mine if t["pnl_pct"] >= 50), 3)},
+            "losers_below_minus_40pct": {"trades": sum(1 for t in mine if t["pnl_pct"] <= -40), "sol": round(sum(t["pnl"] for t in mine if t["pnl_pct"] <= -40), 3),
+                                         "their_best_peak_pct": round(max([t.get("peak_gain_pct") or 0 for t in mine if t["pnl_pct"] <= -40] or [0]))},
+            "own_stop_set_pct": self._manual_cfg().stop_loss_pct or None}
         s = self.summary()
-        recent = [{"symbol": c.get("symbol"), "strategy": (c.get("source") or "").split(":")[0],
+        recent = [{"symbol": c.get("symbol"), "strategy": "manual: the owner's own trade, on the owner's exits only"
+                   if c.get("source") == "manual" else (c.get("source") or "").split(":")[0],
                    "pnl_pct": round(c.get("pnl_pct") or 0, 1), "exit": (c.get("exit") or "")[:60],
                    "held_s": round((c.get("closed") or 0) - (c.get("opened") or 0))} for c in self.book.closed[-12:]]
         lab = self.lab.view("late")
@@ -2394,10 +2509,14 @@ class Engine:
             "top_rejections": [[why, n] for why, n in self.rejects.most_common(10)],
             "recent_trades": recent,
             "exit_lab": [{"rule": v["variant"], "n": v["n"], "mean_pct": round(v["mean_pct"], 1)} for v in (lab.get("variants") or [])[:7]],
-            "settings": {c["key"]: c["value"] for c in self.controls()},
+            # plain names next to the keys: a model read "entry.enabled: false" as "all entries are off" (it's only the sniper)
+            "strategy_switches": {"graduation plays (late.enabled)": self.p.late.enabled, "early sniper (entry.enabled)": self.p.entry.enabled,
+                                  "copy trading (copy.enabled)": self.p.copy.enabled, "callouts (callouts.enabled)": self.p.callouts.enabled},
+            "settings": {f"{c['label']} ({c['key']})": c["value"] for c in self.controls()},
             "feed": {"host": getattr(self.feed, "host", ""), "lag_s": getattr(self.feed, "lag_s", None),
                      "degraded": getattr(self.feed, "degraded_reason", "") or None},
             "ai_desk_voting": bool(self.desk and self.desk.enabled), "recent_notes": notes,
+            "graduation_exit_whatifs": whatifs, "owner_manual_trading": owner,
         }
 
     # ------------------------------------------------------------------ hand your positions to the bots
