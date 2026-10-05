@@ -12,6 +12,10 @@ not upgradeable, no blacklist, no pausing, no owner balance changes); on Solana 
 authorities must be renounced. Measured 2026-10-05: 3 of the 8 trending BNB Chain pools and 1 of 8 on Base were
 honeypots, and honeypot.is didn't know most brand-new pools or some large BNB Chain ones.
 
+Live prices for held coins come from the same routers (a small sell quote every poll_s): measured 2026-10-05,
+router quotes changed every 2.5-5 s while DexScreener's price changed once in 41 s, so stops decided on DexScreener
+filled 7-10% past their level. DexScreener stays the fallback, and the source of liquidity and market cap.
+
 Real-price check: at every paper buy and sell, a real swap router is asked what the same swap would return
 (KyberSwap on BNB Chain / Base / Ethereum, Jupiter on Solana; no key or wallet needed). A coin no router can buy is
 skipped, and each closed trade carries its "real" P&L next to the paper one. readiness() turns those into the
@@ -32,7 +36,7 @@ from pathlib import Path
 DEFAULTS = {
     "enabled": True,
     "chains": ["bsc", "base", "solana"],   # "eth" too if you like: its gas (~$1-3 a swap) eats small trades
-    "poll_s": 10, "scan_s": 90, "max_open": 4,
+    "poll_s": 5, "scan_s": 90, "max_open": 4,
     "size_usd": 0,                         # 0 = the risk dial's sizing.base_usd
     "min_liq_usd": 20_000, "min_vol_h1_usd": 20_000, "min_age_min": 15, "max_age_h": 168,
     "min_mcap_usd": 50_000, "max_mcap_usd": 20_000_000,
@@ -188,6 +192,7 @@ class XChain:
         self._chains = None
         self._recorded = None                          # the lists last kept (their fetch time)
         self._ready: tuple[float, dict] | None = None
+        self._selling: set[str] = set()                 # one sale at a time per coin (a sale waits on the router)
         self.load()
 
     @property
@@ -335,8 +340,30 @@ class XChain:
             for p in self.positions.values():
                 x = q.get(self._k(p["chain"], p["pool"])) if p["chain"] == chain else None
                 if x:
-                    p.update(last=x["price"], last_ts=now, liq=x["liq"] or p["liq"], mcap=x["mcap"])
-                    p["peak"], p["trough"] = max(p["peak"], x["price"]), min(p["trough"], x["price"])
+                    p.update(liq=x["liq"] or p["liq"], mcap=x["mcap"])
+                    if now - p.get("router_ts", 0) > 3 * float(self.cfg["poll_s"]):   # the router's price is fresher
+                        self._mark(p, x["price"], now, "dexscreener")
+        for p in list(self.positions.values()):
+            px = await self.router_price(p)
+            if px:
+                p["router_ts"] = now
+                self._mark(p, px, now, "router")
+
+    def _mark(self, p: dict, price: float, now: float, src: str) -> None:
+        p.update(last=price, last_ts=now, px_src=src)
+        p["peak"], p["trough"] = max(p["peak"], price), min(p["trough"], price)
+
+    async def router_price(self, p: dict) -> float | None:
+        """The coin's price now, from a small sell quote at a real router (market price: the pool fee added back)."""
+        r, dec = p.get("real"), p.get("dec")
+        if not r or dec is None or r["raw_left"] <= 0:
+            return None
+        amt = max(1, r["raw_left"] // 50)               # ~2% of the holding: next to no price impact
+        st, q = await self.real_quote(p["chain"], p["token"], STABLE[p["chain"]][0], amt)
+        if st != "ok":
+            return None
+        usd = q["out_raw"] / 10 ** STABLE[p["chain"]][1]
+        return usd / (amt / 10 ** dec) / max(1 - p["fee_pct"] / 100, 0.5)
 
     def block(self, cost_sol: float) -> str:
         e, cfg = self.e, self.cfg
@@ -387,7 +414,7 @@ class XChain:
                 why = "traded lately"
             out.append({**r, "why": why})
         out.sort(key=lambda r: (r["why"] != "", -(r.get("vol_h1") or 0)))
-        self.scan = [{k: r.get(k) for k in ("chain", "chain_name", "symbol", "name", "pool", "token", "mcap_usd", "liq_usd",
+        self.scan = [{k: r.get(k) for k in ("chain", "chain_name", "symbol", "name", "pool", "token", "mcap_usd", "fdv_usd", "liq_usd",
                                              "vol_h1", "chg_h1", "chg_m5", "buys_h1", "sells_h1", "age_s", "dex", "why")}
                      for r in out[:15]]
         if d.get("fetched", 0) != self._recorded:          # new lists only: the same lists aren't kept twice
@@ -457,6 +484,11 @@ class XChain:
                "why": f"1h {r.get('chg_h1'):+.0f}%, {r.get('buys_h1')}/{r.get('sells_h1')} buys/sells, ${(r.get('vol_h1') or 0) / 1000:,.0f}k vol"}
         if real:                                          # the same buy at a real router's price
             dec = info.get("decimals")
+            if dec is None and real.get("out_usd"):        # EVM: the token's decimals, from the router's own dollar value
+                import math
+                d = round(math.log10(real["out_raw"] / (real["out_usd"] / q["price"])))
+                dec = d if 0 <= d <= 30 else None
+            pos["dec"] = dec
             val = real["out_usd"] if real.get("out_usd") else (real["out_raw"] / 10 ** dec * q["price"] if dec is not None else None)
             paper_val = tokens * q["price"]
             pos["real"] = {"raw": real["out_raw"], "raw_left": real["out_raw"],
@@ -470,9 +502,16 @@ class XChain:
         return pos
 
     async def sell(self, key: str, frac: float, reason: str, now: float, price: float | None = None) -> None:
-        pos = self.positions.get(key)
-        if pos is None:
+        if self.positions.get(key) is None or key in self._selling:
             return
+        self._selling.add(key)
+        try:
+            await self._sell(key, frac, reason, now, price)
+        finally:
+            self._selling.discard(key)
+
+    async def _sell(self, key: str, frac: float, reason: str, now: float, price: float | None) -> None:
+        pos = self.positions[key]
         real, rq, st, amt = pos.get("real"), None, "", 0
         if real and real["raw_left"] > 0 and price != 0.0:   # ask a real router first: what would this sale fetch?
             amt = real["raw_left"] if frac >= 0.999 else int(real["raw_left"] * frac)
@@ -529,6 +568,8 @@ class XChain:
                "peak_gain_pct": (pos["peak"] / pos["entry"] - 1) * 100, "mae_pct": (pos["trough"] / pos["entry"] - 1) * 100,
                "score": 0.0, "initials": pos["tp_taken"], "exit": pos["exits"][-1][1] if pos["exits"] else "",
                "source": "chains", "desk": "", "p": None,
+               # which run produced it, like every other trade (paper results are never mixed with live or demo)
+               "mode": e.mode, "session": e.session, "start_sol": e.book.start_sol, "config": e.config_id, "model": "",
                "chain": pos["chain"], "pool": pos["pool"], "url": pos["url"],
                "cost_usd": round(pos["cost_usd"], 2), "proceeds_usd": round(pos["proceeds_usd"], 2),
                "pnl_usd": round(pos["proceeds_usd"] - pos["cost_usd"], 2),
@@ -576,6 +617,8 @@ class XChain:
     async def sell_now(self, key: str) -> str:
         if key not in self.positions:
             return "no such position"
+        if key in self._selling:
+            return "a sale of this coin is already going through"
         await self.sell(key, 1.0, "you sold", time.time())
         return ""
 
@@ -597,6 +640,7 @@ class XChain:
                           "move_pct": round((p["last"] / p["entry"] - 1) * 100, 1), "stale_s": round(now - p["last_ts"])})
         day = time.strftime("%Y-%m-%d", time.gmtime(now))
         today = [c for c in self.e.book.closed if c.get("source") == "chains" and time.strftime("%Y-%m-%d", time.gmtime(c["closed"])) == day]
+        quoted = [c for c in today if (c.get("real") or {}).get("complete")]          # real prices: the same trades on both sides
         size = self.size_usd()
         mode = self.e.mode
         note = "" if mode == "paper" else ("demo: other chains trade only in the real paper bot" if "synthetic" in mode
@@ -607,7 +651,8 @@ class XChain:
                 "last_scan": self.last_scan, "notes": [{"ts": t, "text": x} for t, x in list(self.notes)[:5]],
                 "today": {"trades": len(today), "pnl_sol": round(sum(c["pnl"] for c in today), 4),
                           "pnl_usd": round(sum(c.get("pnl_usd") or 0 for c in today), 2),
-                          "real_usd": round(sum((c.get("real") or {}).get("pnl_usd") or 0 for c in today), 2)},
+                          "real_usd": round(sum(c["real"]["pnl_usd"] for c in quoted), 2), "real_n": len(quoted),
+                          "real_paper_usd": round(sum(c.get("pnl_usd") or 0 for c in quoted), 2)},
                 "ready": self.readiness(),
                 "rules": {k: cfg[k] for k in ("min_liq_usd", "min_vol_h1_usd", "min_age_min", "max_age_h", "min_mcap_usd", "max_mcap_usd",
                                               "min_buy_ratio", "min_chg_h1", "max_chg_h1", "max_tax_pct", "stop_loss_pct",
@@ -623,7 +668,8 @@ class XChain:
                         rows += [json.loads(line) for line in fh if '"source": "chains"' in line]
                 except (OSError, ValueError):
                     continue
-            return [r for r in rows if r.get("mode") == "paper"]
+            from .report import row_mode
+            return [r for r in rows if row_mode(r) == "paper"]
         return [c for c in self.e.book.closed if c.get("source") == "chains"]
 
     def readiness(self) -> dict:

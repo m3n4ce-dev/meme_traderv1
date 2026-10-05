@@ -213,7 +213,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 ## The lab: the team tests changes on the recorded market
 
 - **Where:** Desk → 🔬 The lab.
-- **How a test works:** one setting of the graduation play changed, replayed on the last 24 hours of recordings against the current settings. Same coins, same costs, same fill delay, compared in 6-hour blocks.
+- **How a test works:** one setting of the graduation play changed, replayed on the last 24 hours of recordings against the current settings. Same coins and same costs, compared in 6-hour blocks. Orders land like they do on your bot: the same landing delay, failed sells and retries (your `execution` settings).
 - **Verdicts:** better, worse, no clear difference, or no effect.
 - **Who starts tests:**
   - **The team:** a routine one-step test every 6 hours (`lab.auto_every_min`), at most 4 tests a day, only when 8 GB of memory is free.

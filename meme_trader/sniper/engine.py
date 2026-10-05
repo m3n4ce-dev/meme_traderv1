@@ -54,6 +54,10 @@ def reason_key(note: str) -> str:
     return re.split(r"[\d(]", note, maxsplit=1)[0].strip(" :-") or note
 
 
+# exits on a falling price or a rug signal: these use execution.urgent_sell_slippage_steps (a failed first try in a dump
+# costs a whole extra landing delay: seen 2026-10-05, 24 graduation exits decided at -3..-18% filled at -40..-74%)
+URGENT_EXITS = ("dev sold", "stop", "momentum decay", "insider", "cluster", "kill switch", "trail")
+
 # Settings the dashboard may change at runtime: (key under sniper, type, min, max, label, help)
 # The risk dial scales exposure around the configured settings (= level 2). It never touches the kill switch,
 # the stop losses, the entry rules or the 3%-of-curve liquidity cap. (name, size x, positions x, daily loss x)
@@ -1192,7 +1196,7 @@ class Engine:
             self.pending.discard(o["mint"])
             return
         x = self.p.execution
-        steps = list(x.sell_slippage_steps)
+        steps = list(o.get("steps") or x.sell_slippage_steps)
         prios = [self.p.callouts.priority_fee_sol] * len(steps) if pos.source == "callout" else \
             list(x.sell_priority_fee_steps) + [x.sell_priority_fee_steps[-1]] * len(steps)
         k = o["attempt"]
@@ -1327,14 +1331,21 @@ class Engine:
         meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot}
         if self._paper_delay() > 0:
             self._defer({"side": "sell", "mint": s.mint, "pos": pos, "tokens": tokens, "reason": reason,
-                         "first_quote": s.curve.price, "attempt": 0, **meta})
+                         "first_quote": s.curve.price, "attempt": 0, "steps": self._sell_steps(reason), **meta})
             return
         await self._dispatch(self._run_sell(s, pos, tokens, reason, meta))
 
+    def _sell_steps(self, reason: str) -> list:
+        x = self.p.execution
+        urgent = x.get("urgent_sell_slippage_steps")
+        return list(urgent) if urgent and any(k in reason for k in URGENT_EXITS) else list(x.sell_slippage_steps)
+
     async def _run_sell(self, s: TokenState, pos: SniperPosition, tokens: float, reason: str, meta=None) -> None:
+        steps = self._sell_steps(reason)
+        kw = {"steps": steps} if steps != list(self.p.execution.sell_slippage_steps) else {}
         try:
             fill = await self.ex.sell(s.mint, s.curve, tokens,
-                                      self.p.callouts.priority_fee_sol if pos.source == "callout" else None)
+                                      self.p.callouts.priority_fee_sol if pos.source == "callout" else None, **kw)
         except Exception as e:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
@@ -2960,13 +2971,18 @@ class Engine:
     # ------------------------------------------------------------------ the lab: the team tests one change at a time
     def lab_baseline(self) -> dict:
         """The settings the lab compares against: what the graduation play runs now."""
-        from .lab import TESTABLE
+        from .lab import EXECUTION, TESTABLE
         out = {}
         for k in TESTABLE:
             sec, key = k.split(".", 1)
             v = (self.p.get(sec) or {}).get(key)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 out[k] = v
+        for k in EXECUTION:                              # how its orders land, so a replay fills like this bot
+            sec, key = k.split(".", 1)
+            v = (self.p.get(sec) or {}).get(key)
+            if v is not None and not isinstance(v, bool):
+                out[k] = list(v) if isinstance(v, (list, tuple)) else v
         return out
 
     def lab_add(self, key: str, value, why: str, by: str) -> tuple[dict | None, str]:

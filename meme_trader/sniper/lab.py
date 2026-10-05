@@ -28,6 +28,10 @@ TESTABLE = {"late.min_net_flow_sol": (0.5, 20), "late.min_buyers": (3, 60), "lat
 AUTO_STEPS = {"late.min_net_flow_sol": 1.0, "late.min_buyers": 4, "late.min_buy_sell_ratio": 0.3, "late.min_near_high": 0.05,
               "late.min_curve_pct": 5, "late.max_age_s": 300, "late.stop_loss_pct": 5, "late.stall_s": 15,
               "late.exit_curve_pct": 2}
+# how the live bot's orders land: replays copy these, so a test sees the same delays, failed sells and retries
+# (graduation-v1 fills instantly with 3% slippage; the owner's bot waits 2.5 s and its sells can fail and retry)
+EXECUTION = ("execution.paper_delay_s", "execution.paper_latency_slippage_pct", "execution.slippage_pct",
+             "execution.sell_slippage_steps", "execution.urgent_sell_slippage_steps")
 BLOCK_S = 6 * 3600
 MAX_QUEUED = 6
 
@@ -193,7 +197,7 @@ def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1,
         raise SystemExit(f"no experiment {exp_id}")
     pol = research.load_policy("graduation-v1")          # its rules and costs, unfrozen: a development copy
     pol.pop("frozen_at", None)
-    base_sets = [f"{k}={json.dumps(v)}" for k, v in (x.get("baseline") or {}).items() if k in TESTABLE]
+    base_sets = [f"{k}={json.dumps(v)}" for k, v in (x.get("baseline") or {}).items() if k in TESTABLE or k in EXECUTION]
     # the last 24 hours of recordings (measured 2026-10-05: three days took over 30 minutes per pair of replays), and
     # only coins that got far enough up their curve for the graduation play to touch them
     files = files or research.feed_files()[-2:]

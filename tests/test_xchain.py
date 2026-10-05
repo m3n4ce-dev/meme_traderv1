@@ -104,6 +104,8 @@ def test_a_paper_round_trip_pays_real_costs_and_lands_in_the_shared_book(monkeyp
     assert not x.positions
     row = e.book.closed[-1]
     assert row["source"] == "chains" and row["chain"] == "base" and row["exit"].startswith("stop loss")
+    from meme_trader.sniper.report import row_mode
+    assert row["mode"] == "paper" and row["session"] and row_mode({"source": "chains"}) == "paper"   # counted in paper results
     assert -30 < row["pnl_pct"] < -22 and row["pnl_usd"] < -6                   # -20% move plus a 2% sell tax and costs
     assert abs((e.book.day_pnl - day0) - row["pnl"]) < 1e-9                      # counts toward the daily loss limit
     assert abs(e.book.sol - (sol0 + row["pnl"])) < 1e-9
@@ -176,6 +178,10 @@ def test_real_router_prices_ride_along_and_no_route_means_no_buy(monkeypatch):
     asyncio.run(x.step(time.time()))
     p = next(iter(x.positions.values()))
     assert p["real"]["buy_gap_pct"] is not None and abs(p["real"]["buy_gap_pct"]) < 2     # the router agrees with the paper fill
+    assert p["dec"] == 18                                                         # decimals, from the router's dollar value
+    state["price"] = 0.0011
+    asyncio.run(x.refresh(time.time() + 5))
+    assert p["px_src"] == "router" and abs(p["last"] / 0.0011 - 1) < 0.02       # held coins are priced by the router
     state["price"] = 0.0008
     asyncio.run(x.step(time.time() + 20))
     row = e.book.closed[-1]
@@ -197,3 +203,26 @@ def test_the_real_money_checklist_passes_only_on_a_real_edge(monkeypatch):
     e.book.closed[:] = [dict(win) for _ in range(3)] + [dict(loss) for _ in range(57)]
     r = x.readiness()
     assert not r["ready"] and not r["checks"][1]["ok"] and not r["checks"][2]["ok"]
+
+
+def test_one_sale_at_a_time_per_coin(monkeypatch):
+    e, x, state = _trader(monkeypatch)
+    asyncio.run(x.step(time.time()))
+    key = next(iter(x.positions))
+    gate = asyncio.Event()
+    real = x.real_quote
+
+    async def slow_quote(*a):
+        await gate.wait()
+        return await real(*a)
+    monkeypatch.setattr(x, "real_quote", slow_quote)
+
+    async def go():
+        t1 = asyncio.create_task(x.sell(key, 0.5, "take profit +40%", time.time()))
+        await asyncio.sleep(0)
+        assert "already going through" in await x.sell_now(key)          # your click while the bot's sale waits
+        gate.set()
+        await t1
+    asyncio.run(go())
+    p = x.positions[key]
+    assert abs(p["tokens"] / p["tokens0"] - 0.5) < 1e-9 and p["real"]["raw_left"] > 0
