@@ -1206,3 +1206,37 @@ def test_backup_usage_survives_a_restart_and_probes_measure_on_the_side(monkeypa
     when, host, lag = g.probe_log[-1]
     assert lag == 1.6 and host in ("api.mainnet-beta.solana.com", "solana-rpc.publicnode.com")
     assert any(v[0] == 1.6 for v in g.endpoint_lag.values())             # the measurement counts for choosing
+
+
+def test_a_spent_backup_is_not_hopped_onto_for_a_few_seconds_of_refill(monkeypatch, tmp_path):
+    """Seen 2026-10-05: allowance spent, the refill made the backup look usable every 30 s: 33 switches an hour."""
+    monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    monkeypatch.delenv("SOLANA_WS_BACKUP_URL", raising=False)
+    monkeypatch.setenv("HELIUS_API_KEY", "k-secret")
+    f = SolanaTradeFeed(backup_mb_per_day=1200)
+    b, mb = f.backup_idx, f.ws_urls.index("wss://api.mainnet-beta.solana.com")
+    now = 50_000.0
+    f.ws_idx = mb
+    f.endpoint_lag = {i: (10.0, now) for i in range(len(f.ws_urls)) if i not in (b, mb)}   # the other free ones: slower
+    f.backup_bank, f.backup_bank_ts = 0.0, now - 30           # spent; 30 s of refill is ~0.4 MB
+    assert 0 < f._backup_left_mb(now) < 1 and not f._backup_ok(now)
+    f.quality.lags.extend([6.0] * f.quality.min_lags)            # slow, and nothing faster or affordable: stay put
+    f.last_trade = now
+    assert f._check_stream(now, now - 100) == ""
+    f.backup_bank, f.backup_bank_ts = 0.0, now - 2.1 * 3600      # two hours of refill: worth moving for again
+    assert f._backup_ok(now) and "behind the chain" in f._check_stream(now, now - 100)
+    assert f._next_endpoint("6s behind the chain", now) == b
+
+
+def test_the_launch_backup_pauses_entries_only_when_it_goes_quiet():
+    import time
+    f = SolanaTradeFeed("wss://example.org/")
+    f.launches.urls.append("wss://pumpdev.io/ws")
+    f.trades_up = True
+    for _ in range(f.quality.min_checks):
+        f.quality.checks.append(True)
+    f.launches.url_idx = 1                                      # new coins come from pumpdev.io now
+    f.launches.last_launch = time.time() - 5
+    assert not f.degraded and f.host == "example.org"           # (the trade server, not the launch one)
+    f.launches.last_launch = time.time() - 90
+    assert f.degraded and "no new coins" in f.degraded_reason
