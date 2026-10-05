@@ -387,7 +387,7 @@ class XChain:
                 why = "traded lately"
             out.append({**r, "why": why})
         out.sort(key=lambda r: (r["why"] != "", -(r.get("vol_h1") or 0)))
-        self.scan = [{k: r.get(k) for k in ("chain", "chain_name", "symbol", "name", "pool", "token", "mcap_usd", "liq_usd",
+        self.scan = [{k: r.get(k) for k in ("chain", "chain_name", "symbol", "name", "pool", "token", "mcap_usd", "fdv_usd", "liq_usd",
                                              "vol_h1", "chg_h1", "chg_m5", "buys_h1", "sells_h1", "age_s", "dex", "why")}
                      for r in out[:15]]
         if d.get("fetched", 0) != self._recorded:          # new lists only: the same lists aren't kept twice
@@ -529,6 +529,8 @@ class XChain:
                "peak_gain_pct": (pos["peak"] / pos["entry"] - 1) * 100, "mae_pct": (pos["trough"] / pos["entry"] - 1) * 100,
                "score": 0.0, "initials": pos["tp_taken"], "exit": pos["exits"][-1][1] if pos["exits"] else "",
                "source": "chains", "desk": "", "p": None,
+               # which run produced it, like every other trade (paper results are never mixed with live or demo)
+               "mode": e.mode, "session": e.session, "start_sol": e.book.start_sol, "config": e.config_id, "model": "",
                "chain": pos["chain"], "pool": pos["pool"], "url": pos["url"],
                "cost_usd": round(pos["cost_usd"], 2), "proceeds_usd": round(pos["proceeds_usd"], 2),
                "pnl_usd": round(pos["proceeds_usd"] - pos["cost_usd"], 2),
@@ -597,6 +599,7 @@ class XChain:
                           "move_pct": round((p["last"] / p["entry"] - 1) * 100, 1), "stale_s": round(now - p["last_ts"])})
         day = time.strftime("%Y-%m-%d", time.gmtime(now))
         today = [c for c in self.e.book.closed if c.get("source") == "chains" and time.strftime("%Y-%m-%d", time.gmtime(c["closed"])) == day]
+        quoted = [c for c in today if (c.get("real") or {}).get("complete")]          # real prices: the same trades on both sides
         size = self.size_usd()
         mode = self.e.mode
         note = "" if mode == "paper" else ("demo: other chains trade only in the real paper bot" if "synthetic" in mode
@@ -607,7 +610,8 @@ class XChain:
                 "last_scan": self.last_scan, "notes": [{"ts": t, "text": x} for t, x in list(self.notes)[:5]],
                 "today": {"trades": len(today), "pnl_sol": round(sum(c["pnl"] for c in today), 4),
                           "pnl_usd": round(sum(c.get("pnl_usd") or 0 for c in today), 2),
-                          "real_usd": round(sum((c.get("real") or {}).get("pnl_usd") or 0 for c in today), 2)},
+                          "real_usd": round(sum(c["real"]["pnl_usd"] for c in quoted), 2), "real_n": len(quoted),
+                          "real_paper_usd": round(sum(c.get("pnl_usd") or 0 for c in quoted), 2)},
                 "ready": self.readiness(),
                 "rules": {k: cfg[k] for k in ("min_liq_usd", "min_vol_h1_usd", "min_age_min", "max_age_h", "min_mcap_usd", "max_mcap_usd",
                                               "min_buy_ratio", "min_chg_h1", "max_chg_h1", "max_tax_pct", "stop_loss_pct",
@@ -623,7 +627,8 @@ class XChain:
                         rows += [json.loads(line) for line in fh if '"source": "chains"' in line]
                 except (OSError, ValueError):
                     continue
-            return [r for r in rows if r.get("mode") == "paper"]
+            from .report import row_mode
+            return [r for r in rows if row_mode(r) == "paper"]
         return [c for c in self.e.book.closed if c.get("source") == "chains"]
 
     def readiness(self) -> dict:
