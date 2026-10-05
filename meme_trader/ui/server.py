@@ -17,7 +17,7 @@ this port to the internet without putting auth in front of it.
                          risk lookup chat chat_stop chat_new chat_decide chat_opts key_set key_clear rec
                          desk_wake pf_add pf_remove pf_refresh x_add x_remove x_auto key_test mem_add mem_del
                          mem_reply mem_ask call anchor post x_disconnect order_place order_cancel
-                         m_buy m_ape m_sell m_initials m_exits (manual trading)
+                         m_buy m_sell m_initials m_exits m_hand away (manual trading) restart
   POST /api/agent        AI operator tools (agent_api.py), only with the X-Agent-Token from data/agent.token
 
 Everything that changes state goes over the websocket, which checks the page's Origin. The GET
@@ -27,6 +27,7 @@ rebinding (a hostile site pointing its own domain at 127.0.0.1 to read these pag
 from __future__ import annotations
 
 import asyncio
+import time
 import hashlib
 import hmac
 import json
@@ -78,7 +79,24 @@ def post_summary(res: dict) -> str:
     return " · ".join(out)
 
 
-def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path | None = None) -> web.Application:
+def restart_process(engine) -> None:
+    """Save everything, then run the same command again in this process (same PID, so a systemd service doesn't
+    notice). Fresh code from disk is loaded, which also applies an update; open positions and orders resume from
+    the saved state."""
+    import sys
+
+    for step in (engine.save_state, lambda: engine.record_file and engine.record_file.flush(),
+                 lambda: engine.ledger.save(), sys.stdout.flush, sys.stderr.flush):
+        try:
+            step()
+        except Exception:
+            pass
+    argv = list(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])
+    os.execv(sys.executable, [sys.executable, *argv[1:]])
+
+
+def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path | None = None,
+             restarter=None) -> web.Application:
     """data_dir: where the portfolio, X feed and logo cache live (tests pass a temp dir)."""
     from . import keys as keymod, sidecars
     from .logos import CACHE, Logos
@@ -131,7 +149,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                             charset="utf-8", headers={"Cache-Control": "no-store"})
 
     async def analytics(_):
-        return _json(await engine.analytics_async())
+        d = await engine.analytics_async()
+        if isinstance(d, dict):
+            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper")}}
+        return _json(d)
 
     async def token(request):
         d = engine.token_detail(request.match_info["mint"])
@@ -377,6 +398,41 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": str(e)}
             return {"ok": True, "recorder": info, "text": "Wallet recorder: " + ("recording" if info["active"] else info["pause_reason"])
                     + ("" if info["running"] else " (the meme-wallets service isn't running)")}
+        if action == "desk_brain":
+            err = engine.set_desk_brain(str(cmd.get("provider") or ""), str(cmd.get("model") or ""), str(cmd.get("base_url") or ""))
+            return {"ok": not err, "text": err or "AI desk model saved", "brain": engine.desk_brain()}
+        if action == "desk_models":                       # what a local / compatible server has installed
+            import aiohttp
+
+            from ..sniper import desk as deskmod
+            base = (str(cmd.get("base_url") or "") or deskmod.PROVIDERS["local"]["base_url"]).rstrip("/")
+            if not base.startswith(("http://", "https://")):
+                return {"ok": False, "models": []}
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
+                    async with s.get(base + "/models") as r:
+                        d = await r.json(content_type=None)
+                ids = sorted(str(m.get("id")) for m in (d.get("data") or []) if isinstance(m, dict) and m.get("id"))
+            except Exception:
+                ids = []
+            return {"ok": True, "action": "desk_models", "models": ids[:300]}
+        if action == "desk_test":
+            from ..config import Params
+            from ..sniper import desk as deskmod
+
+            why = deskmod.provider_ready(engine.p.desk)
+            if why:
+                return {"ok": False, "text": why}
+            brain = deskmod.Desk(Params({**engine.p.desk, "enabled": True}))
+            t0 = time.time()
+            try:
+                d, _ = await asyncio.wait_for(brain.chat("You are a connectivity check.", 'Reply with {"ok": true}.',
+                                                          {"type": "object", "properties": {"ok": {"type": "boolean"}},
+                                                           "required": ["ok"], "additionalProperties": False}, max_tokens=50), 60)
+            except Exception as e:
+                return {"ok": False, "text": "✕ " + deskmod.friendly_error(f"{type(e).__name__}: {e}")}
+            return {"ok": True, "text": f"✓ {deskmod.model_of(engine.p.desk)} answered in {time.time() - t0:.1f} s"
+                                        + (" (too slow for trade votes: they time out at 12 s; fine for note replies)" if time.time() - t0 > 10 else "")}
         if action == "desk_wake":
             on = bool(cmd.get("on"))
             err = engine.set_desk(on)
@@ -400,7 +456,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                                                                   "pf_refresh": "Refreshing"}[action]}
         if action == "ui_set":
             key, value = str(cmd.get("key") or ""), cmd.get("value")
-            if key not in ("layout", "bots", "pulse") or not isinstance(value, dict) or len(json.dumps(value)) > 64_000:
+            if key not in ("layout", "bots", "pulse", "room") or not isinstance(value, dict) or len(json.dumps(value)) > 64_000:
                 return {"ok": False, "text": "can't save that"}
             data = ui_read()
             data[key] = value
@@ -442,6 +498,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "mem_del":
             engine.memory.remove(str(cmd.get("id") or ""))
             return {"ok": True, "memory": memory_view(), "text": "Removed from memory"}
+        if action == "restart":
+            engine.say("info", "restarting from the dashboard: state saved, back in a few seconds")
+            asyncio.get_running_loop().call_later(0.6, (restarter or restart_process), engine)
+            return {"ok": True, "text": "Restarting… this page reconnects by itself", "restarting": True}
         if action == "m_hand":
             n, err = engine.hand_over(str(cmd.get("mint") or ""), bool(cmd.get("on")))
             return {"ok": not err, "text": err or (("🤖 The bots manage it now: their exit rules apply" if cmd.get("on")
@@ -498,8 +558,8 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "x_disconnect":
             soc.disconnect()
             return {"ok": True, "text": "X disconnected (keys in .env, if any, still work)", "social": soc.status()}
-        if action in ("m_buy", "m_ape"):
-            sol = engine._manual_cfg().ape_sol if action == "m_ape" else cmd.get("sol")
+        if action == "m_buy":
+            sol = cmd.get("sol")
             mint = str(cmd.get("mint") or "").strip()
             held = engine.positions.get(mint)
             err = await engine.manual_buy(mint, sol)
@@ -509,7 +569,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": err}
             if mint in engine.manual_queue:
                 return {"ok": True, "text": f"Queued {float(sol):g} SOL: buying at its first trade on the curve"}
-            return {"ok": True, "text": f"🦍 Aped {float(sol):g} SOL" if action == "m_ape" else f"Buy {float(sol):g} SOL sent"}
+            return {"ok": True, "text": f"Buy {float(sol):g} SOL sent"}
         if action == "m_sell":
             err = await engine.manual_sell(str(cmd.get("mint") or ""), cmd.get("fraction"))
             return {"ok": not err, "text": err or "Sell sent"}

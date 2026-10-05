@@ -24,6 +24,7 @@ from ..config import EXAMPLE, ROOT, ConfigError, example_help, validate_sniper
 from ..journal import DATA, record
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .calls import CallLedger, LedgerError
+from .exitlab import ExitLab
 from .copytrade import LeaderBook
 from .curve import Curve
 from .events import Event, Funding, Health, Launch, Metadata, Migration, Social, Tick, Trade, dumps
@@ -213,6 +214,8 @@ class Engine:
         self._last_state_save = 0.0
         # every call, hash-chained (data/calls.jsonl): yours from the 📣 button, plus the bot's own entries
         self.ledger = CallLedger(DATA / "calls.jsonl" if self.persist else None)
+        # other exit rules, shadowing every bot entry on the same prices (measurement only; data/exit_lab.jsonl)
+        self.lab = ExitLab(DATA / "exit_lab.jsonl" if self.persist else None, self.fee)
         self._last_ledger_tick = 0.0
         self._last_ledger_dex = 0.0
         self._ledger_busy = False
@@ -453,6 +456,7 @@ class Engine:
         """Coins to keep priced: open orders and alerts, and curve-stage calls still being scored."""
         out = {o["mint"] for o in self.orders.values() if o["status"] == "open"}
         out.update(c["mint"] for c in self.ledger.open_calls(self.now) if c.get("stage") == "curve")
+        out.update(self.lab.mints())
         return out
 
     async def _unwatch(self, mint: str) -> None:
@@ -1195,6 +1199,7 @@ class Engine:
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
+            self.lab.start(s.mint, s.symbol, "late" if source == "late" else "sniper", fill.price, self.now, self.p)
             try:                                                     # the bot's call, on the record
                 self.ledger.call(s.mint, s.symbol, "bot", s.market_cap_sol * self.sol_price.usd, fill.price,
                                  self.sol_price.usd, thesis="; ".join(notes)[:280], source=source,
@@ -1466,6 +1471,8 @@ class Engine:
         await self._maybe_late()
         await self._manual_queue_tick()
         await self._orders_tick()
+        if self.lab.open:
+            self.lab.tick(self.tokens, self.now, self.p)
         if self.now - self._last_ledger_tick >= 15:
             self._last_ledger_tick = self.now
             self._ledger_tick()
@@ -1777,7 +1784,7 @@ class Engine:
                          "tracked": len(self.tokens)},
                 "holding": holding, "thoughts": list(self.thoughts)[-80:], "log": agent_log,
                 "rejects": self.rejects.most_common(5),
-                "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled),
+                "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled), "brain": self.desk_brain(),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
                          "error": self.desk_error, "failures": self.desk_failures,
@@ -1806,11 +1813,12 @@ class Engine:
         return err
 
     def _set_desk(self, on: bool) -> str:
-        import os
+        from .desk import provider_ready
 
         if on:
-            if not os.environ.get("ANTHROPIC_API_KEY"):
-                return "add an Anthropic API key first (Controls -> API keys)"
+            why = provider_ready(self.p.desk)
+            if why:
+                return why
             try:                                        # always a fresh client: the key or workspace may be new
                 from .desk import Desk
 
@@ -1903,7 +1911,7 @@ class Engine:
     def _manual_cfg(self):
         from ..config import Params
 
-        d = {"max_sol": 2.0, "presets_sol": [0.05, 0.1, 0.25, 0.5, 1.0], "ape_sol": 0.5, "stop_loss_pct": 0,
+        d = {"max_sol": 2.0, "presets_sol": [0.05, 0.1, 0.25, 0.5, 1.0], "stop_loss_pct": 0,
              "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_graduation": True, "queue_s": 60}
         return Params({**d, **(self.p.get("manual") or {})})
 
@@ -2256,8 +2264,9 @@ class Engine:
         pd = self.p.desk
         if not pd.get("note_replies", True):
             return "note replies are off (desk.note_replies)"
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return "add an Anthropic API key (Controls → API keys) so the desk can reply"
+        why = deskmod.provider_ready(pd)
+        if why:
+            return why + " so the desk can reply"
         personas = [p for p in (personas or list(pd.personas)) if p in deskmod.PERSONAS]
         if not personas:
             return "nobody to ask"
@@ -2265,13 +2274,13 @@ class Engine:
         s = self.tokens.get(it.get("mint") or "")
         if s is not None and s.price_known:
             live = deskmod.snapshot_for(s, self.now, "note")
-        import anthropic
+        from ..config import Params
 
-        client = anthropic.AsyncAnthropic(**deskmod.client_kwargs())
+        brain = deskmod.Desk(Params({**pd, "enabled": True}))     # the desk's model, awake or not
         self.note_waiting[item_id] = set(personas)
 
         async def one(persona: str) -> None:
-            r = await deskmod.reply_note(client, pd, persona, it, live)
+            r = await deskmod.reply_note(brain, pd, persona, it, live)
             self.note_stats["calls"] += 1
             self.note_stats["input_tokens"] += r.get("input_tokens", 0)
             self.note_stats["output_tokens"] += r.get("output_tokens", 0)
@@ -2639,6 +2648,44 @@ class Engine:
         out.update({"launches": self.stats["launches"], "entries": self.stats["entries"],
                     "equity_sol": self.equity(), "start_sol": self.book.start_sol})
         return out
+
+    def desk_brain(self) -> dict:
+        """Which model the desk uses, and what a review (one vote per persona) costs on it."""
+        from .desk import CLAUDE_MODELS, PROVIDERS, Desk, model_of, provider_of, provider_ready
+
+        pin, pout = Desk(self.p.desk, client=object()).prices()   # (a client stand-in: just for the price list)
+        calls = int(getattr(self.desk, "calls", 0) or 0)
+        tin = getattr(self.desk, "input_tokens", 0) / calls if calls else 1600     # measured once there are votes
+        tout = getattr(self.desk, "output_tokens", 0) / calls if calls else 350
+        per_vote = tin / 1e6 * pin + tout / 1e6 * pout
+        return {"provider": provider_of(self.p.desk), "model": model_of(self.p.desk), "base_url": self.p.desk.get("base_url") or "",
+                "ready": provider_ready(self.p.desk), "per_vote_usd": round(per_vote, 5),
+                "per_review_usd": round(per_vote * len(self.p.desk.personas), 4), "measured": bool(calls),
+                "providers": {k: {kk: v[kk] for kk in ("label", "key", "base_url", "model", "note")} for k, v in PROVIDERS.items()},
+                "claude_models": {k: v[0] for k, v in CLAUDE_MODELS.items()}}
+
+    def set_desk_brain(self, provider: str, model: str = "", base_url: str = "", who: str = "dashboard") -> str:
+        from .desk import PROVIDERS
+
+        if provider not in PROVIDERS:
+            return f"unknown provider {provider!r}"
+        model, base_url = str(model or "").strip()[:120], str(base_url or "").strip()[:300]
+        if base_url and not base_url.startswith(("http://", "https://")):
+            return "the server URL must start with http:// or https://"
+        self.p.desk["provider"], self.p.desk["model"] = provider, model or PROVIDERS[provider]["model"]
+        self.p.desk["base_url"] = base_url
+        if who == "dashboard" and self.persist:
+            try:
+                for k in ("provider", "model", "base_url"):
+                    self.save_setting(f"desk.{k}", self.p.desk[k])
+            except OSError as e:
+                return f"applied, but not saved: {e}"
+        if self.desk and self.desk.enabled:
+            err = self._set_desk(True)                            # rebuild the desk on the new model now
+            if err:
+                return err
+        self.say("info", f"AI desk now thinks with {PROVIDERS[provider]['label']} · {self.p.desk['model']}")
+        return ""
 
     def desk_stats(self) -> dict:
         d = self.desk
