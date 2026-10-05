@@ -141,3 +141,17 @@ def test_other_chains_rows_and_cache(monkeypatch):
     c._refresh = fake_refresh
     asyncio.run(c.get()); asyncio.run(c.get())
     assert len(calls) == 1 and c.names() == {"BNB Chain": ["PEPE"]}     # cached: one fetch per 90 s
+
+
+def test_hq_status(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+    e = market(launches=2)
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            return await (await c.get("/api/hq")).json()
+    d = asyncio.run(go())
+    assert {"bot", "services", "feed", "lab", "desk", "chat", "machine"} <= set(d)
+    assert d["machine"]["disk_free_gb"] > 0 and set(d["services"]) == {"meme-sniper", "meme-wallets", "edge-scout"}

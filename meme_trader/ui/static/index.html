@@ -678,6 +678,9 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .cork-add { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; } .cork-add input { flex: 1 1 200px; }
 .cork-list { display: grid; gap: 6px; } .cork-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--ring); border-radius: 8px; }
 .cork-row.off { opacity: .55; } .cork-t { flex: 1; min-width: 0; } .cork-ic { font-size: 18px; }
+.hq-svcs { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; } .hq-rows { display: grid; gap: 6px; }
+.hq-rows > div { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .hq-rows b { min-width: 120px; }
+.hq-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--warn, #d69e2e); } .hq-dot.ok { background: var(--good, #22c55e); } .hq-dot.bad { background: var(--bad, #ef4444); }
 .lab-run { padding: 6px 8px; border: 1px dashed var(--ring); border-radius: 8px; margin-bottom: 8px; } .lab-qs { display: grid; gap: 4px; margin-bottom: 8px; }
 .lab-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; } .lab-add select { max-width: 100%; } .lab-add input { width: 110px; }
 .cdock { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 130; width: min(640px, calc(100vw - 32px)); }
@@ -1323,6 +1326,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
 
   <!-- ============================================================ CONTROLS -->
   <section class="view" data-view="controls" hidden>
+    <section class="panel" id="hq-panel"><h2>🏠 HQ <small>everything running on this machine</small> <button class="small ghost" data-hqref="1">Refresh</button></h2><div id="hq-body"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="conn-panel"><h2>Connections <small>post calls, trade cards and proofs to X and Telegram · every post is your click</small></h2><div id="conn-body"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="keys-panel">
       <h2>API keys &amp; connections <small>saved to .env on this machine (owner-only file) · never shown again · never given to Claude</small></h2>
@@ -2030,7 +2034,8 @@ function tickChart(cv, c, o = {}) {
 // ---------------------------------------------------------------- Charts tab: optional views (remembered here)
 const LV = {on: new Set((() => { try { return JSON.parse(store.get("lc-views") || "[]"); } catch { return []; } })()), data: {}, timer: 0, keys: {}};
 const VIEWS = [["kol", "👑 KOL tracker"], ["chains", "🌐 Other chains"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
-LV.chain = store.get("lv-chain") || "all"; LV.chainKind = store.get("lv-chainkind") || "trending";
+LV.chain = store.get("lv-chain") || "all"; LV.chainKind = store.get("lv-chainkind") || "trending"; LV.fresh = store.get("lv-fresh") !== "0";
+const ageShort = s => s == null ? "–" : s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 172800 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
 function renderViewBar() {
   setHTML($("lc-viewbar"), `<span class="note">Optional views:</span>` + VIEWS.map(([k, l]) => `<button class="chip ${LV.on.has(k) ? "on" : ""}" data-lcview="${k}" aria-pressed="${LV.on.has(k)}"><i></i>${l}</button>`).join(""));
 }
@@ -2085,17 +2090,18 @@ function viewBody(k) {
   }
   if (k === "chains") {
     const d = LV.data.chains; if (!d) return `<div class="empty">Loading…</div>`;
-    const nets = Object.keys(d.chains || {}), pool = (d[LV.chainKind] || {}), rows = (LV.chain === "all" ? nets.flatMap(n => (pool[n] || []).slice(0, 6)) : (pool[LV.chain] || []))
+    const fresh = r => !LV.fresh || (r.age_s != null && r.age_s < 7 * 86400);                // memecoin-young: under a week
+    const nets = Object.keys(d.chains || {}), pool = (d[LV.chainKind] || {}), rows = (LV.chain === "all" ? nets.flatMap(n => (pool[n] || []).filter(fresh).slice(0, 8)) : (pool[LV.chain] || []).filter(fresh))
       .slice().sort((a, b) => (b.vol_h1 || 0) - (a.vol_h1 || 0)).slice(0, 24);
     const chip = (v, l, key) => `<button class="small ${(key === "kind" ? LV.chainKind : LV.chain) === v ? "primary" : "ghost"}" data-lvchain="${key}:${v}">${l}</button>`;
     const pc = v => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${fx(v, 1)}%</span>`;
-    return `<div class="lv-chips">${chip("all", "All", "net")}${nets.map(n => chip(n, esc(d.chains[n]), "net")).join("")}<span class="spacer"></span>${chip("trending", "🔥 Trending", "kind")}${chip("new", "🌱 New", "kind")}</div>
+    return `<div class="lv-chips">${chip("all", "All", "net")}${nets.map(n => chip(n, esc(d.chains[n]), "net")).join("")}<span class="spacer"></span><button class="small ${LV.fresh ? "primary" : "ghost"}" data-lvchain="fresh:${LV.fresh ? 0 : 1}" title="Only pools under a week old">Fresh only</button>${chip("trending", "🔥 Trending", "kind")}${chip("new", "🌱 New", "kind")}</div>
       ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Chain</th><th>Pair</th><th class="r">MC</th><th class="r">Vol 1h</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th class="r">Buys/sells 1h</th><th class="r">Age</th><th></th></tr></thead><tbody>${rows.map(r => `
         <tr><td><span class="tag">${esc(r.chain_name)}</span></td><td><b>${esc(r.symbol)}</b> <span class="note">${esc(r.name.split(" / ").slice(1).join(" / "))}</span></td>
         <td class="r num">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r num">${r.vol_h1 != null ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
         <td class="r num">${pc(r.chg_m5)}</td><td class="r num">${pc(r.chg_h1)}</td><td class="r num">${pc(r.chg_h24)}</td>
-        <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${r.age_s != null ? dur(r.age_s) : "–"}</td>
-        <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nothing listed right now.</div>`}
+        <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${ageShort(r.age_s)}</td>
+        <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${LV.fresh ? "Nothing under a week old here right now: turn off Fresh only, or try New." : "Nothing listed right now."}</div>`}
       <p class="note">Read-only, from GeckoTerminal (refreshed every 90 s). The bot trades pump.fun only: other chains are watched, not traded, until the Solana bot proves an edge (docs/MULTICHAIN.md).${d.error ? ` · ${esc(d.error)}` : ""}</p>`;
   }
   if (k === "pulse") return svgPulse(s.pulse || [], s.pulse_since || 0, 150);
@@ -2318,7 +2324,24 @@ function renderAnalytics(a) {
 }
 
 // ---------------------------------------------------------------- controls view
+async function loadHQ() {
+  let d; try { d = await (await fetch("/api/hq", {cache: "no-store"})).json(); } catch (e) { $("hq-body").innerHTML = `<div class="empty">Couldn't reach the bot (${esc(e)})</div>`; return; }
+  const dot = ok => `<span class="hq-dot ${ok === true ? "ok" : ok === false ? "bad" : "warn"}"></span>`;
+  const svc = Object.entries(d.services).map(([u, st]) => `<span>${dot(st === "active")} ${esc(u)} <span class="note">${esc(st)}</span></span>`).join("");
+  const f = d.feed || {}, b = f.backup, r = d.recorder || {};
+  const rows = [
+    ["Bot", d.bot.halted ? false : true, `${esc(d.bot.mode)} · up ${dur(d.bot.up_s)} · ${d.bot.rss_mb} MB${d.bot.paused ? " · entries paused" : ""}${d.bot.halted ? " · HALTED: " + esc(d.bot.halted) : ""}`],
+    ["Market data", f.degraded_reason ? null : true, `${esc(f.host || "?")} · ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s behind" : "?"}${f.degraded_reason ? " · " + esc(f.degraded_reason) : ""} · ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} switches in the last hour${f.mb_per_hour != null ? ` · ${f.mb_per_hour} MB/h` : ""}`],
+    ["Helius backup", b ? true : null, b ? `${b.on ? "in use now" : "standing by"} · ${b.mb_today} MB today · ${b.mb_left} MB left` : "no Helius key saved"],
+    ["Wallet recorder", r.active === true ? true : r.active === false ? false : null, r.active == null ? "no status" : `${r.active ? "recording" : "paused"}${r.pause_reason ? " · " + esc(r.pause_reason) : ""} · updated ${dur(r.updated_s || 0)} ago`],
+    ["The lab", true, `${d.lab.running ? "testing now" : "idle"} · ${d.lab.queued} queued · ${d.lab.tests} tests done`],
+    ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
+    ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
+    ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
+  $("hq-body").innerHTML = `<div class="hq-svcs">${svc}</div><div class="hq-rows">${rows.map(([k, ok, v]) => `<div>${dot(ok)}<b>${k}</b><span class="note">${v}</span></div>`).join("")}</div>`;
+}
 async function loadControls() {
+  loadHQ();
   try { const r = await fetch("/api/controls", {cache: "no-store"}); S.controls = await r.json(); renderControls(); }
   catch (e) { $("ctl").innerHTML = `<div class="empty">Couldn't load settings (${esc(e)})</div>`; }
 }
@@ -5984,14 +6007,17 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-hqref],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.hqref) { loadHQ(); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
-  if (d.lvchain) { const [key, v] = d.lvchain.split(":"); if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else { LV.chain = v; store.set("lv-chain", v); } LV.keys = {}; renderViews(); return; }
+  if (d.lvchain) { const [key, v] = d.lvchain.split(":");
+    if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
+    LV.keys = {}; renderViews(); return; }
   if (d.labdrop) { send({action: "lab_drop", id: d.labdrop}); LABV.at = 0; setTimeout(loadLab, 600); return; }
   if (d.labadd) { const v = $("lab-val").value; if (v === "") { $("lab-val").focus(); return; }
     send({action: "lab_add", key: $("lab-key").value, value: +v}); $("lab-val").value = ""; t.blur(); LABV.at = 0; setTimeout(loadLab, 600); return; }

@@ -311,6 +311,8 @@ sniper:
     auto_every_min: 360          # with nothing queued, the team tests a routine one-step change this often
     max_per_day: 4               # tests started in any 24 h (each replays the last 24 h twice, at low priority)
     min_free_mb: 8000            # start a test only with this much memory free
+    detach: true                 # run each test as its own short-lived user service (survives bot restarts)
+    memory_max_mb: 6000          # ... capped at this much memory
 
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true

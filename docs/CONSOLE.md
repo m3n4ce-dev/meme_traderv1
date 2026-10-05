@@ -229,6 +229,19 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **Risk dial** (Live or Controls): Cautious, Normal, Bold, Aggressive, Max. It scales trade size, open positions and the daily loss limit together.
 - **Pause:** ⏸ Pause or `p` stops new entries; open positions are still managed.
 
+## HQ: everything running on this machine
+
+Controls → 🏠 HQ shows the status of everything running on this machine:
+- **The bot:** mode, uptime and memory.
+- **The services:** sniper, wallet recorder and edge-scout.
+- **Market data:** server, delay, drops and data rate.
+- **The Helius backup:** in use or standing by, and its allowance.
+- **The wallet recorder, the lab and the AI desk.**
+- **Whether Claude's chat is available.**
+- **Free disk and memory.**
+
+Press Refresh to update it.
+
 ## Settings
 
 - **Controls → Live settings:** the main ones, applied instantly. **Save** writes them to config/params.yaml so they survive a restart.
