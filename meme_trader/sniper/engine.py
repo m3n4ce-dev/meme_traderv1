@@ -3298,6 +3298,7 @@ class Engine:
                      "degraded": bool(getattr(self.feed, "degraded", False)),
                      "degraded_reason": getattr(self.feed, "degraded_reason", ""),
                      "gap_pct": getattr(self.feed, "gap_pct", None), "lag_s": getattr(self.feed, "lag_s", None),
+                     **(self.feed.stream_stats() if hasattr(self.feed, "stream_stats") else {}),
                      "connected": getattr(self.feed, "ws", True) is not None,
                      "last_event_age_s": round(self.now - self.last_event, 1) if self.last_event else None},
         }

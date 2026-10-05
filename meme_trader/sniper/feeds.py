@@ -294,6 +294,12 @@ class SolanaTradeFeed(Feed):
         self.ws_idx = 0
         self.memory_path = memory_path
         self._last_lag_save = 0.0
+        # dropped connections per endpoint (times), and what the stream weighs (uncompressed bytes, for paid plans
+        # that bill by data): a free endpoint that just hangs up is reconnected, not abandoned for a slower one
+        self.closes: dict[int, deque] = {}
+        self.switches: deque = deque(maxlen=500)
+        self.bytes_in: deque = deque()              # (minute, bytes) for the last hour
+        self.connected_since = 0.0
         # "confirmed": a fraction of a second later than "processed", but complete. Measured 2026-10-03 on
         # PublicNode: processed missed ~25% of trades (reserve-chain gaps), confirmed 0.4%.
         self.commitment = commitment
@@ -487,6 +493,15 @@ class SolanaTradeFeed(Feed):
                 return i
         return None
 
+    def stream_stats(self, now: float | None = None) -> dict:
+        """Reconnects and switches in the last hour, and the stream's size (uncompressed MB per hour)."""
+        now = now or time.time()
+        hour = [s for s in self.switches if now - s[0] < 3600]
+        mins = [b for m, b in self.bytes_in if m < int(now // 60)]          # whole minutes only
+        return {"reconnects_1h": sum(1 for s in hour if s[1] == s[2]), "switches_1h": sum(1 for s in hour if s[1] != s[2]),
+                "mb_per_hour": round(sum(mins) / len(mins) * 60 / 1e6, 1) if mins else None,
+                "up_for_s": round(now - self.connected_since) if self.trades_up and self.connected_since else 0}
+
     def _check_stream(self, now: float, connected: float) -> str:
         """Why the current endpoint should be dropped, or ''."""
         if now - self.last_trade > self.stall_s:
@@ -505,9 +520,34 @@ class SolanaTradeFeed(Feed):
                 return "retry"
         return ""
 
+    QUICK_CLOSES = 4        # an endpoint that hangs up this often within CLOSE_WINDOW_S is given up on for now
+    CLOSE_WINDOW_S = 180
+
+    def _dropped(self, why: str) -> bool:
+        """The connection failed (closed, refused, timed out), as opposed to the data being slow or incomplete."""
+        return not why or not any(k in why for k in ("behind the chain", "trades missing", "no pump.fun trades", "retry"))
+
+    def _best_known(self, now: float) -> int | None:
+        lags = [(lag, i) for i in range(len(self.ws_urls)) if (lag := self._known_lag(i, now)) is not None]
+        return min(lags)[1] if lags else None
+
     def _next_endpoint(self, why: str, now: float) -> int:
         if why == "retry":
             return 0
+        if self._dropped(why):
+            # Seen 2026-10-05 00:29-01:05: the public RPC hung up every 20 s-5 min; the bot moved to PublicNode
+            # (10 s behind), measured that, moved back, and paused entries each time: dozens of switches an hour.
+            # A hang-up on the fastest endpoint we know is a reconnect to it, unless it keeps hanging up.
+            q = self.closes.setdefault(self.ws_idx, deque(maxlen=20))
+            q.append(now)
+            recent = sum(1 for t in q if now - t < self.CLOSE_WINDOW_S)
+            if self.n_configured and self.ws_idx != 0:          # on a fallback: back to the endpoint you configured
+                first, cur = self._known_lag(0, now), self._known_lag(self.ws_idx, now)
+                if first is None or cur is None or first <= cur:
+                    return 0
+            best = self._best_known(now)
+            if recent < self.QUICK_CLOSES and (best is None or best == self.ws_idx):
+                return self.ws_idx
         if "behind the chain" in why:
             i = self._faster_endpoint(now)
             if i is not None:
@@ -525,7 +565,7 @@ class SolanaTradeFeed(Feed):
                         session.ws_connect(self.ws_url, heartbeat=20, max_msg_size=0) as ws:
                     await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
                                         "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": self.commitment}]})
-                    connected = self.last_trade = time.time()
+                    connected = self.last_trade = self.connected_since = time.time()
                     self.quality.reset()
                     while not why:
                         msg = await ws.receive(timeout=self.STALL_S)
@@ -533,6 +573,13 @@ class SolanaTradeFeed(Feed):
                             why = f"connection closed ({msg.type.name})"
                             break
                         now = time.time()
+                        minute = int(now // 60)
+                        if self.bytes_in and self.bytes_in[-1][0] == minute:
+                            self.bytes_in[-1][1] += len(msg.data)
+                        else:
+                            self.bytes_in.append([minute, len(msg.data)])
+                            while self.bytes_in and self.bytes_in[0][0] < minute - 60:
+                                self.bytes_in.popleft()
                         try:
                             result = json.loads(msg.data)["params"]["result"]
                             value = result["value"]
@@ -554,8 +601,11 @@ class SolanaTradeFeed(Feed):
             except Exception as err:                    # anything: never leave a dead stream marked up
                 why = f"HTTP {err.status} {err.message}" if hasattr(err, "status") else f"{type(err).__name__}: {err}"
             self.trades_up = False
-            old = self.host
+            old, old_idx = self.host, self.ws_idx
             self.ws_idx = self._next_endpoint(why, time.time())
+            self.switches.append((time.time(), old, self.host, why[:80]))
+            if self.ws_idx == old_idx and self._dropped(why):
+                backoff = 1                                  # a hang-up: straight back to the same fast endpoint
             print(f"[feed] trade logs {old}: {why[:200] if why != 'retry' else 'trying the first endpoint again'}"
                   f"; switching to {self.host} in {backoff}s")
             await asyncio.sleep(backoff)
