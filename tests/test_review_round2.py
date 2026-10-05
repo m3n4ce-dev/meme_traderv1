@@ -1107,3 +1107,24 @@ def test_feed_starts_on_the_fastest_endpoint_it_remembers(tmp_path, monkeypatch)
     # on a free fallback, the 30-minute retry of a free "primary" no longer happens
     g.last_trade = now
     assert g._check_stream(now, now - g.RETRY_PRIMARY_S - 1) == ""
+
+
+def test_a_hang_up_on_the_fastest_endpoint_reconnects_to_it(monkeypatch):
+    """2026-10-05: the public RPC hung up every 20 s-5 min; the bot flapped to PublicNode (10 s behind) and back,
+    pausing entries each time. Now a hang-up on the fastest known endpoint is a reconnect to it."""
+    monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    f = SolanaTradeFeed()
+    pn, mb = f.ws_urls.index("wss://solana-rpc.publicnode.com"), f.ws_urls.index("wss://api.mainnet-beta.solana.com")
+    now = 10_000.0
+    f.endpoint_lag = {mb: (1.7, now), pn: (10.0, now)}
+    f.ws_idx = mb
+    for k in range(3):                                       # a few hang-ups: stay on the fast one
+        assert f._next_endpoint("connection closed (CLOSE)", now + k) == mb
+    assert f._next_endpoint("connection closed (CLOSE)", now + 4) == pn       # hanging up all the time: move on
+    f.ws_idx = pn                                            # a hang-up on a slow one: the usual next endpoint
+    assert f._next_endpoint("ClientConnectorError: refused", now + 5) != pn
+    f.ws_idx = mb                                            # slow data still moves to a faster endpoint, never a slower one
+    assert f._dropped("connection closed (CLOSE)") and not f._dropped("12s behind the chain") and not f._dropped("retry")
+    f.switches.extend([(now, "a", "a", "x"), (now, "a", "b", "y")])
+    st = f.stream_stats(now + 10)
+    assert st["reconnects_1h"] == 1 and st["switches_1h"] == 1
