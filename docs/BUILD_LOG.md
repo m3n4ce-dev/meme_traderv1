@@ -4,6 +4,49 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #49: Debug pass, and what the dumps look like at entry
+
+**Owner's requests:** "Improve." "Debug and test." "Improve more while you wait."
+
+**Debug and test, all clean except one layout bug:**
+- **Static analysis (pyflakes):** no undefined names.
+- **`doctor`:** OK for paper.
+- **Every dashboard address:** 200 and fast, with valid JSON. The keys page shows hostnames only; no secret value appears.
+- **Errors:** today's error events are trading events only.
+- **The paper book reconciles to 0.000000 SOL** across 78 closed trades, 14 failed-order fees and the open positions on both bots. 4 more fee lines in the journal were demo coins from before 16f7659.
+- **Read-only browser tour,** all 9 tabs at desktop and phone size: the Desk tab was 409 px too wide on phones (fixed).
+- **Also fixed:**
+  - The chat said "I don't have a tool" for the other-chain bot: its tool descriptions now mention it, and the prompt says to call them. A fresh chat answers with the numbers.
+  - Missing logos answer 204 instead of a 404 error per coin.
+  - Lab results judged with instant fills are labelled and re-tested.
+  - Desk vote time is measured and shown in HQ.
+
+**What the dumps look like at entry.**
+- **The data:** every bot trade now keeps what the bot saw when it decided to buy (`feat`). Replays of the 3 recorded days with your graduation settings and the bot's 2.5 s landing gave 322 trades, 65 of them losing over 30%:
+
+  | Day | Trades | P&L | Dumps |
+  |---|---|---|---|
+  | Oct 3 | 73 | −0.97 SOL | 21 |
+  | Oct 4 | 132 | +0.56 SOL | 21 |
+  | Oct 5 | 117 | −0.85 SOL | 23 |
+- **The profile, on the first two days only.** At entry the dumps were:
+  - younger: median 20 s old, against 31 s;
+  - backed by fewer buyers: 32, against 42;
+  - nearly unsold: 2.5 sells, against 9;
+  - pushed by more money in the last 20 s: 20.7 SOL, against 16.3.
+
+  That looks like coordinated buying with nobody selling: insiders setting up an exit.
+- **Data-mined rules mostly failed out of sample:** the best of 139 single-feature rules on Oct 3–4 mostly didn't hold on Oct 5. For example, "22+ buyers" gained +0.81 SOL on the training days and lost 0.19 SOL on Oct 5.
+- **Two rules from the profile, thresholds chosen on Oct 3–4 and checked once on Oct 5:**
+
+  | Skip the entry if… | Oct 3–4 | Oct 5 (unseen) |
+  |---|---|---|
+  | No sell in the last 20 s | +0.54 SOL (42 of 205 skipped) | +0.29 SOL (15 of 117 skipped) |
+  | Coin under 30 s old | +1.00 SOL | +0.32 SOL (drops most trades) |
+- **Now settings, off by default:** `late.min_recent_sells` and `late.min_age_s`, both testable in the lab. Full-bot replays of all 3 days follow below.
+
+---
+
 ## 2026-10-05 — Entry #48: Toward real money on other chains; why the graduation bot loses in dumps
 
 **Owner's requests:**
