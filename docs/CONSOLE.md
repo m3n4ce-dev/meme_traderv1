@@ -270,6 +270,14 @@ In the terminal: `deposit <sol>`, `reset`.
 - **Post:** `n` or ✎ New post. Every post is your click, and paper results are labelled PAPER.
 - **Connections:** Controls → Connections. X (pay per post) and Telegram (free).
 
+## Market data: the feed badge and outages
+
+- **The feed badge** (top bar) shows where trades come from and how far behind they arrive (`1.3s behind`), with ⚠ when the connection keeps dropping.
+- **Hover it** for the last hour's reconnects and server switches, the data rate, and the backup's use today.
+- **The free servers** (Solana's public RPC, then PublicNode) are used first. When one hangs up, the bot reconnects to the fastest one instead of hopping to a slower one.
+- **With a Helius key saved:** its websocket is the backup while the free ones are down or behind, up to `feed.backup_mb_per_day` (1200 MB ≈ 3 hours, inside the free plan's credits). The bot checks the free ones again every 5 minutes.
+- **For less delay all the time,** a paid endpoint goes in Controls → API keys → `SOLANA_WS_URL`. The Helius Developer plan ($49/month) covers the whole stream.
+
 ## API keys and connections
 
 - **Where:** Controls → API keys. Paste a key and Save, and use **Test** to check it.

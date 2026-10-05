@@ -1056,10 +1056,12 @@ def test_watchdog_switches_endpoint_when_trades_go_missing(monkeypatch):
     assert seen_urls[0] == "wss://flaky.example" and seen_urls[1] == "wss://solana-rpc.publicnode.com"
 
 
-def test_watchdog_never_moves_to_an_endpoint_measured_slower():
+def test_watchdog_never_moves_to_an_endpoint_measured_slower(monkeypatch):
     """2026-10-04: mainnet-beta spiked past 5 s, the watchdog moved to PublicNode (10 s behind) and back,
     40 times in 35 minutes. A slow endpoint is only left for one that isn't known to be slower."""
     from meme_trader.sniper.feeds import FeedQuality
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)              # (no metered backup in this test)
+    monkeypatch.delenv("SOLANA_WS_BACKUP_URL", raising=False)
 
     f = SolanaTradeFeed("wss://fast.example, wss://slow.example", stall_s=60, max_lag_s=5)
     f.ws_urls = ["wss://fast.example", "wss://slow.example"]
@@ -1113,6 +1115,8 @@ def test_a_hang_up_on_the_fastest_endpoint_reconnects_to_it(monkeypatch):
     """2026-10-05: the public RPC hung up every 20 s-5 min; the bot flapped to PublicNode (10 s behind) and back,
     pausing entries each time. Now a hang-up on the fastest known endpoint is a reconnect to it."""
     monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    monkeypatch.delenv("HELIUS_API_KEY", raising=False)              # (no metered backup in this test)
+    monkeypatch.delenv("SOLANA_WS_BACKUP_URL", raising=False)
     f = SolanaTradeFeed()
     pn, mb = f.ws_urls.index("wss://solana-rpc.publicnode.com"), f.ws_urls.index("wss://api.mainnet-beta.solana.com")
     now = 10_000.0
@@ -1128,3 +1132,49 @@ def test_a_hang_up_on_the_fastest_endpoint_reconnects_to_it(monkeypatch):
     f.switches.extend([(now, "a", "a", "x"), (now, "a", "b", "y")])
     st = f.stream_stats(now + 10)
     assert st["reconnects_1h"] == 1 and st["switches_1h"] == 1
+
+
+def test_the_metered_backup_is_used_only_while_the_free_feeds_fail(monkeypatch, tmp_path):
+    """Your Helius key's websocket backs up the free endpoints during outages, within a daily allowance."""
+    import time
+    monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    monkeypatch.delenv("SOLANA_WS_BACKUP_URL", raising=False)
+    monkeypatch.setenv("HELIUS_API_KEY", "k-secret")
+    f = SolanaTradeFeed(backup_mb_per_day=100)
+    b = f.backup_idx
+    assert b == len(f.ws_urls) - 1 and f._hostname(f.ws_urls[b]) == "mainnet.helius-rpc.com"   # (the key never shows)
+    pn, mb = f.ws_urls.index("wss://solana-rpc.publicnode.com"), f.ws_urls.index("wss://api.mainnet-beta.solana.com")
+    now = 50_000.0
+    f.endpoint_lag = {mb: (1.7, now), pn: (10.0, now), b: (0.4, now)}
+    f.ws_idx = mb
+    assert f._best_known(now) == mb and f._faster_endpoint(now) is None    # the backup is never just "faster"
+    for k in range(3):
+        assert f._next_endpoint("connection closed (CLOSE)", now + k) == mb
+    assert f._next_endpoint("connection closed (CLOSE)", now + 3) == b    # keeps hanging up: the backup
+    f.ws_idx = b                                                          # on the backup: back to free after a while
+    f.last_trade = now + f.BACKUP_RETRY_S + 1
+    assert f._check_stream(now + 10, now) == ""
+    assert f._check_stream(now + f.BACKUP_RETRY_S + 1, now) == "retry free"
+    assert f._next_endpoint("retry free", now + 400) == mb
+    f.backup_used[time.strftime("%Y-%m-%d", time.gmtime(now))] = 100.0    # today's allowance spent
+    assert f._check_stream(now + 20, now) == "backup budget used for today"
+    f.ws_idx = mb                                                         # a slow free feed: no backup left, stay
+    f.closes.clear()
+    assert not f._backup_ok(now) and f._next_endpoint("connection closed (CLOSE)", now + 500) == mb
+    st = f.stream_stats(now)
+    assert st["backup"]["host"] == "mainnet.helius-rpc.com" and st["backup"]["mb_today"] == 100.0
+    # a slow free feed with allowance left goes to the backup instead of waiting it out
+    g = SolanaTradeFeed(backup_mb_per_day=100)
+    g.ws_idx = g.ws_urls.index("wss://api.mainnet-beta.solana.com")
+    g.endpoint_lag = {g.ws_urls.index("wss://solana-rpc.publicnode.com"): (10.0, now)}
+    g.last_trade, g.trades_up = now, True
+    from meme_trader.sniper.feeds import FeedQuality
+    g.quality = FeedQuality(max_lag_s=5, min_lags=10)
+    g.quality.checks.extend([True] * 500)
+    for i in range(20):
+        g.quality.observe(Trade(f"m{i}", now, "w", "buy", 1, 1, 30, 1e9, chain_ts=now - 7))
+    assert "behind the chain" in g._check_stream(now, now - 100)
+    assert g._next_endpoint("7s behind the chain", now) == g.backup_idx
+    # with no Helius key there's no backup, and nothing changes
+    monkeypatch.delenv("HELIUS_API_KEY")
+    assert SolanaTradeFeed().backup_idx is None

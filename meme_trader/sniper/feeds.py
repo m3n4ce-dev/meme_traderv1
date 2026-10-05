@@ -286,8 +286,20 @@ class SolanaTradeFeed(Feed):
     STARTUP_MEMORY_S = 6 * 3600   # at startup, begin on the fastest endpoint measured this recently
 
     def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
-                 max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0, memory_path=None):
+                 max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0, memory_path=None,
+                 backup_ws_url: str = "", backup_mb_per_day: float = 1200.0):
         self.ws_urls = ws_urls(ws_url)
+        # A metered backup (your Helius key's websocket by default), used only while the free endpoints are down or
+        # behind, up to backup_mb_per_day of stream a day: Helius bills websockets 2 credits per 0.1 MB, and this
+        # stream is ~400 MB an hour, so its free 1M credits a month cover ~4 hours a day of outages.
+        key = os.environ.get("HELIUS_API_KEY", "").strip()
+        backup = backup_ws_url or os.environ.get("SOLANA_WS_BACKUP_URL", "") or (f"wss://mainnet.helius-rpc.com/?api-key={key}" if key else "")
+        self.backup_idx: int | None = None
+        if backup and backup not in self.ws_urls:
+            self.ws_urls.append(backup)
+            self.backup_idx = len(self.ws_urls) - 1
+        self.backup_mb_per_day = float(backup_mb_per_day)
+        self.backup_used: dict[str, float] = {}      # UTC day -> MB streamed from the backup
         raw = ws_url or os.environ.get("SOLANA_WS_URL", "")
         # endpoints you configured (SOLANA_WS_URL / feed.ws_url) are worth going back to; the free fallbacks aren't
         self.n_configured = len([u for u in (raw if isinstance(raw, list) else str(raw).split(",")) if u and u.strip()])
@@ -461,6 +473,8 @@ class SolanaTradeFeed(Feed):
             v = saved.get(self._hostname(u))
             if isinstance(v, list) and len(v) == 2 and now - v[1] < self.STARTUP_MEMORY_S:
                 self.endpoint_lag[i] = (float(v[0]), float(v[1]))
+                if i == self.backup_idx:                     # never start on the metered backup
+                    continue
                 if best is None or v[0] < self.endpoint_lag[best][0]:
                     best = i
         if best is not None:
@@ -479,6 +493,21 @@ class SolanaTradeFeed(Feed):
         except OSError:
             pass
 
+    BACKUP_RETRY_S = 300    # on the backup, look at the free endpoints again this often
+
+    def _backup_left_mb(self, now: float) -> float:
+        if self.backup_idx is None:
+            return 0.0
+        return self.backup_mb_per_day - self.backup_used.get(time.strftime("%Y-%m-%d", time.gmtime(now)), 0.0)
+
+    def _backup_ok(self, now: float) -> bool:
+        return self.backup_idx is not None and self.ws_idx != self.backup_idx and self._backup_left_mb(now) > 0
+
+    def _free_order(self) -> list[int]:
+        """The free endpoints in rotation order after the current one (the backup is never just 'next')."""
+        n = len(self.ws_urls)
+        return [i for i in ((self.ws_idx + k) % n for k in range(1, n + 1)) if i != self.backup_idx]
+
     def _known_lag(self, i: int, now: float) -> float | None:
         v = self.endpoint_lag.get(i)
         return v[0] if v and now - v[1] < self.LAG_MEMORY_S else None
@@ -486,8 +515,9 @@ class SolanaTradeFeed(Feed):
     def _faster_endpoint(self, now: float) -> int | None:
         """The next endpoint not measured slower than this one lately, or None (stay: the rest are worse)."""
         cur = self.quality.lag_s or 0.0
-        for k in range(1, len(self.ws_urls)):
-            i = (self.ws_idx + k) % len(self.ws_urls)
+        for i in self._free_order():
+            if i == self.ws_idx:
+                continue
             lag = self._known_lag(i, now)
             if lag is None or lag < cur:
                 return i
@@ -500,10 +530,18 @@ class SolanaTradeFeed(Feed):
         mins = [b for m, b in self.bytes_in if m < int(now // 60)]          # whole minutes only
         return {"reconnects_1h": sum(1 for s in hour if s[1] == s[2]), "switches_1h": sum(1 for s in hour if s[1] != s[2]),
                 "mb_per_hour": round(sum(mins) / len(mins) * 60 / 1e6, 1) if mins else None,
-                "up_for_s": round(now - self.connected_since) if self.trades_up and self.connected_since else 0}
+                "up_for_s": round(now - self.connected_since) if self.trades_up and self.connected_since else 0,
+                "backup": None if self.backup_idx is None else {
+                    "host": self._hostname(self.ws_urls[self.backup_idx]), "on": self.ws_idx == self.backup_idx,
+                    "mb_today": round(self.backup_mb_per_day - self._backup_left_mb(now), 1), "mb_per_day": self.backup_mb_per_day}}
 
     def _check_stream(self, now: float, connected: float) -> str:
         """Why the current endpoint should be dropped, or ''."""
+        if self.backup_idx is not None and self.ws_idx == self.backup_idx:   # on the metered backup
+            if self._backup_left_mb(now) <= 0:
+                return "backup budget used for today"
+            if now - connected > self.BACKUP_RETRY_S:
+                return "retry free"
         if now - self.last_trade > self.stall_s:
             return f"no pump.fun trades for {now - self.last_trade:.0f}s"
         if self.quality.bad:
@@ -511,7 +549,7 @@ class SolanaTradeFeed(Feed):
         if len(self.quality.lags) >= self.quality.min_lags:
             self.endpoint_lag[self.ws_idx] = (self.quality.lag_s, now)
             self._save_lags(now)
-        if self.quality.slow and self._faster_endpoint(now) is not None:
+        if self.quality.slow and (self._faster_endpoint(now) is not None or self._backup_ok(now)):
             return f"{self.quality.lag_s:.0f}s behind the chain"
         # (slow but every other endpoint was slower: stay put; entries stay paused until it catches up)
         if self.ws_idx != 0 and self.n_configured and now - connected > self.RETRY_PRIMARY_S:
@@ -528,10 +566,13 @@ class SolanaTradeFeed(Feed):
         return not why or not any(k in why for k in ("behind the chain", "trades missing", "no pump.fun trades", "retry"))
 
     def _best_known(self, now: float) -> int | None:
-        lags = [(lag, i) for i in range(len(self.ws_urls)) if (lag := self._known_lag(i, now)) is not None]
+        lags = [(lag, i) for i in range(len(self.ws_urls)) if i != self.backup_idx and (lag := self._known_lag(i, now)) is not None]
         return min(lags)[1] if lags else None
 
     def _next_endpoint(self, why: str, now: float) -> int:
+        if why in ("retry free", "backup budget used for today"):
+            best = self._best_known(now)
+            return best if best is not None else self._free_order()[0]
         if why == "retry":
             return 0
         if self._dropped(why):
@@ -545,14 +586,20 @@ class SolanaTradeFeed(Feed):
                 first, cur = self._known_lag(0, now), self._known_lag(self.ws_idx, now)
                 if first is None or cur is None or first <= cur:
                     return 0
+            if self.ws_idx == self.backup_idx:                  # the backup hung up: once more, else a free one
+                return self.ws_idx if recent < self.QUICK_CLOSES and self._backup_left_mb(now) > 0 else self._free_order()[0]
             best = self._best_known(now)
             if recent < self.QUICK_CLOSES and (best is None or best == self.ws_idx):
                 return self.ws_idx
+            if recent >= self.QUICK_CLOSES and self._backup_ok(now):
+                return self.backup_idx                          # the fast free one keeps hanging up: the backup
         if "behind the chain" in why:
             i = self._faster_endpoint(now)
             if i is not None:
                 return i
-        return (self.ws_idx + 1) % len(self.ws_urls)
+            if self._backup_ok(now):
+                return self.backup_idx
+        return self._free_order()[0]
 
     async def _trades(self, q: asyncio.Queue) -> None:
         import aiohttp
@@ -574,6 +621,11 @@ class SolanaTradeFeed(Feed):
                             break
                         now = time.time()
                         minute = int(now // 60)
+                        if self.ws_idx == self.backup_idx:              # metered: count it against today's budget
+                            day = time.strftime("%Y-%m-%d", time.gmtime(now))
+                            self.backup_used[day] = self.backup_used.get(day, 0.0) + len(msg.data) / 1e6
+                            if len(self.backup_used) > 3:
+                                self.backup_used.pop(min(self.backup_used))
                         if self.bytes_in and self.bytes_in[-1][0] == minute:
                             self.bytes_in[-1][1] += len(msg.data)
                         else:
