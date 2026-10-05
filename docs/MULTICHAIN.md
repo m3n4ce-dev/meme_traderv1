@@ -1,6 +1,14 @@
 # Cross-chain support: feasibility, work and costs
 
-*Assessed 2026-10-03. Status: **not started, on hold** until the Solana bot proves an edge (see "Go / no-go" below). Tracking issue: [#5](https://github.com/m4n3ce/meme_traderv1/issues/5).*
+*Assessed 2026-10-03. Tracking issue: [#5](https://github.com/m4n3ce/meme_traderv1/issues/5).*
+
+**Update 2026-10-05: paper trading on other chains is running** (owner's call: "not bound to SOL coins"). It doesn't use the launchpad plan below. It's a lighter, chain-agnostic paper bot, `sniper/xchain.py`:
+- **What it trades:** young DEX coins on BNB Chain, Base and Solana, momentum over minutes to hours.
+- **Data:** polled prices (GeckoTerminal for candidates, DexScreener for prices).
+- **Safety:** honeypot.is or GoPlus on EVM chains, mint authorities on Solana.
+- **Costs:** fees, price impact, tax and gas in every fill.
+
+**Live trading on other chains is still on hold** until the go/no-go below is met. There's no EVM wallet or executor.
 
 ## Verdict
 
