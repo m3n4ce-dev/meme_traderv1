@@ -191,7 +191,7 @@ sniper:
     effort: low                  # low keeps votes to a few seconds
     personas: [veteran, narrative, skeptic, quant]
     weights: {veteran: 1.0, narrative: 0.8, skeptic: 1.0, quant: 1.0}
-    quorum: 0.45                 # weighted buy-conviction share needed to approve
+    quorum: 0.45                 # share of the desk's voting weight that must vote buy (a buy under 50 conviction counts half)
     veto_conviction: 75          # skeptic "pass" at/above this conviction vetoes the trade
     timeout_s: 12
     max_price_move_pct: 20       # skip if price ran this much while the desk deliberated

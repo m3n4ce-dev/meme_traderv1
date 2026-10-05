@@ -409,3 +409,27 @@ def test_kol_list_parses_and_names_kols_on_the_chart(tmp_path):
     s.trades.append((s.trades[-1][0] + 1, s.trades[-1][1], "buy", 0.5, k1))
     m = [x for x in e.chart_data(s.mint)["marks"] if x["who"] == "kol"]
     assert m and m[-1]["label"] == "KOL Cooker bought 0.50 SOL"
+
+
+def test_strategy_buttons_save_the_owners_choice(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    e = market()
+    saved = []
+    e.save_setting = lambda k, v, path=None: saved.append((k, v))   # (never the real config/params.yaml)
+    e.p.entry["enabled"] = True
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.send_json({"action": "set", "key": "entry.enabled", "value": False, "save": True})
+            for _ in range(20):
+                m = await ws.receive_json(timeout=5)
+                if m.get("type") == "ack":
+                    return m
+    m = asyncio.run(go())
+    assert m["ok"] and "Sniper off (saved)" in m["text"]
+    assert e.p.entry.enabled is False and saved == [("entry.enabled", False)]   # survives the next restart

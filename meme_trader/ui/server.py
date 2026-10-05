@@ -43,6 +43,11 @@ STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 
 
+
+# the Live page's strategy buttons (key -> name): the owner's on/off is saved at once
+STRATEGY_SWITCHES = {"entry.enabled": "Sniper", "copy.enabled": "Copy trading", "late.enabled": "Graduation plays",
+                     "callouts.enabled": "Callouts"}
+
 def _local(host: str) -> bool:
     """Host header -> is it this machine? '127.0.0.1:8787', 'localhost', '[::1]:8787' are."""
     name = host.split("]")[0] + "]" if host.startswith("[") else host.split(":")[0]
@@ -417,6 +422,19 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         if action == "posted" and cmd.get("mint"):
             engine.mark_posted(str(cmd["mint"]))
             return None
+        if action == "set" and cmd.get("key") and cmd.get("save") and str(cmd["key"]) in STRATEGY_SWITCHES:
+            # the strategy buttons on the Live page: the owner's on/off is kept across restarts, like the risk dial
+            # (applied-only, a restart for a deploy turned the sniper back on behind the owner's back)
+            key = str(cmd["key"])
+            err = engine.set_control(key, cmd.get("value"))
+            if not err:
+                try:
+                    engine.save_setting(key, bool(next((c['value'] for c in engine.controls() if c['key'] == key), False)))
+                except Exception as e:                    # disk, YAML: the change still applies until a restart
+                    err = f"applied, but not saved: {e}"
+            on = bool(next((c['value'] for c in engine.controls() if c['key'] == key), False))
+            return {"ok": not err, "key": key, "text": err or f"{STRATEGY_SWITCHES[key]} {'on' if on else 'off'} (saved)",
+                    "controls": engine.controls(), "advanced": engine.advanced_controls()}
         if action == "set" and cmd.get("key"):
             err = engine.set_control(str(cmd["key"]), cmd.get("value"))
             return {"ok": not err, "key": cmd["key"], "text": err or "Applied now. Press Save to keep it after a restart",
