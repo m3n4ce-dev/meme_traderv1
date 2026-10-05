@@ -471,18 +471,32 @@ class Desk:
             self.output_tokens += o
             return d, ""
         caps = await self._claude_caps()
-        oc: dict = {}
-        if caps["effort"] and effort:
-            oc["effort"] = effort
-        if caps["json"]:
-            oc["format"] = {"type": "json_schema", "schema": schema}
-        else:
-            system += "\n\nReply with only a JSON object with these keys: " + ", ".join(schema["properties"]) + "."
         extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"} if self.model.startswith("claude-opus") else {}
-        r = await self.client.beta.messages.create(
-            model=self.model, max_tokens=8000 if caps["effort"] else max_tokens,   # thinking needs room on the big models
-            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": user}], **({"output_config": oc} if oc else {}), **extra)
+        for _ in range(3):
+            oc: dict = {}
+            if caps["effort"] and effort:
+                oc["effort"] = effort
+            sys_text = system
+            if caps["json"]:
+                oc["format"] = {"type": "json_schema", "schema": schema}
+            else:
+                sys_text += "\n\nReply with only a JSON object with these keys: " + ", ".join(schema["properties"]) + "."
+            try:
+                r = await self.client.beta.messages.create(
+                    model=self.model, max_tokens=8000 if caps["effort"] else max_tokens,   # thinking needs room on the big models
+                    system=[{"type": "text", "text": sys_text, "cache_control": {"type": "ephemeral"}}],
+                    messages=[{"role": "user", "content": user}], **({"output_config": oc} if oc else {}), **extra)
+                break
+            except Exception as e:
+                # the model said it doesn't take an option its capabilities didn't tell us about (seen 2026-10-05: Haiku
+                # 4.5 and "effort"): drop it, remember, ask again
+                msg = str(e).lower()
+                if "effort" in msg and "not support" in msg and caps["effort"]:
+                    caps["effort"] = False
+                elif ("structured" in msg or "json_schema" in msg or "format" in msg) and "not support" in msg and caps["json"]:
+                    caps["json"] = False
+                else:
+                    raise
         self.calls += 1
         self.input_tokens += r.usage.input_tokens
         self.output_tokens += r.usage.output_tokens
