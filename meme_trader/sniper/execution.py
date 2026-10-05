@@ -50,7 +50,8 @@ class PaperExecutor:
         return SniperFill(tokens > 0, sol=sol + self._tx_cost(priority), tokens=tokens,
                           error="" if tokens > 0 else "curve full")
 
-    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None) -> SniperFill:
+    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None,
+                   steps: list | None = None) -> SniperFill:
         sol = max(curve.quote_sell(tokens, self.fee) * (1 - self.slip) - self._tx_cost(priority), 0.0)
         return SniperFill(True, sol=sol, tokens=tokens)
 
@@ -197,17 +198,18 @@ class LiveExecutor:
     async def buy(self, mint: str, curve: Curve, sol: float, priority: float | None = None) -> SniperFill:
         return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct, 0.0, priority)
 
-    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None) -> SniperFill:
+    async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None,
+                   steps: list | None = None) -> SniperFill:
         fee = self.ex.curve_fee_pct + self.ex.platform_fee_pct
         estimate = curve.quote_sell(tokens, fee) if curve is not None else 0.0
 
         def run() -> SniperFill:
             fill = SniperFill(False, error="no attempt")
             lost = 0.0
-            steps = list(self.ex.sell_slippage_steps)
-            prios = [priority] * len(steps) if priority is not None else \
-                list(self.ex.sell_priority_fee_steps) + [self.ex.sell_priority_fee_steps[-1]] * len(steps)
-            for slip, prio in zip(steps, prios):     # each retry: more slippage room AND more priority
+            slips = list(steps or self.ex.sell_slippage_steps)
+            prios = [priority] * len(slips) if priority is not None else \
+                list(self.ex.sell_priority_fee_steps) + [self.ex.sell_priority_fee_steps[-1]] * len(slips)
+            for slip, prio in zip(slips, prios):     # each retry: more slippage room AND more priority
                 fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate, prio)
                 lost += fill.fees_lost
                 if fill.unknown:                     # a fresh sell now could sell twice: stop and resolve

@@ -111,6 +111,26 @@ def test_paper_sell_retries_through_the_slippage_steps():
     asyncio.run(go())
 
 
+def test_urgent_exits_get_their_own_slippage_steps():
+    """A crash before the first try lands: with urgent_sell_slippage_steps wide enough, a stop fills on that first try
+    instead of failing and landing a whole delay later."""
+    e = engine(delay=1.0)
+    e.p.execution["urgent_sell_slippage_steps"] = [50, 80, 95]
+    assert e._sell_steps("late stop -16%") == [50, 80, 95] and e._sell_steps("dev sold") == [50, 80, 95]
+    assert e._sell_steps("momentum decay (outflow -2.36 SOL, -18%)") == [50, 80, 95]
+    assert e._sell_steps("graduation exit (curve 94%)") == [15, 25, 40] and e._sell_steps("late stall 45s") == [15, 25, 40]
+    s, k = setup_token(e)
+
+    async def go():
+        await e._buy(s, 60, 0.1, ["t"], source="late")
+        await e.handle(Tick(2.5))
+        await e._sell(s, e.positions[A], 1.0, "late stop -16%")
+        await e.handle(Trade(A, 3.0, W, "sell", 5.0, 1e7, 33.0, k / 33.0))   # about -33%
+        await e.handle(Tick(3.6))                       # first attempt: inside 50% -> fills at once
+        assert A not in e.positions and e.stats["failed_sell_attempts"] == 0
+    asyncio.run(go())
+
+
 def test_zero_delay_is_unchanged():
     e = engine(delay=0.0, slip=3.0)
     s, _ = setup_token(e)
