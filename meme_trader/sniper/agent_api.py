@@ -41,7 +41,8 @@ UI_ACTIONS = {"theme": ("light", "dark", "auto"), "tab": ("live", "charts", "pul
               "open_coin": None, "pin_chart": None, "unpin_chart": None, "character": None}
 UI_WORDS = {"white": "light", "bright": "light", "day": "light", "black": "dark", "night": "dark", "system": "auto",
             "dollars": "usd", "$": "usd", "dollar": "usd"}
-ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk", "hand_over")
+ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk", "hand_over",
+             "set_exits", "order", "cancel_order")
 
 
 def _get(p, key: str):
@@ -290,6 +291,54 @@ class AgentAPI:
         await self.e._sell(s, pos, frac, f"agent: {reason}")
         self._say(f"sell {s.symbol} {frac:.0%} | {reason}", mint)
         return {"sent": True, "symbol": s.symbol, "fraction": frac}
+
+    async def act_set_exits(self, mint: str, reason: str, stop_loss_pct=None, take_profit_pct=None,
+                            take_profit_fraction=None, trail_pct=None) -> dict:
+        """Exit rules on one of the owner's positions: a stop loss, a take profit (and how much it sells), a trail."""
+        reason = self._reason(reason)
+        pos = self.e.positions.get(str(mint))
+        if pos is None:
+            raise AgentError("no open position in that coin")
+        if pos.source != "manual":
+            raise AgentError("that's the bot's own position: its strategy's exits manage it")
+        if all(v in (None, "") for v in (stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct)):
+            raise AgentError("give at least one of stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct")
+        err = self.e.set_manual_exits(str(mint), stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct)
+        if err:
+            raise AgentError(err)
+        rules = ", ".join(f"{k} {v}" for k, v in (("stop", stop_loss_pct), ("take profit", take_profit_pct),
+                                                    ("sells", take_profit_fraction), ("trail", trail_pct)) if v not in (None, ""))
+        self._say(f"exits on {pos.symbol}: {rules} | {reason}", str(mint))
+        return {"symbol": pos.symbol, "exits": pos.manual}
+
+    async def act_order(self, mint: str, side: str, mcap_usd: float, reason: str, when: str = "", sol=None,
+                        fraction=None, hours: float = 24) -> dict:
+        """A limit buy or sell, or an alert, at a market cap in dollars (the owner's order book)."""
+        reason = self._reason(reason)
+        side = str(side or "").lower()
+        op = {"above": "ge", ">=": "ge", "ge": "ge", "below": "le", "<=": "le", "le": "le"}.get(str(when or "").lower())
+        if op is None:
+            op = "le" if side == "buy" else "ge"            # buy the dip, sell into strength, unless told
+        if side == "buy":
+            usd = float(sol or 0) * float(self.e.sol_price.usd or 0)
+            cap = min(self.max_buy_usd, float(self.e.p.sizing.max_usd))
+            if not self.can_buy:
+                raise AgentError("agent buys are disabled in the config (agent.can_buy)")
+            if usd > cap:
+                raise AgentError(f"that's ${usd:,.0f}: agent orders are capped at ${cap:g} a buy")
+        err, o = await self.e.place_order(str(mint), side, op, mcap_usd, sol=sol, frac=fraction, ttl_h=hours)
+        if err:
+            raise AgentError(err)
+        self._say(f"order: {self.e.order_label(o)} | {reason}", str(mint))
+        return {"order": o["id"], "label": self.e.order_label(o)}
+
+    async def act_cancel_order(self, order_id: str, reason: str) -> dict:
+        reason = self._reason(reason)
+        err = self.e.cancel_order(str(order_id))
+        if err:
+            raise AgentError(err)
+        self._say(f"cancelled order {order_id} | {reason}")
+        return {"cancelled": order_id}
 
     async def act_buy(self, mint: str, usd: float, reason: str) -> dict:
         reason = self._reason(reason)

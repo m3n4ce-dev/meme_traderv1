@@ -306,6 +306,12 @@ sniper:
     kelly_fraction: 0.25         # quarter-Kelly into the sizing agent's strength (needs display_only: false)
     require_positive_ev: false   # skip entries the model says lose money after costs (needs display_only: false)
 
+  lab:                           # the team's lab: one setting at a time replayed on the last 24 h of recordings
+    enabled: true                #   (a separate low-priority process; results go to the next huddle)
+    auto_every_min: 360          # with nothing queued, the team tests a routine one-step change this often
+    max_per_day: 4               # tests started in any 24 h (each replays the last 24 h twice, at low priority)
+    min_free_mb: 8000            # start a test only with this much memory free
+
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true
     lookback_trades: 10          # how many recent trades defense mode looks at
