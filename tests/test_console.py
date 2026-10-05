@@ -164,5 +164,5 @@ def test_hq_status(tmp_path):
         async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
             return await (await c.get("/api/hq")).json()
     d = asyncio.run(go())
-    assert {"bot", "services", "feed", "lab", "desk", "chat", "machine"} <= set(d)
+    assert {"bot", "services", "feed", "lab", "desk", "chat", "machine", "xchain"} <= set(d) and d["xchain"]["ready"].endswith("of 6")
     assert d["machine"]["disk_free_gb"] > 0 and set(d["services"]) == {"meme-sniper", "meme-wallets", "edge-scout"}

@@ -194,8 +194,10 @@ def validate_sniper(sn: dict) -> None:
         _num(sn, f"execution.{k}", 0)
     _num(sn, "execution.paper_latency_slippage_pct", 0, 100, hi_open=True)
     _num(sn, "execution.slippage_pct", 0, lo_open=True)
-    for key, positive in (("sell_slippage_steps", True), ("sell_priority_fee_steps", False)):
+    for key, positive in (("sell_slippage_steps", True), ("sell_priority_fee_steps", False), ("urgent_sell_slippage_steps", True)):
         v = sn["execution"].get(key)
+        if key == "urgent_sell_slippage_steps" and v is None:
+            continue
         _require(isinstance(v, list) and v, f"sniper.execution.{key} must be a non-empty list")
         for x in v:
             _require(isinstance(x, (int, float)) and not isinstance(x, bool) and (x > 0 if positive else x >= 0),

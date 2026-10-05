@@ -1604,7 +1604,7 @@ function renderXchain(s) {
   (s.closed || []).forEach(c => { if (c.chain && c.url) XURL[c.mint] = c.url; });
   const names = {bsc: "BNB Chain", base: "Base", eth: "Ethereum", solana: "Solana"}, sc = x.scan || [], now = Date.now() / 1000;
   $("xc-sub").textContent = !x.enabled ? "off" : x.mode_note ? x.mode_note
-    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.today.trades ? ` (real prices ${usdS(x.today.real_usd)})` : ""}${x.blocked ? " · " + x.blocked : ""}`;
+    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.today.real_n ? ` (router-checked ${x.today.real_n}: real ${usdS(x.today.real_usd)} vs paper ${usdS(x.today.real_paper_usd)})` : ""}${x.blocked ? " · " + x.blocked : ""}`;
   $("xc-scansub").textContent = x.last_scan ? `${sc.filter(r => !r.why).length} passing of the top ${sc.length} · ${dur(now - x.last_scan)} ago` : "";
   const R = x.ready || {checks: []};
   $("xc-readysub").textContent = `${R.passed || 0} of ${R.checks.length} checks passed${R.ready ? ": ready to talk about a wallet" : ""}`;
@@ -1626,7 +1626,7 @@ function renderXchain(s) {
     : `<div class="empty">${x.mode_note ? esc(x.mode_note) + "." : x.active ? "No other-chain positions. It scans BNB Chain, Base and Solana DEX coins every 90 seconds and buys only coins that pass every rule and can be sold again." : "Off. Turn on “Other chains (paper)” in Controls."}</div>`;
   $("xc-scan").innerHTML = sc.length ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Chain</th><th class="r">Market cap</th><th class="r">Liquidity</th><th class="r">Vol 1h</th><th class="r">1h</th><th>Verdict</th></tr></thead><tbody>${sc.map(r => `<tr>
       <td><a href="${esc(r.dex || "")}" target="_blank" rel="noopener noreferrer"><b>${esc(r.symbol)}</b></a></td><td><span class="tag">${esc(r.chain_name || r.chain)}</span></td>
-      <td class="r">${r.mcap_usd ? "$" + fmtUsd(r.mcap_usd) : "–"}</td><td class="r">${r.liq_usd ? "$" + fmtUsd(r.liq_usd) : "–"}</td><td class="r">${r.vol_h1 ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
+      <td class="r">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r">${r.liq_usd ? "$" + fmtUsd(r.liq_usd) : "–"}</td><td class="r">${r.vol_h1 ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
       <td class="r ${cls(r.chg_h1)}">${r.chg_h1 != null ? pct(r.chg_h1) : "–"}</td><td class="note">${r.why ? esc(r.why) : "<b>passes</b>"}</td></tr>`).join("")}</tbody></table></div>`
     : `<div class="empty">No scan yet.</div>`;
 }
@@ -2377,6 +2377,8 @@ async function loadHQ() {
     ["Helius backup", b ? true : null, b ? `${b.on ? "in use now" : "standing by"} · ${b.mb_today} MB today · ${b.mb_left} MB left` : "no Helius key saved"],
     ["Wallet recorder", r.active === true ? true : r.active === false ? false : null, r.active == null ? "no status" : `${r.active ? "recording" : "paused"}${r.pause_reason ? " · " + esc(r.pause_reason) : ""} · updated ${dur(r.updated_s || 0)} ago`],
     ["The lab", true, `${d.lab.running ? "testing now" : "idle"} · ${d.lab.queued} queued · ${d.lab.tests} tests done`],
+    ["Other chains", d.xchain ? (d.xchain.active && d.xchain.last_scan_s != null && d.xchain.last_scan_s < 600 ? true : null) : null,
+     d.xchain ? `${d.xchain.active ? "paper, scanning" : "off"}${d.xchain.note ? " · " + esc(d.xchain.note) : ""} · ${d.xchain.open} open · today ${d.xchain.today.trades} trades ${usdS(d.xchain.today.pnl_usd)} · real-money checklist ${d.xchain.ready}${d.xchain.last_scan_s != null ? ` · scanned ${dur(d.xchain.last_scan_s)} ago` : ""}` : "–"],
     ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
     ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
     ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
