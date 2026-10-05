@@ -433,3 +433,27 @@ def test_strategy_buttons_save_the_owners_choice(tmp_path):
     m = asyncio.run(go())
     assert m["ok"] and "Sniper off (saved)" in m["text"]
     assert e.p.entry.enabled is False and saved == [("entry.enabled", False)]   # survives the next restart
+
+
+def test_coin_families_mark_the_og_and_number_the_copies():
+    from meme_trader.sniper.events import Launch
+
+    e = market(launches=5)
+    t0 = e.now
+    e.fam_since = t0 - 3600
+
+    async def go():
+        for i, (sym, name) in enumerate([("GIZMO", "Gizmo"), ("$gizmo", "Gizmo Cat"), ("GIZ", "gizmo!"), ("OTHER", "Other")]):
+            await e.handle(Launch(mint=f"M{i}" + "x" * 40, ts=t0 + 60 * i, creator=f"C{i}" + "y" * 40, symbol=sym, name=name))
+    asyncio.run(go())
+    og, c2, c3, other = (e.family(f"M{i}" + "x" * 40, full=True) for i in range(4))
+    assert other is None                                            # a coin with no namesakes has no family
+    assert og["og"] and og["n"] == 3 and og["rank"] == 1 and og["og_known"]
+    assert not c2["og"] and c2["rank"] == 2 and c2["og_symbol"] == "GIZMO" and c2["after_og_s"] == 60
+    assert c3["rank"] == 3 and c3["after_og_s"] == 120              # same name, different ticker: still a copy
+    assert {m["rank"] for m in og["members"]} == {1, 2, 3}
+    row = e._pulse_token(e.tokens["M1" + "x" * 40], 100.0, False)
+    assert row["fam"]["rank"] == 2 and row["fam"]["og"] is False
+    e.now = t0 + 7 * 3600
+    asyncio.run(e._tick())
+    assert e.family("M0" + "x" * 40) is None                        # families forget after 6 h
