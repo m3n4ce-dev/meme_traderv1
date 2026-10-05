@@ -2461,8 +2461,6 @@ class Engine:
     # ------------------------------------------------------------------ the desk discusses your notes
     async def discuss_note(self, item_id: str, personas: list[str] | None = None) -> str:
         """Each persona reads a memory item (and the discussion so far) and replies. '' or why not."""
-        import os
-
         from . import desk as deskmod
 
         it = next((i for i in self.memory.items_ if i.get("id") == item_id), None)
