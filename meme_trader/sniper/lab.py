@@ -22,7 +22,8 @@ from pathlib import Path
 TESTABLE = {"late.min_net_flow_sol": (0.5, 20), "late.min_buyers": (3, 60), "late.min_buy_sell_ratio": (1.0, 5.0),
             "late.min_near_high": (0.5, 1.0), "late.min_curve_pct": (30, 84), "late.max_curve_pct": (56, 92),
             "late.max_age_s": (120, 3600), "late.flow_window_s": (10, 120), "late.stop_loss_pct": (5, 50),
-            "late.stall_s": (15, 300), "late.max_hold_s": (60, 3600), "late.exit_curve_pct": (86, 99)}
+            "late.stall_s": (15, 300), "late.max_hold_s": (60, 3600), "late.exit_curve_pct": (86, 99),
+            "late.min_age_s": (0, 120), "late.min_recent_sells": (0, 10)}
 # when nobody has proposed anything, the team works through these: one step either side of where it is now
 AUTO_STEPS = {"late.min_net_flow_sol": 1.0, "late.min_buyers": 4, "late.min_buy_sell_ratio": 0.3, "late.min_near_high": 0.05,
               "late.min_curve_pct": 5, "late.max_age_s": 300, "late.stop_loss_pct": 5, "late.stall_s": 15,
