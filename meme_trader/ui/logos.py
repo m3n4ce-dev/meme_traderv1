@@ -18,6 +18,10 @@ from ..config import ROOT
 CACHE = ROOT / "data" / "logos"
 MAX_BYTES = 4 * 1024 * 1024
 SIZE = 96
+# A 96-px logo never needs a bigger source. The 4 MB download cap doesn't bound this: a 0.23 MB PNG can hold 73 M
+# pixels, and decoding that took 1.4 s and ~300 MB (seen 2026-10-05 in the bot's log, twice). So the header's
+# size is checked before anything is decoded, and decoding runs off the event loop.
+MAX_PIXELS = 16_000_000
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 DS_TOKENS = "https://api.dexscreener.com/tokens/v1/solana/"
 from ..sniper.feeds import IPFS_GATEWAYS as GATEWAYS, ipfs_urls  # noqa: E402,F401 (one list for the bot and logos)
@@ -29,11 +33,14 @@ def thumbnail(data: bytes, size: int = SIZE) -> bytes | None:
         from PIL import Image
     except ImportError:
         return None
-    Image.MAX_IMAGE_PIXELS = 40_000_000
+    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
     try:
-        with Image.open(io.BytesIO(data)) as im:
+        with Image.open(io.BytesIO(data)) as im:              # (lazy: only the header is read here)
             if im.format not in ("PNG", "JPEG", "GIF", "WEBP"):
                 return None
+            if im.size[0] * im.size[1] > MAX_PIXELS:
+                return None
+            im.draft("RGB", (size * 2, size * 2))              # JPEG: decode at a fraction of full size
             im.seek(0)
             im = im.convert("RGBA")
             im.thumbnail((size, size))
@@ -110,7 +117,7 @@ class Logos:
         async with self.slots:
             for url in [u for c in await self._candidates(mint) for u in ipfs_urls(c)][:6]:
                 data = await fetch_image(url)
-                img = thumbnail(data) if data else None
+                img = await asyncio.to_thread(thumbnail, data) if data else None   # never stall the bot
                 if img:
                     self.dir.mkdir(parents=True, exist_ok=True)
                     tmp = self.path(mint).with_suffix(".part")
