@@ -117,3 +117,27 @@ def test_howto_questions_carry_the_manual_and_others_dont():
 def test_only_howto_questions_get_the_manual(text, attach):
     from meme_trader.ui.chat import with_manual
     assert ("[Console manual" in with_manual(text, text)) is attach
+
+
+def test_other_chains_rows_and_cache(monkeypatch):
+    import time as _t
+
+    from meme_trader.ui import chains
+    p = {"attributes": {"address": "0xabc", "name": "PEPE / WBNB", "market_cap_usd": "123456.7", "fdv_usd": None, "reserve_in_usd": "5000",
+                        "volume_usd": {"h1": "9000", "h24": "50000"}, "price_change_percentage": {"m5": "1.5", "h1": "-3", "h24": "40"},
+                        "transactions": {"h1": {"buys": 120, "sells": 80, "buyers": 60}},
+                        "pool_created_at": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(_t.time() - 3600))},
+         "relationships": {"base_token": {"data": {"id": "bsc_0xtoken"}}}}
+    r = chains.pool_row("bsc", p)
+    assert r["symbol"] == "PEPE" and r["chain_name"] == "BNB Chain" and r["token"] == "0xtoken" and r["mcap_usd"] == 123456.7
+    assert r["buys_h1"] == 120 and abs(r["age_s"] - 3600) < 120 and r["dex"].startswith("https://dexscreener.com/bsc/")
+    assert chains.pool_row("bsc", {"attributes": {}}) is None
+    c = chains.Chains()
+    calls = []
+
+    async def fake_refresh():
+        calls.append(1)
+        c.data = {"trending": {"bsc": [r]}, "new": {}, "fetched": _t.time(), "error": "", "chains": {"bsc": "BNB Chain"}}
+    c._refresh = fake_refresh
+    asyncio.run(c.get()); asyncio.run(c.get())
+    assert len(calls) == 1 and c.names() == {"BNB Chain": ["PEPE"]}     # cached: one fetch per 90 s

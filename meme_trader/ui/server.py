@@ -263,6 +263,17 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         return web.Response(text=body, content_type="application/x-ndjson", headers={
             "Content-Disposition": f'attachment; filename="calls-{L.head[:12]}.jsonl"', "Cache-Control": "no-store"})
 
+    from .chains import Chains
+    chains = engine.chains = Chains()            # other chains, read-only (GeckoTerminal, cached 90 s)
+
+    async def chains_view(_):
+        return _json(await chains.get())
+
+    async def lab_view(_):                      # the team's lab: running, queued, results
+        from ..sniper.lab import TESTABLE
+        return _json({**engine.xlab.view(), "baseline": engine.lab_baseline(),
+                      "testable": {k: [lo, hi] for k, (lo, hi) in TESTABLE.items()}})
+
     async def kols_view(_):                     # the Charts tab's KOL tracker
         return _json(engine.kol_view())
 
@@ -572,6 +583,14 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             err = await engine.refresh_kols()
             n = len(engine.kols.get("kols") or {})
             return {"ok": not err, "text": err or f"{n} KOL wallets loaded: the live charts name them when they trade"}
+        if action == "lab_add":                           # the owner queues a test for the lab
+            x, err = engine.lab_add(str(cmd.get("key") or ""), cmd.get("value"), str(cmd.get("why") or "the owner's idea"), "you")
+            return {"ok": not err, "text": err or f"Queued: {x['key']} {x['now']} → {x['value']}. The team replays the last 24 hours with it."}
+        if action == "lab_drop":
+            before = len(engine.xlab.items)
+            engine.xlab.items = [x for x in engine.xlab.items if not (x["id"] == cmd.get("id") and x["status"] == "queued")]
+            engine.xlab.save()
+            return {"ok": len(engine.xlab.items) < before, "text": "Taken off the queue" if len(engine.xlab.items) < before else "only a queued test can be dropped"}
         if action == "huddle_apply":                      # the owner approves one of the team's setting changes
             try:
                 err = engine.apply_huddle_action(str(cmd.get("id") or ""), int(cmd.get("i")))
@@ -787,7 +806,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory),
                     web.get("/api/calls", calls), web.get("/api/calls/export", calls_export),
                     web.get("/api/pulse", pulse_board), web.get("/api/social", social),
-                    web.get("/api/kols", kols_view), web.get("/api/hot", hot_names),
+                    web.get("/api/kols", kols_view), web.get("/api/hot", hot_names), web.get("/api/lab", lab_view), web.get("/api/chains", chains_view),
                     web.get("/api/card.png", card_png), web.get("/x/connect", x_connect),
                     web.get("/x/callback", x_callback),
                     web.get("/api/ui", ui_state)])

@@ -123,6 +123,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - The coins they're in: who, buys/sells, net SOL, and market cap at their first buy → now. 📈 pins a coin.
   - A tape of their latest trades, with how long they held when they sell.
   - Load the KOL list with 👑 Refresh KOL list.
+- **🌐 Other chains:** trending and new pools on Solana, BNB Chain, Base and Ethereum (market cap, 1-hour volume, price change, buys/sells), with DexScreener links. Read-only: the bot trades pump.fun only.
 - **🔥 Copycat waves:** names launched 3+ times in the last hour, with the OG and the biggest one now.
 - **🎓 Graduation watch:** the graduation scanner's coins (curve %, market cap, age, a sparkline, and what it's waiting on).
 - **⚡ Market pulse:** launches, trades and graduations per minute.
@@ -208,6 +209,19 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - The bots discuss the account and keep a **Growth plan** (goal, strategy, experiments).
   - They propose up to 3 setting changes, each with an **Apply** button. Nothing changes until you press it.
 - **Teach the desk:** Desk → Teach the desk. Paste a link, an address or a note; the personas reply under it.
+
+## The lab: the team tests changes on the recorded market
+
+- **Where:** Desk → 🔬 The lab.
+- **How a test works:** one setting of the graduation play changed, replayed on the last 24 hours of recordings against the current settings. Same coins, same costs, same fill delay, compared in 6-hour blocks.
+- **Verdicts:** better, worse, no clear difference, or no effect.
+- **Who starts tests:**
+  - **The team:** a routine one-step test every 6 hours (`lab.auto_every_min`), at most 4 tests a day, only when 8 GB of memory is free.
+  - **The meetings:** they can attach tests to their plan's experiments, and read the results at the next huddle.
+  - **You:** *Test a change* (pick the setting, type the value, Test it).
+- **In the room:** Claude sends a bot to the lab bench, the lab board shows what's being tested, and the result is announced.
+- **"Better" is promising, not proven:** the panel counts every test run, and the best of many tries always looks better than it is. Nothing changes the bot until you Apply a change.
+- **It runs in the background** as a low-priority process, one test at a time, taking ~10–20 minutes. Trading carries on.
 
 ## Strategies on and off, and the risk dial
 

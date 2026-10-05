@@ -130,6 +130,12 @@ HUDDLE_SYSTEM = (
     "sniper; graduation plays have their own switch. Manual trades follow only the owner's exits, so never judge the "
     "bot's stops by them.\n"
     "Review current_plan against the results: keep, change or finish its experiments.\n"
+    "The team has a lab: an experiment with test: {key, value} is replayed on the recorded market (the current "
+    "graduation settings against that one change, same days, same costs), and the result comes back in "
+    "desk_brief.lab.results for the next meeting. Use only keys in desk_brief.lab.testable. Judge results honestly: "
+    "'better' over a few days is promising, not proven, and desk_brief.lab.tries says how many tests were run, "
+    "since the best of many tries looks better than it is. Propose an action from a lab result only when its "
+    "verdict is better and it holds without the best 3 trades.\n"
     "Write 6 to 10 lines of real discussion with 4 to 6 speakers: they answer each other by name and challenge each "
     "other with numbers. No greetings, filler or catchphrases, and don't repeat previous_takeaways unless something "
     "changed. Then: takeaway (one sentence); plan (goal: a measurable target and date; strategy: two or three "
@@ -150,7 +156,9 @@ HUDDLE_SCHEMA = {
             "goal": {"type": "string"}, "strategy": {"type": "string"}, "next": {"type": "string"},
             "experiments": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "change": {"type": "string"}, "success_if": {"type": "string"},
-                "status": {"type": "string", "enum": ["proposed", "running", "passed", "failed", "stopped"]}},
+                "status": {"type": "string", "enum": ["proposed", "running", "passed", "failed", "stopped"]},
+                "test": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "number"}},
+                         "required": ["key", "value"], "additionalProperties": False}},
                 "required": ["name", "change", "success_if", "status"], "additionalProperties": False}}},
             "required": ["goal", "strategy", "experiments", "next"], "additionalProperties": False},
         "actions": {"type": "array", "items": {"type": "object", "properties": {
@@ -182,7 +190,9 @@ async def run_huddle(brain: "Desk", p, brief: dict, previous: list[str], reason:
         return {"error": "the model wrote no lines", **used}
     pl = d.get("plan") if isinstance(d.get("plan"), dict) else {}
     plan = {"goal": str(pl.get("goal", ""))[:300], "strategy": str(pl.get("strategy", ""))[:600], "next": str(pl.get("next", ""))[:300],
-            "experiments": [{k: str(x.get(k, ""))[:240] for k in ("name", "change", "success_if", "status")}
+            "experiments": [{**{k: str(x.get(k, ""))[:240] for k in ("name", "change", "success_if", "status")},
+                             **({"test": {"key": str(x["test"].get("key", "")), "value": x["test"].get("value")}}
+                                if isinstance(x.get("test"), dict) else {})}
                             for x in (pl.get("experiments") or []) if isinstance(x, dict)][:6]}
     actions = [{"key": str(a.get("key", "")).strip(), "value": str(a.get("value", "")).strip()[:60], "why": str(a.get("why", ""))[:300]}
                for a in (d.get("actions") or []) if isinstance(a, dict) and a.get("key")][:3]
