@@ -146,3 +146,14 @@ def test_a_run_in_its_own_service_is_picked_up_after_a_restart(tmp_path, monkeyp
     y, _ = lab2.add("late.stall_s", 60, "", "team", 1.0, {"late.stall_s": 45})
     y["status"] = "running"; lab2.save()
     assert Lab(tmp_path / "lab2").queued()[0]["id"] == y["id"]
+
+
+def test_lab_replays_land_orders_like_the_live_bot():
+    """A test of an exit setting is only fair with the bot's own landing delay and sell retries."""
+    e = market(launches=2)
+    e.p.execution["paper_delay_s"] = 2.5
+    b = e.lab_baseline()
+    assert b["execution.paper_delay_s"] == 2.5 and b["execution.sell_slippage_steps"] == list(e.p.execution.sell_slippage_steps)
+    assert "late.stop_loss_pct" in b
+    from meme_trader.sniper.lab import EXECUTION
+    assert set(EXECUTION) & set(b) and not any(k.startswith("execution.") for k in labmod.TESTABLE)   # copied, never "tested"

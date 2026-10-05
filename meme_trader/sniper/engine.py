@@ -2971,13 +2971,18 @@ class Engine:
     # ------------------------------------------------------------------ the lab: the team tests one change at a time
     def lab_baseline(self) -> dict:
         """The settings the lab compares against: what the graduation play runs now."""
-        from .lab import TESTABLE
+        from .lab import EXECUTION, TESTABLE
         out = {}
         for k in TESTABLE:
             sec, key = k.split(".", 1)
             v = (self.p.get(sec) or {}).get(key)
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 out[k] = v
+        for k in EXECUTION:                              # how its orders land, so a replay fills like this bot
+            sec, key = k.split(".", 1)
+            v = (self.p.get(sec) or {}).get(key)
+            if v is not None and not isinstance(v, bool):
+                out[k] = list(v) if isinstance(v, (list, tuple)) else v
         return out
 
     def lab_add(self, key: str, value, why: str, by: str) -> tuple[dict | None, str]:
