@@ -118,8 +118,14 @@ async def _run(args, params) -> None:
         _compress_old_feeds(record)
     # live and the real-feed paper bot keep their book across restarts (cash, today's P&L and loss limit,
     # open positions); the synthetic demo starts fresh every time
+    # The synthetic demo is a sandbox: its fake trades stay out of data/'s trade and journal files (they were mixed
+    # into the real day's files, labelled paper-synthetic), and the AI desk stays asleep unless --desk asks for it
+    # (it was spending real API credit voting on fake coins).
+    if args.synthetic and not args.desk and params.sniper.desk.enabled:
+        params["sniper"]["desk"]["enabled"] = False
+        print("demo: AI desk off (it would spend real API credit on fake coins); add --desk to use it")
     engine = Engine(params, feed, executor, mode=full_mode, record_path=record, desk=_desk(params, args.desk),
-                    persist=not args.synthetic)
+                    persist=not args.synthetic, log_to_journal=not args.synthetic)
 
     runner = None
     if not args.no_ui:                    # bind BEFORE trading: no controls = no engine
