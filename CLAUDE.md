@@ -36,6 +36,9 @@ Facts to keep in mind (paper results, 2026-10-03 to 10-04; see BUILD_LOG #32 and
   The early sniper lost (-13.8%) and is off. The frozen `graduation-v1` test decides (~2026-10-17).
 - Copying KOLs (kolscan.io wallets) loses: they hold a median 34 s, and following 1-2.5 s late lost ~13% a trade
   (BUILD_LOG #39). Volume/transaction-count rules haven't shown an edge on unseen days either.
+- Market data: free public RPC first (reconnect on hang-ups), PublicNode as fallback, the owner's Helius websocket
+  as a budgeted outage backup (feed.backup_mb_per_day). The stream is ~400-800 MB/h. Don't add subscription probes
+  against these endpoints.
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
 - Manual trading is the owner's: never resize or block it. Positions the owner hands to the bots "ride"
   (half out at 2x, a 30% trail, a stop 40% down). Lifting a kill-switch halt is the owner's call only.
