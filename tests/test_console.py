@@ -174,3 +174,32 @@ def test_desk_vote_speed_is_measured():
     e.desk_vote_s.extend([3.1, 4.2, 3.8, 9.5, 4.0])
     v = e.vote_speed()
     assert v["n"] == 5 and v["median"] == 4.0 and v["p90"] == 9.5
+
+
+def test_daily_digest_and_the_daily_loss_alert():
+    import time as _t
+    e = market(launches=2)
+    day = _t.strftime("%Y-%m-%d", _t.gmtime(e.now))
+    e.book.closed += [{"source": "late", "pnl": -0.2, "closed": e.now, "symbol": "A"},
+                      {"source": "late", "pnl": 0.1, "closed": e.now, "symbol": "B"},
+                      {"source": "chains", "pnl": -0.05, "closed": e.now, "symbol": "C",
+                       "real": {"pnl_usd": -4.0, "complete": True}}]
+    text = e.daily_digest(day)
+    assert day in text and "late: 2 trades, -0.100 SOL, 1 won" in text and "real router prices $-4.00 on 1" in text
+    assert "kill switch at" in text and "checklist" in text
+
+    said = []
+    e.say = lambda level, text, *a, **k: said.append((level, text))
+    e.feed.realtime = True
+    e.book.day, e.book.day_pnl = day, -10.0                       # past the daily loss limit
+    e.persist = False
+
+    async def tick():
+        await e._tick()
+    asyncio.run(tick()); asyncio.run(tick())
+    stops = [t for lv, t in said if t.startswith("DAILY LOSS LIMIT")]
+    assert len(stops) == 1                                         # announced once, not every tick
+    e.book.day = "2000-01-01"                                       # the UTC day rolls over
+    said.clear()
+    asyncio.run(tick())
+    assert any(lv == "digest" for lv, _ in said) and any("entries are open again" in t for _, t in said)
