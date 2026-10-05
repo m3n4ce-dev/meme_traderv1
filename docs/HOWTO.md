@@ -72,6 +72,7 @@ Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls
   - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
   - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
   - Balances use your `SOLANA_RPC_URL` if you set one. The public endpoint is slow for big wallets.
+- **>_ Terminal** (the `>_` button, or the backtick key `` ` ``): type commands instead of clicking. `help` lists them: `status`, `pos`, `buy BONK 0.1`, `sell all`, `alert BONK >= 1m`, `limit buy BONK <= 50k 0.1`, `hand all`, `away on`, `risk 2`, `desk on`, `unhalt`, `log 20`, `ask …` and more. Up arrow brings back earlier commands and Tab completes. It only runs bot commands (the same as the buttons), not system commands.
 - **↻ Restart** (next to KILL): saves everything, reloads the bot's code and settings, and carries on. Open positions and orders resume.
 - **Analytics**: what is working, in plain English, plus charts (and the **Exit lab**: other exit rules run on the same entries, to see which would have done better):
   - equity and drawdown;
@@ -238,7 +239,7 @@ To stop agent buys entirely: `sniper.agent.can_buy: false`. To turn the tools of
 |---|---|
 | Feed badge red / `stale` | No market data. Check the internet, then the `trade logs` row of `scripts/start.sh doctor`. If the public RPC is struggling, set `SOLANA_WS_URL` to another Solana websocket. |
 | Amber **Defense mode** banner | A losing run. It lifts by itself after the set minutes. Turn it off in Controls if you disagree. |
-| Red **Halted** banner | The drawdown kill switch fired or KILL was pressed. Restart the bot to reset. |
+| Red **Halted** banner | The drawdown kill switch fired or KILL was pressed. Press **Resume trading…** in the banner (or type `unhalt` in the terminal). A restart doesn't clear it: the account carries over. If the account is still past the limit, the kill switch then counts from where you resumed. On paper you can also **Add paper SOL** or **Start over**. |
 | "running · max positions" | All trading slots are full. Raise **Max open positions** or wait for exits. |
 | No buys for a long time | Look at **Why we passed** and the radar's rejected tokens, then check the gate audit in Analytics. |
 | `no model` badge | Normal until you run `scripts/start.sh train` and then `scripts/start.sh promote`. |

@@ -333,6 +333,9 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             engine.say("error", "KILL SWITCH pressed on dashboard")
             await engine.kill()
             return {"ok": True, "text": "Kill switch: selling everything, entries stopped"}
+        if action == "unhalt":                            # the owner lifts the kill switch (never the agent)
+            err = engine.clear_halt("dashboard")
+            return {"ok": not err, "text": err or f"Trading resumed. The kill switch trips again at {engine.kill_at():.3f} SOL"}
         if action == "sell" and cmd.get("mint"):
             await engine.sell_now(str(cmd["mint"]))
             return {"ok": True, "text": "Sell sent"}

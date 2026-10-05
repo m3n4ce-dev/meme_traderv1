@@ -11,7 +11,7 @@ Guardrails live HERE, in code, so no prompt can talk past them:
   strategy the config had off;
 * the risk dial goes UP only with the owner's approval (the dashboard chat always asks for that one, even
   with "ask before actions" off) and never above risk.max_level;
-* it can't switch to live trading, touch the wallet, save risk settings to disk, or press the kill switch;
+* it can't switch to live trading, touch the wallet, save risk settings to disk, or press or lift the kill switch;
 * paper mode only: it can add pretend SOL to the paper balance (capped per deposit), optionally as the new
   starting balance in the config;
 * agent buys go through the engine's normal authorization (daily loss, feed health, cash reserve,
