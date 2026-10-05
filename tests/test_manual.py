@@ -1,4 +1,4 @@
-"""Manual trading from the dashboard: buy / ape / sell part / initials / exit, and manual exit rules."""
+"""Manual trading from the dashboard: buy / add / sell part / initials / exit, manual exit rules, hand-over."""
 import asyncio
 import copy
 
@@ -144,7 +144,7 @@ def test_dashboard_actions(tmp_path):
                     pass
                 return m
             out = {"bad": await ack({"action": "m_buy", "mint": "nope", "sol": 0.1}),
-                   "ape": await ack({"action": "m_ape", "mint": s.mint}),
+                   "buy": await ack({"action": "m_buy", "mint": s.mint, "sol": 0.1}),
                    "exits": await ack({"action": "m_exits", "mint": s.mint, "sl": 30, "tp": "", "trail": ""}),
                    "sell": await ack({"action": "m_sell", "mint": s.mint, "fraction": 0.5}),
                    "note": await ack({"action": "mem_add", "text": "a note for the desk", "note": "mine"})}
@@ -152,7 +152,7 @@ def test_dashboard_actions(tmp_path):
             return out
     out = asyncio.run(go())
     assert not out["bad"]["ok"] and "contract address" in out["bad"]["text"]
-    assert out["ape"]["ok"] and "Aped" in out["ape"]["text"]
+    assert out["buy"]["ok"] and "Buy 0.1 SOL sent" in out["buy"]["text"]
     assert out["exits"]["ok"] and out["sell"]["ok"]
     assert e.positions[s.mint].manual["sl"] == 30 and e.positions[s.mint].tokens < e.positions[s.mint].initial_tokens
     assert out["note"]["ok"] and out["note"]["memory"]["items"][0]["note"] == "mine"
@@ -219,3 +219,26 @@ def test_hand_your_positions_to_the_bots_and_take_them_back():
     assert e.positions[c.mint].bot                             # and anything you open while away
     assert "back" in e.set_away(False).lower()
     assert not any(p.bot for p in e.positions.values())
+
+
+def test_restart_button_saves_and_restarts(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    e = market()
+    called = []
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path, restarter=lambda eng: called.append(eng)))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.receive_json()
+            await ws.send_json({"action": "restart"})
+            while (m := await ws.receive_json())["type"] != "ack":
+                pass
+            await asyncio.sleep(0.8)
+            await ws.close()
+            return m
+    m = asyncio.run(go())
+    assert m["ok"] and m["restarting"] and called == [e]
