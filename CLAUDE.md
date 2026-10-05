@@ -41,6 +41,9 @@ Facts to keep in mind (paper results, 2026-10-03 to 10-04; see BUILD_LOG #32 and
   against these endpoints.
 - The lab (sniper/lab.py) replays one graduation setting change on the last 24 h (~20 min, its own systemd-run
   service). As of 2026-10-05 the current settings replay at -0.87 SOL over 150 trades on the last 24 h: no proven edge now.
+- Other chains trade paper only (sniper/xchain.py): DexScreener prices, honeypot.is/GoPlus/mint-authority checks.
+  GeckoTerminal's free API 429s quickly: ui/chains.py paces it; don't add bursts of calls.
+- The risk dial scales size, positions and the daily loss limit; it never changes which coins are picked.
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
 - Manual trading is the owner's: never resize or block it. Positions the owner hands to the bots "ride"
   (half out at 2x, a 30% trail, a stop 40% down). Lifting a kill-switch halt is the owner's call only.
