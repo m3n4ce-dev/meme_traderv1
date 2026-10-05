@@ -183,6 +183,7 @@ class Engine:
         self._think: dict[str, tuple[str, str, float]] = {}       # mint -> (verdict, why, when said)
         self._last_think = 0.0
         self.desk_reviews: deque = deque(maxlen=20)
+        self.desk_vote_s: deque = deque(maxlen=200)     # how long each desk review took (wall clock), for the Desk and HQ
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
@@ -1022,10 +1023,13 @@ class Engine:
             extra = {**extra, "name_family": {"coins_sharing_name_or_ticker_6h": fam["n"], "is_first_launched": fam["og"],
                                               "launch_order": fam["rank"], "seconds_after_first": fam["after_og_s"],
                                               "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
+        t0 = time.time()
         try:
             v = await self.desk.review(snapshot_for(s, self.now, kind, extra))
         finally:
             self.reviewing.discard(s.mint)
+        if self.feed.realtime:
+            self.desk_vote_s.append(round(time.time() - t0, 2))
         s.desk = v.summary
         self.say("desk", f"{s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
         self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": kind,
@@ -1924,6 +1928,13 @@ class Engine:
         view.sort(key=lambda r: (order.get(r["verdict"], 9), -r["readiness"], -r["progress"]))
         self.late_view = view
 
+    def vote_speed(self) -> dict | None:
+        """How long the desk's reviews take: median and slowest 10%, over the last 200."""
+        v = sorted(self.desk_vote_s)
+        if not v:
+            return None
+        return {"n": len(v), "median": v[len(v) // 2], "p90": v[min(len(v) - 1, int(len(v) * 0.9))]}
+
     def desk_view(self) -> dict:
         """Everything the Desk tab shows that lives in the engine."""
         L, x = self.p.late, self.p.exit
@@ -1960,6 +1971,7 @@ class Engine:
                 "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled), "brain": self.desk_brain(),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
+                         "vote_s": self.vote_speed(),
                          "error": self.desk_error, "failures": self.desk_failures,
                          "reviews": list(self.desk_reviews)[::-1]},
                 "risk": self.risk_info(), "day_pnl": self.book.day_pnl,

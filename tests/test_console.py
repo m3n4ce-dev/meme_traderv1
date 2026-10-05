@@ -166,3 +166,11 @@ def test_hq_status(tmp_path):
     d = asyncio.run(go())
     assert {"bot", "services", "feed", "lab", "desk", "chat", "machine", "xchain"} <= set(d) and d["xchain"]["ready"].endswith("of 6")
     assert d["machine"]["disk_free_gb"] > 0 and set(d["services"]) == {"meme-sniper", "meme-wallets", "edge-scout"}
+
+
+def test_desk_vote_speed_is_measured():
+    e = market(launches=2)
+    assert e.vote_speed() is None
+    e.desk_vote_s.extend([3.1, 4.2, 3.8, 9.5, 4.0])
+    v = e.vote_speed()
+    assert v["n"] == 5 and v["median"] == 4.0 and v["p90"] == 9.5
