@@ -3130,13 +3130,14 @@ class Engine:
 
     def lab_brief(self) -> dict:
         """What the team reads about its lab at a meeting."""
-        from .lab import TESTABLE
+        from .lab import TESTABLE, landed_like_bot
         def row(x):
             r = x.get("result") or {}
             return {"test": f"{x['key']}: {x['now']} -> {x['value']}", "by": x["by"], "why": x.get("why", "")[:120], "status": x["status"],
                     "verdict": r.get("verdict"), "now": r.get("now"), "change": r.get("change"),
                     "blocks_better_of": f"{r.get('better_blocks')} of {r.get('blocks')}" if r.get("blocks") else None,
-                    "error": r.get("error")}
+                    "error": r.get("error"),
+                    "caveat": None if landed_like_bot(x) else "judged with instant fills (before replays landed orders like the bot): weaker"}
         v = self.xlab.view()
         return {"testable": {k: f"{lo:g}-{hi:g}" for k, (lo, hi) in TESTABLE.items()}, "current": self.lab_baseline(),
                 "tries": v["tries"], "running": row(v["running"]) if v["running"] else None,

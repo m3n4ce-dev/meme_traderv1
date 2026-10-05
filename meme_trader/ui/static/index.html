@@ -5594,7 +5594,7 @@ function renderLab() {
     return `<tr><td>${labTest(x)}<div class="note">${esc(who(x.by))}${x.why ? " · " + esc(x.why.slice(0, 60)) : ""}</div></td>
       <td class="r num">${n.pnl_sol != null ? signed(n.pnl_sol) : "–"}<div class="note">${n.trades ?? "–"} trades</div></td>
       <td class="r num">${c.pnl_sol != null ? signed(c.pnl_sol) : "–"}<div class="note">${c.trades ?? "–"} trades</div></td>
-      <td class="r num">${r.blocks ? `${r.better_blocks} / ${r.blocks}` : "–"}</td><td>${x.status === "failed" ? `<span class="tag bad" title="${esc(r.error || "")}">failed</span>` : vtag(r.verdict)}</td></tr>`; }).join("");
+      <td class="r num">${r.blocks ? `${r.better_blocks} / ${r.blocks}` : "–"}</td><td>${x.status === "failed" ? `<span class="tag bad" title="${esc(r.error || "")}">failed</span>` : vtag(r.verdict)}${x.instant_fills ? ` <span class="note" title="Replayed with instant fills, before tests landed orders like your bot (2.5 s delay, failed sells, retries). The team re-tests these.">· old fill model</span>` : ""}</td></tr>`; }).join("");
   const opts = Object.keys(d.testable || {}).map(k => `<option value="${esc(k)}">${esc(labName(k))} (now ${d.baseline[k] ?? "?"})</option>`).join("");
   setHTML(box, `${run}${q ? `<div class="lab-qs">${q}</div>` : ""}
     ${rows ? `<div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">Now</th><th class="r">With the change</th><th class="r" title="6-hour blocks where the change made more">Blocks better</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>`
