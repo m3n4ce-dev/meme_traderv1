@@ -4,6 +4,30 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #33: Handed-over positions ride for a runner, a chart in the trade panel, Market Pulse fixed
+
+- **Hand-over rides instead of dumping** (owner: "whenever I hand over to the bots they pretty much sell instantly. I'm trying to catch 2xs"):
+  - **Why it sold at once:** handed positions ran the bots' own scalp exits, which are tuned for coins they bought seconds earlier. On a coin you'd held for minutes, those time-based exits fired at once: a 45 s stall, momentum decay, "dev sold" and a short stop.
+  - **New "ride" rules** (`evaluate_ride_exit`, config `manual.handover`):
+    - 50% out at 2x the entry.
+    - The rest trails 30% off its peak since the hand-over, once it has run 30% (or after the partial).
+    - A stop 40% below the lower of the entry and the hand-over price.
+    - No time, stall, momentum, dev-sold or cluster exits.
+  - **Coverage:** away mode and older saved hand-overs use the same rules.
+  - **Graduated coins** keep riding on paper (the pool price). Live sells them, since its orders reach the curve only.
+  - **Manual positions on a graduated coin** are no longer auto-sold on paper ("graduated (curve only)" applies to live only), now that paper prices them.
+- **A chart in the trade panel** (owner: "whenever I click trade ... it should pop up the chart"): picking a coin opens its live price chart.
+  - It refreshes every 2.5 s and marks your entry.
+  - Coins the bot doesn't track show the pool's candles from the lookup.
+- **Market Pulse:**
+  - **What was wrong:** after a restart it had 2 minutes of data, drawn as two half-width bars, and the header averaged a partial minute.
+  - **Now:** a fixed 60-minute axis with one slot per minute, and partial minutes are faint, left out of the trades line and the averages. The line breaks where the bot was off.
+  - **Kept across restarts:** the last hour is saved with the state.
+- **Tests:** 286 pass, with a new one for the ride rules: no exit on chop, half at 2x, a trail off the peak, a stop below the hand-over price, and graduated paper vs live. The hand-over test now expects no instant sell.
+  - Browser: Trade → chart shown, buy → hand over → still held, Pulse rendering.
+
+---
+
 ## 2026-10-05 — Entry #32: Trade tips, the edge check, smarter personas, graduated coins, tightening
 
 - **Tips on your own trades, never limits** (owner: "manual trading to be manual... no restrictions"):

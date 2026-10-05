@@ -787,6 +787,8 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.tr-chartbox { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--ring); border-radius: 10px; background: var(--surface-2); }
+.tr-chart-h { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; } #tr-chart { width: 100%; display: block; }
 .edge-why { margin-top: 8px; } .edge-why summary { cursor: pointer; } .edge-why ul { margin: 6px 0; padding-left: 20px; }
 .db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .db-grid label { display: grid; gap: 3px; font-size: 12px; } .db-grid .db-url { grid-column: 1 / -1; }
 .db-grid select, .db-grid input { width: 100%; } .db-cost { margin: 6px 0 8px; font-size: 13px; }
@@ -974,6 +976,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <h2>Manual trade <small id="tr-sub">your own trades</small></h2>
       <div class="tr-row"><input id="tr-ca" type="text" placeholder="Paste a contract address (or press Trade in any coin's details)" spellcheck="false" aria-label="Contract address">
         <div id="tr-coin" class="tr-coin"></div></div>
+      <div id="tr-chartbox" class="tr-chartbox" hidden><div class="tr-chart-h"><b>Price</b> <span class="note" id="tr-chartnote"></span></div>
+        <canvas id="tr-chart" height="160"></canvas><div id="tr-chartsvg"></div></div>
       <div id="tr-metrics"></div>
       <div class="tr-row"><span class="note">Amount (SOL)</span><div class="seg" id="tr-presets" role="group" aria-label="Amount presets"></div>
         <input id="tr-amt" type="number" min="0" step="0.01" placeholder="custom" aria-label="Custom amount in SOL">
@@ -1589,8 +1593,8 @@ function render(s) {
       el.querySelector(".bar > i").style.width = (p.progress * 100).toFixed(1) + "%";
       if (p.source === "manual") {
         el.classList.toggle("handed", !!p.bot);
-        setHTML(el.querySelector(".hand"), p.bot ? `<span class="tag bot">🤖 bots manage it (${p.bot === "late" ? "graduation" : "sniper"} exits)</span><button class="small" data-mhand="${esc(p.mint)}" data-on="0" title="Your own exits apply again">✋ Take back</button>`
-          : `<button class="small" data-mhand="${esc(p.mint)}" data-on="1" title="The bots run their exits on it (stop loss, initials, trailing stop, sell before graduation)">🤖 Hand to the bots</button>`);
+        setHTML(el.querySelector(".hand"), p.bot ? `<span class="tag bot" title="${esc(rideText(s))}">🤖 the bots ride it${p.ride_tp ? " · partial taken" : ""}</span><button class="small" data-mhand="${esc(p.mint)}" data-on="0" title="Your own exits apply again">✋ Take back</button>`
+          : `<button class="small" data-mhand="${esc(p.mint)}" data-on="1" title="${esc(rideText(s))}">🤖 Hand to the bots</button>`);
       }
       const quiet = p.spark.length < 2;
       el.querySelector(".nochart").hidden = !quiet;
@@ -3109,7 +3113,7 @@ function screenHTML(kind) {
     case "scanner": return `<p class="note">Graduation window ${d.late.window[0]}–${d.late.window[1]}% · needs +${d.late.min_net_flow_sol} SOL and ${d.late.min_buyers} buyers in ${d.late.flow_window_s}s</p><div class="cands">${(d.late.candidates || []).slice(0, 7).map(c => candHTML(c, d.late)).join("") || `<div class="empty">Nothing near the window.</div>`}</div>`;
     case "exits": return `<div class="holds">${(d.holding || []).map(holdHTML).join("") || `<div class="empty">Nothing open.</div>`}</div>`;
     case "risk": return cards.risk + `<div class="dial" style="margin-top:10px">${(s.risk ? s.risk.levels : []).map(l => `<button data-lv="${l.level}" aria-pressed="${s.risk.level === l.level}">${esc(l.name)}</button>`).join("")}</div>`;
-    case "feed": return cards.feed + `<div style="margin-top:10px">${svgPulse(s.pulse || [], 170)}</div>`;
+    case "feed": return cards.feed + `<div style="margin-top:10px">${svgPulse(s.pulse || [], s.pulse_since || 0, 170)}</div>`;
     case "operator": return cards.operator + `<div class="log" style="margin-top:8px">${(d.log || []).filter(l => l.level === "agent").slice(-8).reverse().map(l => `<div><time>${hhmmss(l.ts)}</time><span>${esc(l.text)}</span></div>`).join("") || `<div class="empty">No actions yet.</div>`}</div>`;
     case "recorder": return cards.recorder;
     case "board": { const sm = s.summary;
@@ -3394,6 +3398,32 @@ function setTradeMint(mint) {
   TR.mint = mint; $("tr-ca").value = mint; TR.info = null;
   if (isMint(mint)) { send({action: "lookup", mint}); TR.looked = Date.now(); }
   if (snap) renderTradePanel(snap);
+  trChart();
+}
+// the coin's live price chart in the trade panel, refreshed while you're on it
+async function trChart() {
+  clearTimeout(TR.chartTimer);
+  const mint = TR.mint, box = $("tr-chartbox");
+  if (!isMint(mint)) { box.hidden = true; return; }
+  if (S.tab !== "live" || document.hidden) { TR.chartTimer = setTimeout(trChart, 2500); return; }
+  let d = null;
+  try { const r = await fetch("/api/token/" + encodeURIComponent(mint), {cache: "no-store"}); if (r.ok) d = await r.json(); } catch { /* next round */ }
+  if (TR.mint !== mint) return;
+  const ch = (d && d.chart) || [], pos = d && d.position, cv = $("tr-chart"), svg = $("tr-chartsvg");
+  const i = TR.info && TR.info.mint === mint ? TR.info : null;
+  if (ch.length > 1) {
+    box.hidden = false; cv.hidden = false; svg.innerHTML = "";
+    $("tr-chartnote").textContent = `last ${ch.length} trades · live${pos ? " · dashed line = your entry" : ""}`;
+    lineChart(cv, ch, {axis: true, fill: true, fmt: v => v.toExponential(1), refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [],
+      hover: k => `${ch[k].toExponential(3)} SOL`});
+  } else if (i && (i.candles || []).length > 1) {
+    box.hidden = false; cv.hidden = true; svg.innerHTML = svgCandles(i.candles); $("tr-chartnote").textContent = "candles from its pool (DexScreener)";
+  } else {
+    box.hidden = false; cv.hidden = true;
+    svg.innerHTML = `<div class="nochart-box">${d ? "No trades since the bot started watching it, so there's no price line yet: it fills in with the next trades." : "Looking it up… the chart appears once it trades or its pool answers."}</div>`;
+    $("tr-chartnote").textContent = "";
+  }
+  TR.chartTimer = setTimeout(trChart, 2500);
 }
 function tradeMetrics(i) {
   if (!i) return `<div class="note" style="margin-top:8px"><span class="typing"><i></i><i></i><i></i></span> Pulling metrics: on-chain, DexScreener, RugCheck…</div>`;
@@ -3620,18 +3650,26 @@ function svgRibbon(rows) {
       const v = Math.max(-300, Math.min(300, r.pnl_pct)), bh = Math.max(2, Math.abs(v) / m * (mid - 3)), x = w - (rows.length - i) * bw;
       return `<rect data-open="${esc(r.mint)}" style="cursor:pointer" x="${(x + 1).toFixed(1)}" y="${(v >= 0 ? mid - bh : mid).toFixed(1)}" width="${Math.max(bw - 2, 1).toFixed(1)}" height="${bh.toFixed(1)}" rx="1.5" fill="${v >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".88"><title>${esc(r.symbol)} · ${esc(r.source)} · ${pct(r.pnl_pct, 0)} (${signed(r.pnl)} SOL)</title></rect>`; }).join("")}</svg>`;
 }
-function svgPulse(pulse, h = 150) {
-  if (!pulse || pulse.length < 2) return `<div class="empty">Collecting… one bar per minute.</div>`;
-  const w = 640, L = 34, R = 40, T = 8, B = 18, n = pulse.length, bw = (w - L - R) / n;
-  const lm = Math.max(1, ...pulse.map(p => p[1])), tm = Math.max(1, ...pulse.map(p => p[2]));
-  const YL = v => h - B - v / lm * (h - B - T), YT = v => h - B - v / tm * (h - B - T);
-  const line = pulse.map((p, i) => `${(L + i * bw + bw / 2).toFixed(1)},${YT(p[2]).toFixed(1)}`).join(" ");
+const pulsePartial = (p, end, since) => p[0] === end || (since > p[0] && since - p[0] < 60);   // this minute, and the one the bot started in
+function svgPulse(pulse, since = 0, h = 150) {
+  if (!pulse || !pulse.length) return `<div class="empty">Collecting… one bar per minute.</div>`;
+  // always the last 60 minutes, one slot each: a fresh start shows a few thin bars on the right, not two giant ones
+  const w = 640, L = 34, R = 40, T = 8, B = 18, N = 60, end = pulse[pulse.length - 1][0], start = end - (N - 1) * 60, bw = (w - L - R) / N;
+  const rows = pulse.filter(p => p[0] >= start), full = rows.filter(p => !pulsePartial(p, end, since));
+  const lm = Math.max(1, ...rows.map(p => p[1])), tm = Math.max(1, ...(full.length ? full : rows).map(p => p[2]));
+  const YL = v => h - B - v / lm * (h - B - T), YT = v => h - B - Math.min(v, tm) / tm * (h - B - T), X = t => L + (t - start) / 60 * bw;
+  const segs = []; let seg = [];                       // the trades line: complete minutes only, broken where the bot was off
+  for (const p of full) { if (seg.length && p[0] - seg[seg.length - 1][0] > 60) { segs.push(seg); seg = []; } seg.push(p); }
+  if (seg.length) segs.push(seg);
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Market pulse">
     ${[0, .5, 1].map(f => `<line class="g" x1="${L}" x2="${w - R}" y1="${YL(lm * f).toFixed(1)}" y2="${YL(lm * f).toFixed(1)}"/><text x="${L - 6}" y="${(YL(lm * f) + 4).toFixed(1)}" text-anchor="end">${Math.round(lm * f)}</text><text x="${w - R + 6}" y="${(YT(tm * f) + 4).toFixed(1)}">${Math.round(tm * f)}</text>`).join("")}
-    ${pulse.map((p, i) => `<rect x="${(L + i * bw + 1).toFixed(1)}" y="${YL(p[1]).toFixed(1)}" width="${Math.max(bw - 2, 1).toFixed(1)}" height="${(h - B - YL(p[1])).toFixed(1)}" rx="1.5" fill="var(--series)" opacity=".55"><title>${hhmm(p[0])} · ${p[1]} launches · ${p[2]} trades · ${(+p[3]).toFixed(1)} SOL bought / ${(+p[4]).toFixed(1)} sold${p[5] ? ` · ${p[5]} graduated` : ""}</title></rect>
-      ${p[5] ? `<circle cx="${(L + i * bw + bw / 2).toFixed(1)}" cy="${T + 2}" r="3.5" fill="var(--warn-mark)"><title>${p[5]} graduated</title></circle>` : ""}`).join("")}
-    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>
-    <text x="${L}" y="${h - 4}">${hhmm(pulse[0][0])}</text><text x="${w - R}" y="${h - 4}" text-anchor="end">${hhmm(pulse[n - 1][0])}</text></svg>
+    ${rows.map(p => { const part = pulsePartial(p, end, since);
+      return `<rect x="${(X(p[0]) + 1).toFixed(1)}" y="${YL(p[1]).toFixed(1)}" width="${Math.max(bw - 2, 1).toFixed(1)}" height="${(h - B - YL(p[1])).toFixed(1)}" rx="1.5" fill="var(--series)" opacity="${part ? .22 : .55}"><title>${hhmm(p[0])}${part ? " (partial minute)" : ""} · ${p[1]} launches · ${p[2]} trades · ${(+p[3]).toFixed(1)} SOL bought / ${(+p[4]).toFixed(1)} sold${p[5] ? ` · ${p[5]} graduated` : ""}</title></rect>
+      ${p[5] ? `<circle cx="${(X(p[0]) + bw / 2).toFixed(1)}" cy="${T + 2}" r="3.5" fill="var(--warn-mark)"><title>${p[5]} graduated</title></circle>` : ""}`; }).join("")}
+    ${segs.map(sg => sg.length > 1 ? `<polyline points="${sg.map(p => `${(X(p[0]) + bw / 2).toFixed(1)},${YT(p[2]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="2"/>`
+      : `<circle cx="${(X(sg[0][0]) + bw / 2).toFixed(1)}" cy="${YT(sg[0][2]).toFixed(1)}" r="2.5" fill="var(--accent)"/>`).join("")}
+    <text x="${L}" y="${h - 4}">${hhmm(start)}</text><text x="${w - R}" y="${h - 4}" text-anchor="end">${hhmm(end)}</text></svg>
+    ${rows.length < 10 ? `<p class="note">Collecting since ${hhmm(rows[0][0])}: one bar per minute, and the hour fills in as it runs. Faint bars are partial minutes.</p>` : ""}
     <div class="legend"><span><i style="background:var(--series);opacity:.6"></i>launches / min (left)</span><span><i style="background:var(--accent)"></i>trades on tracked tokens / min (right)</span><span><i style="background:var(--warn-mark)"></i>graduated</span></div>`;
 }
 function svgCandles(c, h = 180) {
@@ -3731,13 +3769,14 @@ function renderLiveVisuals(s) {
   renderPulse("pulse", "pulse-sub", s);
 }
 function renderPulse(id, subId, s) {
-  const p = s.pulse || [], last = p.slice(-6, -1), f = s.feed || {};
-  const avg = k => last.length ? last.reduce((a, r) => a + r[k], 0) / last.length : 0;
+  const p = s.pulse || [], end = p.length ? p[p.length - 1][0] : 0, f = s.feed || {};
+  const last = p.filter(r => !pulsePartial(r, end, s.pulse_since || 0)).slice(-5);     // the last five complete minutes
+  const avg = k => last.length ? last.reduce((a, r) => a + r[k], 0) / last.length : NaN;
   const grads = p.reduce((a, r) => a + r[5], 0);
-  const head = `<div class="pulse-stats"><span><b>${avg(1).toFixed(1)}</b> launches/min</span><span><b>${Math.round(avg(2))}</b> trades/min</span>
+  const head = `<div class="pulse-stats"><span><b>${isNaN(avg(1)) ? "–" : avg(1).toFixed(1)}</b> launches/min</span><span><b>${isNaN(avg(2)) ? "–" : Math.round(avg(2))}</b> trades/min</span>
     <span><b>${grads}</b> graduated (hour)</span>${f.gap_pct != null ? `<span title="share of trades missing from the feed (watchdog)">feed gaps <b>${fx(f.gap_pct, 1)}%</b></span>` : ""}</div>`;
   const key = p.length ? p[p.length - 1].join() + p.length : "";
-  const el = $(id); if (el.dataset.k !== key) { el.dataset.k = key; el.innerHTML = head + svgPulse(p); }
+  const el = $(id); if (el.dataset.k !== key) { el.dataset.k = key; el.innerHTML = head + svgPulse(p, s.pulse_since || 0); }
   if (subId) $(subId).textContent = "per minute, last hour";
 }
 
@@ -4272,6 +4311,8 @@ const GUIDE = [
       <li><b>The paper account carries over restarts:</b> cash, open positions, today's P&amp;L and the loss limit. Controls → Paper balance → <i>Start over</i> resets it.</li></ul>`},
   {id: "trade", icon: "🛒", title: "Trading by hand", html: `
     <ul><li><b>Buy and add:</b> pick a preset or type an amount. On a coin you already hold, Buy adds to that position; the ＋ buttons on each position card do the same. Your trades skip the bot's "paused" and seat limits, but never the kill switch, the daily loss limit or a broken feed.</li>
+      <li><b>The chart:</b> pick a coin (Trade, or paste its address) and its live price chart opens in the panel, with your entry marked once you hold it.</li>
+      <li><b>🤖 Hand to the bots</b> (on a position, or 🚶 Away for all of them): the bots ride it for a runner. Half comes out at 2x; the rest trails 30% off its peak once it's up 30%; a stop sits 40% down. There are no time or stall exits, so a coin you've held a while isn't sold the moment you hand it over. Tune it under <code>manual.handover</code> in the config.</li>
       <li><b>Selling:</b> 25%, 50%, <b>Initials</b> (sell just enough to get your cost back; the rest rides free) and <b>Exit</b>, on any position.</li>
       <li><b>Your exit rules:</b> each of your positions exits only on the stop, take profit or trail you set on its card, plus a sale at graduation (the bot trades the curve only).</li>
       <li><b>Limit orders and alerts</b> (under the metrics): buy when the market cap dips to a level or breaks out above one, sell part of a position at a target, or just get a 🔔. The quick buttons fill sensible levels from the current market cap. Orders fire on the live curve price, survive restarts, and expire (24 h by default).</li>
@@ -4466,6 +4507,10 @@ function coinMenu(mint, x, y) {
 }
 // a post about a coin: its name and the numbers people check first, filled in from what the bot sees
 // (and a lookup for coins it isn't tracking). You edit it before anything is posted.
+function rideText(s) {                      // how the bots ride a position you hand them (manual.handover)
+  const r = (s && s.manual && s.manual.handover) || {take_x: 2, take_frac: .5, trail_pct: 30, trail_arm_pct: 30, stop_pct: 40};
+  return `The bots ride it for a runner: ${Math.round(r.take_frac * 100)}% out at ${r.take_x}x, then the rest trails ${r.trail_pct}% off its peak once it's up ${r.trail_arm_pct}%; a stop ${r.stop_pct}% down. No time or stall exits.`;
+}
 function coinPostDraft(mint, i) {
   const pl = PL.data && ["stretch", "new", "graduated"].flatMap(c => PL.data[c] || []).find(r => r.mint === mint);
   const w = snap?.watching?.find(x => x.mint === mint), p = snap?.positions?.find(x => x.mint === mint);
@@ -4555,6 +4600,7 @@ function setTab(t) {
   if (t === "analytics") loadAnalytics();
   if (t === "controls") loadControls();
   if (t === "live" && snap) render(snap);
+  if (t === "live") trChart();
   if (t === "chat") { $$(".tabs button").find(b => b.dataset.tab === "chat")?.classList.remove("dotted");
     if (!C.loaded) loadChat(); else renderChat(true);
     if (snap) renderChatSide(snap); setTimeout(() => $("ch-in").focus(), 30); }
@@ -4726,7 +4772,7 @@ const TCMD = {
     if ((a[0] || "").toLowerCase() === "all") { const ps = snap?.positions || []; if (!ps.length) return termPrint("Nothing to sell.", "dim");
       return termAsk(`Sell ${Math.round(f * 100)}% of all ${ps.length} position(s)?`, () => ps.forEach(p => send({action: "m_sell", mint: p.mint, fraction: f}))); }
     trSell(termNeedCoin(a[0]), f); }],
-  hand: ["<coin|all>", "hand positions to the bots' exit rules", a => send({action: "m_hand", mint: (a[0] || "all").toLowerCase() === "all" ? "" : termNeedCoin(a[0]), on: true})],
+  hand: ["<coin|all>", "hand positions to the bots: they ride them for a 2x", a => send({action: "m_hand", mint: (a[0] || "all").toLowerCase() === "all" ? "" : termNeedCoin(a[0]), on: true})],
   take: ["<coin|all>", "take positions back from the bots", a => send({action: "m_hand", mint: (a[0] || "all").toLowerCase() === "all" ? "" : termNeedCoin(a[0]), on: false})],
   away: ["on|off", "away mode: the bots manage everything while you're gone", a => send({action: "away", on: !/^(off|0|no)$/i.test(a[0] || "on")})],
   alert: ["<coin> >=|<= <mcap>", "tell me when a coin hits a market cap (e.g. 1m, 50k)", a => termOrder("alert", a)],
@@ -4826,7 +4872,7 @@ $("ar-reset").onclick = () => resetLayout(false);
 $("ar-reset-all").onclick = () => { if (confirm("Put every page back the way it was?")) resetLayout(true); };
 $("palette").onclick = () => openPalette();
 $("away-btn").onclick = () => { const on = !(snap && snap.away);
-  if (on && !confirm("Leaving? The bots take over all your positions with their exit rules (stop loss, initials, trailing stop, sell before graduation), and anything your limit orders buy while you're away. Press I'm back to take them back.")) return;
+  if (on && !confirm(`Leaving? The bots take over all your positions, and anything your limit orders buy while you're away. ${rideText(snap)} Press I'm back to take them back.`)) return;
   send({action: "away", on}); if (on) IO.events.push({kind: "handover", n: (snap.positions || []).filter(p => p.source === "manual").length}); };
 $("ck-in").oninput = () => { CK.i = 0; renderPalette(); };
 $("cmdk").onclick = e => { if (e.target === $("cmdk")) closePalette(); };
@@ -4859,7 +4905,7 @@ $("wd-reset").onclick = () => { WD.looks[WD.bot] = {...FIG[WD.bot]}; renderWardr
 $("wd-name").oninput = e => { WD.names[WD.bot] = e.target.value; };
 $("wardrobe").onclick = e => { if (e.target === $("wardrobe")) $("wardrobe").hidden = true; };
 $("mem-add").onclick = memAdd;
-$("tr-ca").addEventListener("input", e => { const v = e.target.value.trim(); if (isMint(v) && v !== TR.mint) setTradeMint(v); else if (!v) { TR.mint = ""; if (snap) renderTradePanel(snap); } });
+$("tr-ca").addEventListener("input", e => { const v = e.target.value.trim(); if (isMint(v) && v !== TR.mint) setTradeMint(v); else if (!v) { TR.mint = ""; if (snap) renderTradePanel(snap); trChart(); } });
 $("tr-amt").addEventListener("input", () => { TR.amt = null; if (snap) renderTradePanel(snap); });
 $("tr-buy").onclick = () => trBuy(TR.mint || $("tr-ca").value.trim(), TR.amt || parseFloat($("tr-amt").value));
 $("xf-auto").onchange = e => send({action: "x_auto", on: e.target.checked});

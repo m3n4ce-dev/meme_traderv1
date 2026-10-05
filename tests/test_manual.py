@@ -208,9 +208,12 @@ def test_hand_your_positions_to_the_bots_and_take_them_back():
     asyncio.run(e._check_exit(a))
     assert a.mint in e.positions
     n, err = e.hand_over(a.mint, True)
-    assert n == 1 and not err and e.positions[a.mint].bot in ("sniper", "late")
+    assert n == 1 and not err and e.positions[a.mint].bot == "ride" and e.positions[a.mint].handed_price > 0
     assert "already handed over" in e.hand_over(a.mint, True)[1]
-    asyncio.run(e._check_exit(a))                              # the bots' stop loss sells it
+    asyncio.run(e._check_exit(a))
+    assert a.mint in e.positions                               # no instant sell: they ride from here
+    a.curve.v_sol *= 0.5                                       # half again
+    asyncio.run(e._check_exit(a))                              # 40% under the hand-over price: their stop sells it
     assert a.mint not in e.positions
     assert "Away mode on" in e.set_away(True) and e.away
     assert e.positions[b.mint].bot                             # away: everything you hold goes to the bots
@@ -307,3 +310,30 @@ def test_graduated_coins_trade_on_paper_at_the_pool_price_and_live_says_why_not(
     s2.migrated = True
     e2.mode = "live"
     assert "PumpSwap" in asyncio.run(e2.manual_buy(s2.mint, 0.1))
+
+
+def test_the_bots_ride_a_handed_position_for_a_runner_instead_of_selling_at_once():
+    """Owner: 'whenever I hand over to the bots they pretty much sell instantly. I'm trying to catch 2xs.'"""
+    from types import SimpleNamespace
+
+    from meme_trader.sniper.engine import RIDE_DEFAULTS
+    from meme_trader.sniper.strategy import evaluate_ride_exit
+
+    pos = SniperPosition(mint="m", symbol="X", opened_at=0, entry_price=1.0, tokens=100, initial_tokens=100, cost_sol=0.1,
+                         initial_cost_sol=0.1, score=50, peak_price=1.2, source="manual", bot="ride", handed_price=1.2, handed_peak=1.2)
+    tok = SimpleNamespace(curve=SimpleNamespace(price=1.0), migrated=False)
+    step = lambda px, live=False: (setattr(tok.curve, "price", px), evaluate_ride_exit(pos, tok, RIDE_DEFAULTS, live))[1]
+    assert step(1.05) is None and step(0.9) is None and step(1.3) is None        # chop, no time or stall exit
+    frac, why = step(2.05)
+    assert frac == 0.5 and "2x" in why and pos.ride_tp                          # half out at 2x
+    assert step(2.6) is None and step(2.0) is None                              # the rest runs...
+    assert step(1.8)[1].startswith("bots: trail")                               # ...until it gives back 30% of its peak
+    pos2 = SniperPosition(mint="n", symbol="Y", opened_at=0, entry_price=1.0, tokens=100, initial_tokens=100, cost_sol=0.1,
+                          initial_cost_sol=0.1, score=50, peak_price=1.0, source="manual", bot="ride", handed_price=0.8, handed_peak=0.8)
+    tok.curve.price = 0.5
+    assert evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS) is None                 # 40% under the hand-over price is 0.48
+    tok.curve.price = 0.47
+    assert evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS)[1].startswith("bots: stop")
+    tok.migrated, tok.curve.price = True, 0.9
+    assert evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS) is None                 # graduated: paper keeps riding
+    assert "graduated" in evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS, live=True)[1]
