@@ -4,6 +4,65 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #48: Toward real money on other chains; why the graduation bot loses in dumps
+
+**Owner's requests:**
+- "Would be good to be able to trade chains for real after paper."
+- "Keep going until we're solid."
+- The owner lifted the 40% kill-switch halt (by asking Claude to, while away from home).
+
+**Real router prices on every other-chain paper trade:**
+- **How:** every paper buy and sell also asks KyberSwap (BNB Chain, Base) or Jupiter (Solana) what the same swap would get. No key or wallet is needed.
+- **No route, no buy:** coins no router can route are skipped.
+- **Real P&L:** each closed trade carries its P&L at real prices.
+- **First round trips:** router vs paper buy fills were +0.35% ($1.8M pool), +0.23% ($520k) and −1.59% ($32k).
+- **Live prices for held coins:** a router quote every 5 s.
+  - Measured: Jupiter and KyberSwap quotes changed every 2.5–5 s; DexScreener's price changed once in 41 s.
+  - So the first two stops at −15% had filled at −21.8% and −25%.
+- **The real-money checklist** (Live → 🌐 Other chains → Real money?):
+  - 50+ trades;
+  - paper profit after costs;
+  - ≥ 90% sure it isn't luck;
+  - still up without the best 3 trades;
+  - router quotes within 2% of paper fills;
+  - profit at real router prices.
+
+  Then a wallet the owner creates and funds, and their go-ahead.
+
+**Why the graduation bot loses in dumps:**
+- **The numbers:** 24 of its 191 trades lost over 30% each, together −7.63 SOL. The other 167 made +9.78 SOL.
+- **Exits decide on time:** at the decision the worst price so far was only −3% to −18%.
+- **They fill late:** about 5.2 s after the decision, at −40% to −74%.
+- **The mechanism:** the first sell try allows 15% slippage and is refused when the price has already fallen further. The retry lands a whole landing delay (2.5 s) later, after the crash. A live sell retries the same way.
+- **The option:** `execution.urgent_sell_slippage_steps` gives exits on a falling price (dev sold, stops, momentum decay, insider cluster, trails, kill switch) their own steps.
+- **The replay said no.** On the last 24 h (136 graduation trades, your settings, 2.5 s delay):
+
+  | Sell slippage steps | P&L | Losses over 30% |
+  |---|---|---|
+  | 15/25/40 (now) | −0.79 SOL | 29 |
+  | 30/60/95 | −0.94 SOL | 28 |
+  | 50/80/95 | −0.92 SOL | 28 |
+
+  Wider is not clearly different and slightly worse. A sell landing 2.5 s after the decision has already met most of the crash, and a failed first try sometimes catches a bounce. The default stays as it is. The levers left are less delay (a faster feed and faster landing) or not entering coins that dump.
+
+**The lab now lands orders like the bot.** graduation-v1 replays filled instantly with 3% slippage. The bot waits 2.5 s, and its sells can fail and retry, which is where the dump losses come from. Lab tests now copy the bot's `execution` settings.
+
+**The AI desk's speed:**
+- **Measured:** four-persona votes take 3.9–4.4 s on Sonnet 5.5 and 2.8–6.1 s on Haiku 4.5, so a faster model doesn't buy much.
+- **Haiku 4.5 had failed every vote** ("does not support the effort parameter"). The desk now asks again without a refused option and remembers.
+- **Correction:** a first count said 74% of the desk's approvals were skipped because the price ran during the vote. 20 of those 23 were demo coins written into the real journal between 23:34 and 23:54 on Oct 4, one minute before the fix that keeps demos out (16f7659). The real count is 3 skips in two days.
+
+**Fixes:**
+- Other-chain trades carried no `mode`, so Analytics, the edge check and the checklist left them out as "unknown".
+- The "real prices" figure compared different trades.
+- Your Sell click and the bot's take profit could overlap on one coin.
+
+**Checks:**
+- 347 tests pass.
+- Browser QA round 10 passed 54 of 54 checks.
+
+---
+
 ## 2026-10-05 — Entry #47: Other chains (paper), a steadier feed, and what the risk dial really does
 
 **Owner's requests:**
