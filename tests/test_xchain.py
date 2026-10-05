@@ -72,7 +72,16 @@ def _trader(monkeypatch, price=0.001, liq=80_000, safe=(True, "", {"buy_tax": 0.
 
     async def safety(chain, token):
         return safe
+
+    async def real_quote(chain, token_in, token_out, amount_raw):          # a stand-in router: 1% worse than the pool
+        if state.get("route") is False:
+            return "no route", None
+        if token_out == "0xTOKEN":                                          # buy: dollars in, coins (18 decimals) out
+            usd = amount_raw / 1e6
+            return "ok", {"out_raw": int(usd * 0.99 / state["price"] * 1e18), "out_usd": usd * 0.99, "gas_usd": 0.01}
+        return "ok", {"out_raw": int(amount_raw / 1e18 * state["price"] * 0.99 * 1e6), "out_usd": None, "gas_usd": 0.01}
     monkeypatch.setattr(x, "_chains_data", chains_data)
+    monkeypatch.setattr(x, "real_quote", real_quote)
     monkeypatch.setattr(x, "quotes", quotes)
     monkeypatch.setattr(x, "safety", safety)
     monkeypatch.setitem(e.p.sniper if "sniper" in e.p else e.p, "xchain", {**DEFAULTS, "chains": ["base"], "size_usd": 30})
@@ -147,3 +156,44 @@ def test_honeypots_are_skipped_and_positions_survive_a_restart(monkeypatch, tmp_
     y = XChain(e, tmp_path / "xchain.json")
     assert y.positions.keys() == x.positions.keys() and abs(y.value_sol() - x.value_sol()) < 1e-12
     assert (tmp_path / "xchain").is_dir()                                         # scans kept for research
+
+
+def test_real_router_prices_ride_along_and_no_route_means_no_buy(monkeypatch):
+    from meme_trader.sniper.xchain import parse_jupiter, parse_kyber
+    ok = {"code": 0, "data": {"routeSummary": {"amountOut": "131099115858099691323392", "amountOutUsd": "29.89", "gasUsd": "0.0133"}}}
+    assert parse_kyber(200, ok) == ("ok", {"out_raw": 131099115858099691323392, "out_usd": 29.89, "gas_usd": 0.0133})   # (seen 2026-10-05)
+    assert parse_kyber(400, {"code": 4008, "message": "route not found"})[0] == "no route"
+    assert parse_kyber(503, {})[0] == "error" and parse_kyber(429, None)[0] == "error"
+    assert parse_jupiter(200, {"outAmount": "11945000"})[1]["out_raw"] == 11945000
+    assert parse_jupiter(400, {"error": "Could not find any route"})[0] == "no route"
+
+    e, x, state = _trader(monkeypatch)
+    state["route"] = False
+    asyncio.run(x.step(time.time()))
+    assert not x.positions and "no real swap route" in x.scan[0]["why"]
+    state["route"] = True
+    x.last_scan = 0
+    asyncio.run(x.step(time.time()))
+    p = next(iter(x.positions.values()))
+    assert p["real"]["buy_gap_pct"] is not None and abs(p["real"]["buy_gap_pct"]) < 2     # the router agrees with the paper fill
+    state["price"] = 0.0008
+    asyncio.run(x.step(time.time() + 20))
+    row = e.book.closed[-1]
+    assert row["real"]["complete"] and row["real"]["pnl_usd"] < 0 and abs(row["real"]["pnl_usd"] - row["pnl_usd"]) < 2
+    r = x.readiness()
+    assert not r["ready"] and r["trades"] == 1 and r["checks"][0]["value"] == "1"
+    names = [c["name"] for c in r["checks"]]
+    assert any("luck" in n for n in names) and any("real router prices" in n for n in names)
+
+
+def test_the_real_money_checklist_passes_only_on_a_real_edge(monkeypatch):
+    e, x, state = _trader(monkeypatch)
+    win = {"source": "chains", "pnl": 0.01, "pnl_usd": 3.0, "real": {"pnl_usd": 2.8, "complete": True, "buy_gap_pct": 0.5, "sell_gap_pct": -0.8}}
+    loss = {**win, "pnl_usd": -2.0, "real": {**win["real"], "pnl_usd": -2.1}}
+    e.book.closed += [dict(win) for _ in range(40)] + [dict(loss) for _ in range(20)]
+    r = x.readiness()
+    assert r["ready"] and r["passed"] == 6
+    x._ready = None
+    e.book.closed[:] = [dict(win) for _ in range(3)] + [dict(loss) for _ in range(57)]
+    r = x.readiness()
+    assert not r["ready"] and not r["checks"][1]["ok"] and not r["checks"][2]["ok"]
