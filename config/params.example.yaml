@@ -283,6 +283,9 @@ sniper:
     min_curve_pct: 55            # window start: curve at least this % full
     max_curve_pct: 85            # window end: curve at most this % full
     max_age_s: 900               # token at most this old (seconds)
+    min_age_s: 0                 # ... and at least this old (0 = off). Dumps were younger at entry (median 20 s vs 31 s)
+    min_recent_sells: 0          # skip when the last 20 s had fewer sells than this (0 = off): heavy buying with nobody
+                                 #   selling was the dump profile (2026-10-05 replays of 3 days, 322 trades; see BUILD_LOG #49)
     flow_window_s: 30            # seconds of trades the momentum checks look at
     min_net_flow_sol: 3.0        # net SOL into the curve in flow_window_s
     min_buyers: 12               # unique buyers in flow_window_s
