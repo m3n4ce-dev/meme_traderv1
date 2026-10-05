@@ -1532,13 +1532,15 @@ class Engine:
             if self.book.day and self.feed.realtime:      # the day that just closed, in one message (phone + log)
                 self.say("digest", self.daily_digest(self.book.day))
             self.book.day, self.book.day_pnl = day, 0.0
-            if self._day_stop_said:
-                self._day_stop_said = False
-                self.say("info", "New day: the daily loss limit reset, entries are open again")
-        if not self._day_stop_said and -self.book.day_pnl >= self.p.capital.daily_loss_limit_sol and self.feed.realtime:
-            self._day_stop_said = True                     # once, when it happens (it used to be silent)
-            self.say("error", f"DAILY LOSS LIMIT: {self.book.day_pnl:+.3f} SOL today (limit {self.p.capital.daily_loss_limit_sol:g}): "
-                              f"no new entries until 00:00 UTC; open positions are still managed")
+        lim = self.p.capital.daily_loss_limit_sol
+        stopped = -self.book.day_pnl >= lim
+        if stopped != self._day_stop_said and self.feed.realtime:   # each change, once (the stop used to be silent)
+            self._day_stop_said = stopped
+            if stopped:
+                self.say("error", f"DAILY LOSS LIMIT: {self.book.day_pnl:+.3f} SOL today (limit {lim:g}): no new entries "
+                                  f"until 00:00 UTC unless a close brings it back; open positions are still managed")
+            else:
+                self.say("info", f"Entries open again: today {self.book.day_pnl:+.3f} SOL is inside the {lim:g} SOL daily limit")
         eq = self.equity()
         self.book.mark(eq)
         if self.record_file and self.feed.realtime and self.now - self._last_health >= 60:

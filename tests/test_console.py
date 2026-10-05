@@ -199,7 +199,13 @@ def test_daily_digest_and_the_daily_loss_alert():
     asyncio.run(tick()); asyncio.run(tick())
     stops = [t for lv, t in said if t.startswith("DAILY LOSS LIMIT")]
     assert len(stops) == 1                                         # announced once, not every tick
+    e.book.day_pnl = -0.01                                          # a winning close brings it back inside
+    said.clear()
+    asyncio.run(tick())
+    assert [t for _, t in said if t.startswith("Entries open again")]
+    e.book.day_pnl = -10.0
+    asyncio.run(tick())
     e.book.day = "2000-01-01"                                       # the UTC day rolls over
     said.clear()
     asyncio.run(tick())
-    assert any(lv == "digest" for lv, _ in said) and any("entries are open again" in t for _, t in said)
+    assert any(lv == "digest" for lv, _ in said) and any(t.startswith("Entries open again") for _, t in said)
