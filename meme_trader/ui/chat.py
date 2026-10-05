@@ -51,11 +51,32 @@ lookup (a contract address they pasted), they already see a metrics card: give y
 repeating the numbers - what stands out, the main risks, and whether it suits what the bot trades
 (pump.fun bonding-curve tokens; graduation plays). Never promise price moves. Mode is in get_status
 (paper = pretend money).
-The console: for any "how do I / where is / can I" question about the dashboard, call console_help first and
+The console: the owner does most things with a click. For any "how do I / where is / can I / turn off / hide /
+delete / add" question about the dashboard, use the console manual (attached to such messages, or call
+console_help) and never answer that there's no tool or no way: tell them the clicks. Call console_help first and
 answer with the exact clicks or keys it gives (never invent a button). If they ask you to change what the screen
 shows - the theme ("make it white" = light), a tab, $ or SOL, open a coin, pin or unpin a chart, the room's speech
 bubbles, notifications, or how a character acts or where it stands - just do it with ui_action (no approval
 needed), then say in one line what you did and the shortcut for next time (e.g. the t key for the theme)."""
+
+
+HOWTO = re.compile(r"\b(how (do|can|to|would)|where('s| is| are| do)|can (i|you|we)|is there a way|turn (on|off)|"
+                   r"switch|change|hide|show|delete|remove|add|pin|move|find|set up|enable|disable)\b", re.I)
+
+
+def with_manual(prompt: str, text: str) -> str:
+    """A question about using the dashboard gets the matching console-manual sections attached, so the answer
+    never depends on the model remembering to look (it once answered "I don't have a tool" for a button)."""
+    if not HOWTO.search(text or ""):
+        return prompt
+    from .manual import search
+    found = search(text, top=3, budget=4500)["found"]
+    if not found:
+        return prompt
+    ref = "\n\n".join(f"## {f['section']}\n{f['text']}" for f in found)
+    return (f"{prompt}\n\n[Console manual, the sections matching this message (attached automatically). If they ask how, "
+            f"answer with these exact clicks or keys; if they ask you to do a screen change, use ui_action. Never say "
+            f"there's no way when the manual shows a button.]\n{ref}")
 
 
 def _now() -> float:
@@ -261,6 +282,7 @@ class ChatManager:
             if prompt is None:                       # card only (auto-read off)
                 self._finish(msg)
                 return
+            prompt = with_manual(prompt, text)
             for attempt in (0, 1):
                 resume = attempt == 0 and bool(self.state["session_id"])
                 got_result, err = await self._run(prompt, msg, resume)

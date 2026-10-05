@@ -723,13 +723,15 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             mint = str(cmd.get("mint") or "").strip()
             held = engine.positions.get(mint)
             err = await engine.manual_buy(mint, sol)
+            if not err and cmd.get("hand"):                # "Buy & give to bots": the bots ride it from the fill
+                engine.hand_after[mint] = engine.now
             if not err and held is not None:
-                return {"ok": True, "text": f"Adding {float(sol):g} SOL to {held.symbol}"}
+                return {"ok": True, "text": f"Adding {float(sol):g} SOL to {held.symbol}" + (" · the bots ride it" if cmd.get("hand") else "")}
             if err:
                 return {"ok": False, "text": err}
             if mint in engine.manual_queue:
                 return {"ok": True, "text": f"Queued {float(sol):g} SOL: buying at its first trade on the curve"}
-            return {"ok": True, "text": f"Buy {float(sol):g} SOL sent"}
+            return {"ok": True, "text": f"Buy {float(sol):g} SOL sent" + (": the bots ride it once it fills" if cmd.get("hand") else "")}
         if action == "m_sell":
             err = await engine.manual_sell(str(cmd.get("mint") or ""), cmd.get("fraction"))
             return {"ok": not err, "text": err or "Sell sent"}

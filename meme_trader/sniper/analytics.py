@@ -72,6 +72,18 @@ def _buckets(rows: list[dict], key: str, edges: list[float]) -> list[dict]:
     return [_group_row(k, g[k]) for k in order if g.get(k)]
 
 
+MCAP_BINS_K = [5, 10, 20, 40, 80, 160]       # entry market cap, $K
+
+
+def by_entry_mcap(rows: list[dict]) -> list[dict]:
+    """Results by the market cap a trade was entered at ($K buckets); trades from before it was recorded are left out."""
+    out = _buckets([{**c, "_mck": c["entry_mcap_usd"] / 1000} for c in rows if c.get("entry_mcap_usd")], "_mck", MCAP_BINS_K)
+    for r in out:
+        k = r["key"]
+        r["key"] = f"<${k[1:]}K" if k.startswith("<") else f"${k[:-1]}K+" if k.endswith("+") else "${}K–${}K".format(*k.split("-"))
+    return out
+
+
 def _hist(values: list[float], edges: list[float]) -> list[dict]:
     labels = [f"<{edges[0]:g}"] + [f"{lo:g}..{hi:g}" for lo, hi in zip(edges, edges[1:])] + [f"{edges[-1]:g}+"]
     counts = [0] * len(labels)
@@ -321,6 +333,8 @@ def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdow
     by_hour = sorted(_group(trades, lambda c: time.gmtime(c["opened"]).tm_hour), key=lambda r: r["key"])
     by_day = sorted(_group(trades, lambda c: time.strftime("%Y-%m-%d", time.gmtime(c["closed"]))), key=lambda r: r["key"])
     by_score = _buckets(trades, "score", SCORE_BINS)
+    by_mcap = {who: by_entry_mcap([c for c in trades if pick(c)]) for who, pick in
+               (("all", lambda c: True), ("manual", lambda c: c["source"] == "manual"), ("bots", lambda c: c["source"] != "manual"))}
     by_p = _buckets(trades, "p", P_BINS)
     pnls = [c["pnl"] for c in trades]
     equity_now = equity_hist[-1][1] if equity_hist else start_sol + sum(c["pnl"] for c in closed)
@@ -330,7 +344,7 @@ def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdow
     return {
         "generated_at": time.time(), "kpis": k, "drawdown": drawdown(equity_hist, observed_max_dd_pct),
         "by_source": by_source, "by_exit": by_exit, "by_hour": by_hour, "by_day": by_day,
-        "by_score": by_score, "by_p": by_p, "live_calibration": live_calibration(trades),
+        "by_score": by_score, "by_p": by_p, "by_mcap": by_mcap, "live_calibration": live_calibration(trades),
         "pnl_hist": _hist([c["pnl_pct"] for c in trades], PNL_BINS),
         "hold_hist": _hist([c["closed"] - c["opened"] for c in trades], HOLD_BINS),
         "scatter": [{"hold_s": round(c["closed"] - c["opened"], 1), "pnl_pct": round(c["pnl_pct"], 1),

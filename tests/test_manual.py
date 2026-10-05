@@ -457,3 +457,59 @@ def test_coin_families_mark_the_og_and_number_the_copies():
     e.now = t0 + 7 * 3600
     asyncio.run(e._tick())
     assert e.family("M0" + "x" * 40) is None                        # families forget after 6 h
+
+
+def test_buy_and_give_to_the_bots(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    e = market()
+    s = live_coin(e)
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.send_json({"action": "m_buy", "mint": s.mint, "sol": 0.1, "hand": True})
+            for _ in range(20):
+                m = await ws.receive_json(timeout=5)
+                if m.get("type") == "ack":
+                    return m
+    m = asyncio.run(go())
+    assert m["ok"] and "bots ride it" in m["text"]
+    asyncio.run(e._tick())                                   # the fill has landed: the bots take it from here
+    pos = e.positions[s.mint]
+    assert pos.source == "manual" and pos.bot == "ride" and s.mint not in e.hand_after
+    e.hand_after["gone" * 10] = e.now - 1000                 # a buy that never filled is forgotten
+    asyncio.run(e._tick())
+    assert "gone" * 10 not in e.hand_after
+
+
+def test_market_cap_in_and_out_is_recorded_and_backfilled(tmp_path):
+    import json as _json
+
+    from meme_trader.sniper import mcapfill
+    from meme_trader.sniper.analytics import by_entry_mcap
+
+    e = market()
+    s = live_coin(e)
+    e.sol_price.usd = 150.0
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
+    row = next(p for p in e.snapshot()["positions"] if p["mint"] == s.mint)
+    assert row["entry_mcap_sol"] == pytest.approx(s.market_cap_sol, rel=0.2) and row["mcap_sol"] == pytest.approx(s.market_cap_sol)
+    assert asyncio.run(e.manual_sell(s.mint, 1.0)) == ""
+    c = e.book.closed[-1]
+    assert c["entry_mcap_sol"] > 0 and c["exit_mcap_sol"] > 0 and c["entry_mcap_usd"] == round(c["entry_mcap_sol"] * 150)
+    assert by_entry_mcap([c])[0]["n"] == 1
+    # an older trade (no market caps) gets them from the recorded feed
+    old = {"mint": "M" * 44, "opened": 1000.0, "closed": 1100.0, "source": "manual", "pnl": 0.01, "pnl_pct": 10, "cost": 0.1}
+    (tmp_path / "trades-2026-10-04.jsonl").write_text(_json.dumps(old) + "\n")
+    feed = [{"mint": "M" * 44, "ts": 999.0, "v_sol": 40.0, "v_tokens": 800_000_000.0},
+            {"mint": "M" * 44, "ts": 1099.0, "v_sol": 60.0, "v_tokens": 600_000_000.0}]
+    (tmp_path / "feed-2026-10-04.jsonl").write_text("".join(_json.dumps(x) + "\n" for x in feed))
+    r = mcapfill.run(tmp_path)
+    assert r["filled"] == 1
+    rows = [dict(old)]
+    assert mcapfill.apply(rows, tmp_path, 100.0) == 1
+    assert rows[0]["entry_mcap_sol"] == 50.0 and rows[0]["exit_mcap_sol"] == 100.0 and rows[0]["entry_mcap_usd"] == 5000

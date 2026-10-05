@@ -1012,6 +1012,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div class="tr-row"><span class="note">Amount (SOL)</span><div class="seg" id="tr-presets" role="group" aria-label="Amount presets"></div>
         <input id="tr-amt" type="number" min="0" step="0.01" placeholder="custom" aria-label="Custom amount in SOL">
         <button class="buy-btn" id="tr-buy">Buy</button>
+        <button class="small" id="tr-give" title="">🤖 Buy &amp; give to bots</button>
         <button class="call-btn" id="tr-call" title="Put this coin on your record at today's market cap">📣 Call</button>
         <span class="note">Sell, take initials or exit from the position cards below. Your positions only exit on rules you set.</span></div>
       <div id="tr-callrow" hidden></div>
@@ -1045,7 +1046,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
           <h2>Closed trades <small id="closed-sub"></small></h2>
           <div class="scroll" style="max-height:340px"><table>
             <thead><tr><th>Token</th><th>Source</th><th class="r">Held</th><th class="r">Cost</th><th class="r">P&amp;L</th>
-              <th class="r">Peak</th><th class="r">P(2x)</th><th>Exit</th></tr></thead>
+              <th class="r">Peak</th><th class="r" title="Market cap when it was bought, and when it was sold">MC in → out</th><th>Exit</th></tr></thead>
             <tbody id="closed"></tbody></table></div>
         </section>
         <section class="panel">
@@ -1254,6 +1255,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     </div>
     <div class="two">
       <section class="panel"><h2>By entry score</h2><div id="an-score"></div></section>
+      <section class="panel"><h2>By entry market cap <small>the market cap each trade got in at · <span class="seg" id="an-mc-who"><button data-anmc="all" aria-pressed="true">All</button><button data-anmc="manual">You</button><button data-anmc="bots">Bots</button></span></small></h2><div id="an-mcap"></div></section>
       <section class="panel"><h2>By model P(2x) at entry</h2><div id="an-p"></div></section>
     </div>
     <section class="panel"><h2>By hour <small>UTC, P&amp;L of trades opened in that hour</small></h2><div id="an-hour"></div></section>
@@ -1414,6 +1416,7 @@ const sol = (x, d = 3) => usdMode() ? (x >= 0 ? "" : "−") + usdAbs(x * snap.so
 const signed = (x, d = 3) => (x > 0 ? "▲ +" : x < 0 ? "▼ −" : "") + (usdMode() ? usdAbs(x * snap.sol_usd) : Math.abs(x).toFixed(d));
 const U = () => usdMode() ? "" : " SOL";                       // the unit after an amount (none in dollars: "$" says it)
 const mcap = x => usdMode() ? "$" + fmtUsd(x * snap.sol_usd) : (+x).toFixed(0) + " SOL";
+const mcUsd = x => x == null || !(x > 0) ? "–" : snap && snap.sol_usd > 0 ? "$" + fmtUsd(x * snap.sol_usd) : (+x).toFixed(0) + " SOL";   // market cap, always $
 const flowAmt = (x, d = 2) => usdMode() ? (x > 0 ? "+" : x < 0 ? "−" : "") + usdAbs(x * snap.sol_usd) : fx(x, d) + " SOL";
 const px = (v, d = 3) => usdMode() ? "$" + (v * snap.sol_usd).toExponential(d) : v.toExponential(d) + " SOL";
 const pxAxis = v => usdMode() ? "$" + (v * snap.sol_usd).toExponential(1) : v.toExponential(1);
@@ -1637,7 +1640,7 @@ function render(s) {
       const el = $("p-" + p.mint); if (!el) continue;
       const tagCls = p.source.startsWith("copy") ? "copy" : p.source === "late" ? "late" : "";
       el.querySelector(".gain").innerHTML = `<span class="${cls(p.gain_pct)}">${pct(p.gain_pct)}</span>`;
-      el.querySelector(".meta").innerHTML = `<span>${dur(p.held_s)}</span><span>value ${sol(p.value_sol)}${U()}</span>
+      el.querySelector(".meta").innerHTML = `${p.entry_mcap_sol ? `<span title="Market cap when you got in, and now"><b>MC ${mcUsd(p.entry_mcap_sol)} → ${mcUsd(p.mcap_sol)}</b></span>` : ""}<span>${dur(p.held_s)}</span><span>value ${sol(p.value_sol)}${U()}</span>
         <span>peak ${pct(p.peak_gain_pct)}</span><span>score ${p.score.toFixed(0)}</span>${p.p != null ? `<span>P(2x) ${prob(p.p)}</span>` : ""}
         ${p.initials ? '<span class="tag ok">✓ initials out</span>' : '<span class="tag">initials pending</span>'}
         <span class="tag ${tagCls}" title="${esc(p.desk)}">${esc(p.source)}${p.desk ? " · AI ✓" : ""}</span>`;
@@ -1674,7 +1677,7 @@ function render(s) {
       <td><span class="tag ${(c.source || "").startsWith("copy") ? "copy" : c.source === "late" ? "late" : ""}">${esc(c.source)}</span></td>
       <td class="r">${dur(c.closed - c.opened)}</td><td class="r">${c.cost.toFixed(3)}</td>
       <td class="r ${cls(c.pnl)}">${signed(c.pnl)} (${pct(c.pnl_pct)})</td><td class="r">${pct(c.peak_gain_pct)}</td>
-      <td class="r">${prob(c.p)}</td><td class="why" title="${esc(c.exit)}">${esc(c.exit)}</td></tr>`).join("")
+      <td class="r num" title="${c.mcap_approx ? "from the recorded feed (dollars at today's SOL price)" : ""}">${c.entry_mcap_sol ? `${mcUsd(c.entry_mcap_sol)} → ${mcUsd(c.exit_mcap_sol)}` : "–"}</td><td class="why" title="${esc(c.exit)}">${esc(c.exit)}</td></tr>`).join("")
       || `<tr><td colspan="8" class="empty">No closed trades yet</td></tr>`;
   }
   S.prevClosed = sm.closed;
@@ -1877,7 +1880,7 @@ function onTicks(m) {
     const c = LC.data[mint] && !d.full ? LC.data[mint] : (LC.data[mint] = {pts: [], marks: []});
     if (d.pts && d.pts.length) { c.pts.push(...d.pts); if (c.pts.length > 3000) c.pts.splice(0, c.pts.length - 3000); }
     if (d.marks) c.marks = d.marks;
-    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, fam: d.fam, got: Date.now(),
+    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, fam: d.fam, got: Date.now(), mcpp: d.mc_per_px || c.mcpp,
       mcap_usd: d.mcap_usd, curve_pct: d.curve_pct, age_s: d.age_s, migrated: d.migrated});
     const pin = LC.pins.find(x => x.mint === mint);
     if (pin && pin.p == null && c.pts.length) { pin.p = c.pts[c.pts.length - 1][1]; store.set("lc-pins", JSON.stringify(LC.pins)); }
@@ -1945,18 +1948,18 @@ function tickChart(cv, c, o = {}) {
   let lo = Math.min(...ys), hi = Math.max(...ys);
   if (hi === lo) { hi *= 1.05; lo *= .95; }
   const sp = hi - lo; lo -= sp * .08; hi += sp * .1;
-  const padL = 48, padR = 8, padT = 10, padB = 18;
+  const padL = 52, padR = 8, padT = 10, padB = 18, axis = v => c.mcpp ? mcUsd(v * c.mcpp) : pxAxis(v);   // market cap when known
   const X = t => padL + (W - padL - padR) * (tEnd === t0 ? 1 : (t - t0) / (tEnd - t0));
   const Y = v => padT + (h - padT - padB) * (1 - (v - lo) / (hi - lo));
   g.font = "11px system-ui"; g.lineWidth = 1;
   for (let k = 0; k <= 3; k++) { const v = lo + (hi - lo) * k / 3, y = Y(v);
     g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(padL, y); g.lineTo(W - padR, y); g.stroke();
-    g.fillStyle = css("--muted"); g.fillText(pxAxis(v), 2, y + 4); }
+    g.fillStyle = css("--muted"); g.fillText(axis(v), 2, y + 4); }
   const span = tEnd - t0;
   for (let k = 0; k <= 3; k++) { const t = t0 + span * k / 3, lab = k === 3 ? "now" : "-" + dur(tEnd - t);
     g.fillStyle = css("--muted"); g.fillText(lab, Math.min(W - padR - g.measureText(lab).width, Math.max(padL, X(t) - g.measureText(lab).width / 2)), h - 4); }
   if (c.entry) { g.strokeStyle = css("--axis"); g.setLineDash([4, 4]); g.beginPath(); g.moveTo(padL, Y(c.entry)); g.lineTo(W - padR, Y(c.entry)); g.stroke(); g.setLineDash([]);
-    g.fillStyle = css("--muted"); g.fillText("entry", padL + 4, Y(c.entry) - 3); }
+    g.fillStyle = css("--muted"); g.fillText(c.mcpp ? `in at ${mcUsd(c.entry * c.mcpp)}` : "entry", padL + 4, Y(c.entry) - 3); }
   const up = c.entry ? pts[pts.length - 1][1] >= c.entry : pts[pts.length - 1][1] >= pts[0][1];
   g.beginPath(); g.moveTo(X(pts[0][0]), Y(pts[0][1]));
   for (let i = 1; i < pts.length; i++) { g.lineTo(X(pts[i][0]), Y(pts[i - 1][1])); g.lineTo(X(pts[i][0]), Y(pts[i][1])); }
@@ -1976,17 +1979,17 @@ function tickChart(cv, c, o = {}) {
   }
   const lp = pts[pts.length - 1][1], ly = Y(lp);
   g.fillStyle = up ? css("--up") || "#22c55e" : css("--down") || "#ef4444"; g.beginPath(); g.arc(X(tEnd), ly, 3, 0, 7); g.fill();
-  cv._lc = {pts, drawn, X, Y, t0, tEnd, padL, padR};
+  cv._lc = {pts, drawn, X, Y, t0, tEnd, padL, padR, mcpp: c.mcpp};
   if (!cv._hov) {
     cv._hov = true;
     cv.addEventListener("mousemove", ev => {
       const L = cv._lc; if (!L) return;
       const r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
       const near = L.drawn.filter(d => Math.abs(d.x - x) < 8 && Math.abs(d.y - y) < 10);
-      if (near.length) { tip(near.map(d => `<b>${esc(d.m.label)}</b> <span class="note">${dur(L.tEnd - d.m.t)} ago${d.m.wallet ? " · " + short(d.m.wallet) : ""}</span>`).join("<br>"), ev); return; }
+      if (near.length) { tip(near.map(d => `<b>${esc(d.m.label)}</b>${L.mcpp ? ` at ${mcUsd(d.m.p * L.mcpp)} MC` : ""} <span class="note">${dur(L.tEnd - d.m.t)} ago${d.m.wallet ? " · " + short(d.m.wallet) : ""}</span>`).join("<br>"), ev); return; }
       const t = L.t0 + (x - L.padL) / (cv.clientWidth - L.padL - L.padR) * (L.tEnd - L.t0);
       let k = 0; while (k + 1 < L.pts.length && L.pts[k + 1][0] <= t) k++;
-      tip(`${px(L.pts[k][1])} <span class="note">${dur(Math.max(0, L.tEnd - t))} ago</span>`, ev);
+      tip(`${L.mcpp ? `MC <b>${mcUsd(L.pts[k][1] * L.mcpp)}</b> · ` : ""}${px(L.pts[k][1])} <span class="note">${dur(Math.max(0, L.tEnd - t))} ago</span>`, ev);
     });
     cv.addEventListener("mouseleave", hideTip);
   }
@@ -2033,7 +2036,7 @@ function renderCharts(s) {
   for (const x of pins) { const card = box.querySelector(`.lc-card.pin[data-mint="${CSS.escape(x.mint)}"]`); if (card) card.querySelector(".lc-legend").innerHTML = lcLegend(LC.data[x.mint]); }
   for (const p of ps) {
     const card = box.querySelector(`.lc-card[data-mint="${CSS.escape(p.mint)}"]`); if (!card) continue;
-    card.querySelector(".lc-sub").textContent = `${sol(p.cost_sol)}${U()} in · held ${dur(p.held_s)} · peak ${pct(p.peak_gain_pct, 0)}${p.last_trade_s > 30 ? ` · no trades for ${dur(p.last_trade_s)}` : ""}`;
+    card.querySelector(".lc-sub").textContent = `${p.entry_mcap_sol ? `in at ${mcUsd(p.entry_mcap_sol)} MC, now ${mcUsd(p.mcap_sol)} · ` : ""}${sol(p.cost_sol)}${U()} in · held ${dur(p.held_s)} · peak ${pct(p.peak_gain_pct, 0)}${p.last_trade_s > 30 ? ` · no trades for ${dur(p.last_trade_s)}` : ""}`;
     card.querySelector(".lc-legend").innerHTML = lcLegend(LC.data[p.mint]);
   }
   lcCardNums();
@@ -2168,6 +2171,8 @@ function renderAnalytics(a) {
   $("an-src").innerHTML = groupTable(a.by_source, "Strategy");
   $("an-exit").innerHTML = groupTable(a.by_exit, "Exit");
   $("an-score").innerHTML = groupTable(a.by_score, "Score");
+  const mw = S.anMc || "all"; $$("#an-mc-who button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.anmc === mw)));
+  $("an-mcap").innerHTML = groupTable((a.by_mcap || {})[mw], "Entry MC") + `<p class="note">Trades from before market caps were logged are filled in from the recorded feed (dollars at today's SOL price).</p>`;
   const lc = a.live_calibration || [];
   $("an-p").innerHTML = groupTable(a.by_p, "P(2x)") + (lc.length ? `<p class="note" style="margin-top:8px">Live check: ${lc.map(b => `${b.bin}: predicted ${prob(b.predicted)}, reached 2x ${prob(b.realized_2x)} (n=${b.n})`).join(" · ")}</p>` : "");
   $("an-hour").innerHTML = svgHours(a.by_hour);
@@ -3123,7 +3128,7 @@ function goTo(b, dest, then = null, speed = 2.2, room = "floor") {
 }
 function goHome(b, speed = 2.2) {
   const room = homeRoom(b.id, b.mood), h = homeOf2(b.id, b.mood);
-  b.busy = null; b.spot = null; setProp(b, "");
+  b.busy = null; b.spot = null; b.task = null; setProp(b, "");
   const settle = () => { b.sit = !actOf(b.id).spot; b.view = room === "lounge" && (IO.phase || lightPhase()) !== "night" ? "back" : "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; };
   if ((b.room || "floor") === room && Math.hypot(b.x - h[0], b.y - h[1]) < .05) { settle(); drawBot(b); return; }
   goTo(b, h, settle, speed, room);
@@ -3305,8 +3310,8 @@ function busyCount() { return Object.values(IO.bots).filter(b => b.busy).length;
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function errand2(b) {
   const t = Math.random();
-  if (t < (b.id === "recorder" ? .35 : .08) && houseTrip(b, "lab")) return;
-  if (t > .8 && houseTrip(b, "lounge")) return;
+  if (t < (b.id === "recorder" ? .45 : .22) && startTask(b, "lab")) return;
+  if (t > .7 && startTask(b, "lounge")) return;
   const night = IO.phase === "night", r = Math.random();
   const deskBots = Object.values(IO.bots).filter(o => o !== b && DESK_AT[o.id] && !o.busy && !o.path.length && ["idle", "work"].includes(o.mood));
   if (r < .14 && deskBots.length) return meet(b, pick(deskBots));
@@ -3360,6 +3365,11 @@ setInterval(() => {
   applyPhase(); layoutChat(); renderBoards(); houseTabs(); renderHouseBoards();
   while (IO.events.length) { if (relay(IO.events[0]) === false) break; IO.events.shift(); }
   if (busyCount() >= 3 || IO.zoom) return;
+  const away = Object.values(IO.bots).filter(b => b.busy === "task").length;
+  if (away < 2 && Math.random() < 1 / 15) {                   // keep the lounge and the lab lived in
+    const pool = Object.values(IO.bots).filter(b => canRoam(b) && Math.random() < (MOVE_F[actOf(b.id).move] ?? 1));
+    if (pool.length) startTask(pick(pool), Math.random() < .5 ? "lab" : "lounge");
+  }
   for (const b of Object.values(IO.bots)) {
     if (b.busy || b.path.length || !DESK_AT[b.id] && b.mood === "sleep") continue;
     const act = actOf(b.id), p = (b.mood === "idle" ? 1 / 24 : b.mood === "work" ? 1 / 70 : 0) * (MOVE_F[act.move] ?? 1);
@@ -3678,7 +3688,7 @@ function showRoom(r) {
   const night = $("iso-nightglow"); if (night) night.innerHTML = nightGlows(r);
   IO.chat.forEach(m => m.el.remove()); IO.chat = [];
   $$("[data-roomedit]").forEach(x => x.hidden = r !== "floor");
-  syncRoomVis(); sortDepth(); houseTabs(); renderBoards(); renderHouseBoards();
+  syncRoomVis(); sortDepth(); houseTabs(); renderBoards(); renderHouseBoards(); ppBall();
 }
 function syncRoomVis() {
   for (const b of Object.values(IO.bots)) b.g.style.display = (b.room || "floor") === (IO.room || "floor") ? "" : "none";
@@ -3688,7 +3698,10 @@ function houseTabs() {
   for (const b of Object.values(IO.bots)) n[b.room || "floor"]++;
   for (const k of Object.keys(HOUSE)) {
     const c = document.querySelector(`[data-roomn="${k}"]`); if (c) c.textContent = n[k];
-    const btn = document.querySelector(`[data-room="${k}"]`); if (btn) btn.setAttribute("aria-pressed", String((IO.room || "floor") === k));
+    const btn = document.querySelector(`[data-room="${k}"]`); if (!btn) continue;
+    btn.setAttribute("aria-pressed", String((IO.room || "floor") === k));
+    const doing = Object.values(IO.bots).filter(b => (b.room || "floor") === k && b.task).map(b => `${botLook(b.id).name} ${b.task}`);
+    btn.title = HOUSE[k].name + (doing.length ? ": " + doing.join("; ") : "");
   }
 }
 // where a bot lives: the AI personas rest in the lounge (in bed at night, on the sofa by day); everyone else on the floor
@@ -3716,6 +3729,85 @@ function houseTrip(b, room) {                         // a break in the lounge, 
     setTimeout(() => { if (b.spot === room + ":" + k) { b.spot = null; goHome(b); } }, 9000 + Math.random() * 9000);
   }, 2.2, room);
   return true;
+}
+// ---- tasks around the house: a few steps each in the lab and the lounge, so the other rooms aren't empty
+const TASKS = {
+  lab: [
+    {name: "running a backtest", steps: [["bench", 9, "⌨️", () => "Backtesting yesterday's tape: same rules, new data."],
+      ["rack", 5, "🛠", () => "Pulling the recorder's files."], ["edge", 7, "", b => labLine(b, "edge")]]},
+    {name: "reading the wallet study", steps: [["wallets", 8, "", b => labLine(b, "wallets")], ["table", 6, "📄", () => "Writing up which wallets move together."]]},
+    {name: "servicing the rack", steps: [["rack", 9, "🛠", () => "Checking the rack: every trade still landing on disk."], ["bench2", 6, "⌨️", () => "Disk's fine. Logs look clean."]]},
+    {name: "comparing exits", steps: [["bench2", 9, "⌨️", () => exitLabLine()], ["table", 5, "📄", () => "Same entries, different exits: the data decides."]]},
+  ],
+  lounge: [
+    {name: "playing ping-pong", pair: true},
+    {name: "on the arcade", steps: [["arcade", 12, "🕹", () => pick(["New high score.", "One more game.", "This cabinet eats quarters.", "Level 9. Don't talk to me."])]]},
+    {name: "grabbing a snack", steps: [["fridge", 4, "🧃", () => pick(["Fridge raid.", "Who took my yogurt?", "Last cold drink."])], ["sofa", 10, "🍿", () => tvLine()]]},
+    {name: "napping", steps: [["bag1", 14, "💤", () => "Five minutes on the beanbag."]]},
+    {name: "watching the pulse", steps: [["bag2", 12, "🍿", () => tvLine()]]},
+  ],
+};
+function tvLine() { const r = ((snap && snap.pulse) || []).slice(-1)[0]; return r ? `The big TV says ${r[1]} launches this minute.` : "Watching the market pulse on the big TV."; }
+function exitLabLine() {
+  const v = ((((S.analytics || {}).exit_lab || {}).late || {}).variants || []).filter(x => x.n).sort((a, b) => b.mean_pct - a.mean_pct)[0];
+  return v ? `Exit lab: "${v.variant}" leads, ${pct(v.mean_pct, 1)} a trade over ${v.n}.` : "Comparing exits on the same entries.";
+}
+const freeStop = (room, k) => !Object.values(IO.bots).some(o => o.spot === room + ":" + k);
+const canRoam = b => !b.busy && !b.path.length && b.mood !== "sleep" && actOf(b.id).move !== "still" && !["alert", "act"].includes(b.mood);
+function startTask(b, room) {
+  const ts = TASKS[room].filter(t => t.pair ? freeStop("lounge", "pongL") && freeStop("lounge", "pongR") : freeStop(room, t.steps[0][0]));
+  return ts.length ? runTask(b, room, pick(ts)) : false;
+}
+function runTask(b, room, task) {
+  if (task.pair) return pingPong(b);
+  const steps = task.steps.filter(([k]) => HSTOPS[room][k]);
+  b.busy = "task"; b.task = task.name; b.spot = null;
+  let i = 0;
+  const next = () => {
+    if (b.busy !== "task") return;                              // pulled away: real work, or the owner dragged it
+    if (i >= steps.length) { b.spot = null; b.task = null; goHome(b); return; }
+    const [k, secs, prop, say] = steps[i++], [x, y, view] = HSTOPS[room][k];
+    if (!freeStop(room, k) && b.spot !== room + ":" + k) return next();   // taken: skip that step
+    b.spot = room + ":" + k;
+    goTo(b, [x, y], () => {
+      if (b.busy !== "task") return;
+      b.view = view; b.sit = ["sofa", "bag1", "bag2", "bench", "bench2"].includes(k); drawBot(b); setProp(b, prop);
+      const line = say(b); if (line) hsay(b.id, esc(line), {force: true});
+      setTimeout(next, secs * 1000 * (.8 + Math.random() * .5));
+    }, 2.2, room);
+  };
+  next(); houseTabs(); return true;
+}
+function pingPong(a) {
+  const others = Object.values(IO.bots).filter(o => o !== a && canRoam(o) && (!DESK_AT[o.id] || o.mood === "idle"));
+  if (!others.length || !freeStop("lounge", "pongL") || !freeStop("lounge", "pongR")) return false;
+  const b = pick(others), len = 15000 + Math.random() * 9000;
+  let here = 0;
+  const done = () => { IO.ppOn = false; ppBall(); for (const p of [a, b]) if (p.busy === "task" && p.task === "playing ping-pong") { p.spot = null; p.task = null; goHome(p); } };
+  for (const [p, k, face] of [[a, "pongL", 1], [b, "pongR", -1]]) {
+    p.busy = "task"; p.task = "playing ping-pong"; p.spot = "lounge:" + k;
+    goTo(p, HSTOPS.lounge[k].slice(0, 2), () => {
+      if (p.busy !== "task") return done();
+      p.view = "front"; p.face = face; p.sit = false; drawBot(p); setProp(p, "🏓");
+      if (++here === 2) {
+        IO.ppOn = true; ppBall();
+        hsay(a.id, esc(pick(["Rally!", "Best of five?", "Serve's mine.", "Loser buys coffee."])), {force: true});
+        setTimeout(() => { if (IO.ppOn) hsay(b.id, esc(pick(["Match point.", "Nice spin.", "Rematch later.", "That was in!"])), {force: true}); }, 6000);
+        setTimeout(done, len);
+      }
+    }, 2.2, "lounge");
+  }
+  houseTabs(); return true;
+}
+function ppBall() {                                              // the ball, while a game's on and you're in the lounge
+  const ents = $("iso-ents"); if (!ents) return;
+  ents.querySelector(".pp-ball")?.remove();
+  if (!IO.ppOn || IO.room !== "lounge") return;
+  const [x1, y1] = iso(9.1, 7.8, 24), [x2, y2] = iso(11.9, 7.8, 24), my = Math.min(y1, y2) - 14;
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.classList.add("pp-ball"); g.dataset.depth = 18.9;
+  g.innerHTML = `<circle r="2.6" fill="#fff" stroke="#999" stroke-width=".5"><animate attributeName="cx" values="${x1};${x2};${x1}" dur="1.1s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="${y1};${my};${y2};${my};${y1}" dur="1.1s" repeatCount="indefinite"/></circle>`;
+  ents.appendChild(g); sortDepth();
 }
 function labLine(b, k) {
   const w = S.wallets, e = S.analytics && S.analytics.edge, late = e && (e.strategies || []).find(s => s.source === "late");
@@ -3909,11 +4001,11 @@ function quietFor(mint) {
   for (const col of ["new", "stretch"]) { const r = PL.data && (PL.data[col] || []).find(x => x.mint === mint); if (r) return r.last_trade_s ?? Infinity; }
   return null;                                                  // unknown: the bot doesn't track it yet
 }
-function trBuy(mint, sol) {
+function trBuy(mint, sol, hand = false) {
   if (!isMint(mint)) { toast("Paste a contract address first", "bad"); $("tr-ca").focus(); return; }
   if (!(sol > 0)) { toast("Pick an amount", "bad"); return; }
-  if (!liveConfirm(`Buy ${sol} SOL of ${tokenName(mint).replace(/<[^>]+>/g, "")}`)) return;
-  if (send({action: "m_buy", mint, sol})) buyTips(mint, sol);
+  if (!liveConfirm(`Buy ${sol} SOL of ${tokenName(mint).replace(/<[^>]+>/g, "")}${hand ? " and give it to the bots" : ""}`)) return;
+  if (send({action: "m_buy", mint, sol, hand})) buyTips(mint, sol);
 }
 function trSell(mint, fraction) {
   if (!liveConfirm(`Sell ${Math.round(fraction * 100)}% of ${tokenName(mint).replace(/<[^>]+>/g, "")}`)) return;
@@ -3959,13 +4051,18 @@ function renderTradePanel(s) {
   const w = s.watching.find(x => x.mint === mint), p = s.positions.find(x => x.mint === mint), q = (m.queue || []).includes(mint);
   const i = TR.info && TR.info.mint === mint ? TR.info : null;
   const sym = (w && w.symbol) || (p && p.symbol) || (i && i.symbol) || short(mint);
-  const facts = p ? `<b class="${cls(p.gain_pct)}">${pct(p.gain_pct, 1)}</b> · worth ${sol(p.value_sol)}${U()} · held ${dur(p.held_s)}`
+  const facts = p ? `<b class="${cls(p.gain_pct)}">${pct(p.gain_pct, 1)}</b>${p.entry_mcap_sol ? ` · in at <b>${mcUsd(p.entry_mcap_sol)}</b> MC, now ${mcUsd(p.mcap_sol)}` : ""} · worth ${sol(p.value_sol)}${U()} · held ${dur(p.held_s)}`
     : w ? `curve ${(w.progress * 100).toFixed(0)}% · MC ${mcap(w.mcap_sol)} · ${w.buyers} buyers · <span title="What the bot's own rules make of it">bot's take: ${esc(w.status)}, score ${fx(w.score, 0)}</span>`
     : i ? `${esc(i.stage || "")}${i.mcap_usd ? " · MC $" + fmtUsd(i.mcap_usd) : ""}${i.curve_pct != null ? ` · curve ${fx(i.curve_pct, 0)}%` : ""}` : "looking it up…";
   setHTML($("tr-coin"), `<span class="tok" data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym, "md")}<b>${esc(sym)}</b></span>
     <span class="note">${facts}</span>${q ? `<span class="tag late">queued: buying at its first trade</span>` : ""}${p ? `<span class="tbar-row">${sellBtns(mint)}</span>` : ""}`);
   setHTML($("tr-metrics"), tradeMetrics(i));
   $("tr-buy").textContent = p ? "＋ Add" : "Buy"; $("tr-buy").title = p ? "Add this amount to your open position" : "";
+  const g = $("tr-give"), mine = p && p.source === "manual";                    // give it to the bots, or take it back
+  g.hidden = !!p && !mine;
+  g.textContent = mine ? (p.bot ? "✋ Take back" : "🤖 Give to bots") : "🤖 Buy & give to bots";
+  g.dataset.mode = mine ? (p.bot ? "take" : "give") : "buygive";
+  g.title = mine && p.bot ? "Your own exits apply again" : rideText(s) + (mine ? "" : " Buys the amount picked, then hands it over once it fills.");
   if (S.tab === "live" && Date.now() - (TR.looked || 0) > 20000) { TR.looked = Date.now(); send({action: "lookup", mint}); }
   renderOrderForm(s);
 }
@@ -5574,6 +5671,11 @@ $("mem-add").onclick = memAdd;
 $("tr-ca").addEventListener("input", e => { const v = e.target.value.trim(); if (isMint(v) && v !== TR.mint) setTradeMint(v); else if (!v) { TR.mint = ""; if (snap) renderTradePanel(snap); trChart(); } });
 $("tr-amt").addEventListener("input", () => { TR.amt = null; if (snap) renderTradePanel(snap); });
 $("tr-buy").onclick = () => trBuy(TR.mint || $("tr-ca").value.trim(), TR.amt || parseFloat($("tr-amt").value));
+$("tr-give").onclick = () => {
+  const mint = TR.mint || $("tr-ca").value.trim(), mode = $("tr-give").dataset.mode;
+  if (mode === "give" || mode === "take") { send({action: "m_hand", mint, on: mode === "give"}); if (mode === "give") IO.events.push({kind: "handover", n: 1}); return; }
+  trBuy(mint, TR.amt || parseFloat($("tr-amt").value), true);
+};
 $("xf-auto").onchange = e => send({action: "x_auto", on: e.target.checked});
 $("pf-add").onclick = () => { const a = $("pf-addr").value.trim(); if (!a) { $("pf-addr").focus(); return; }
   send({action: "pf_add", address: a, label: $("pf-label").value, mine: $("pf-mine").checked}); $("pf-addr").value = ""; $("pf-label").value = ""; setTimeout(loadPortfolio, 2500); };
@@ -5611,12 +5713,13 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.anmc) { S.anMc = d.anmc; if (S.analytics) renderAnalytics(S.analytics); return; }
   if (d.lcpin) { lcPin(d.lcpin); if (S.drawer === d.lcpin) t.textContent = `📈 ${lcPinned(d.lcpin) ? "Unpin" : "Pin"}`; return; }
   if (d.kolref) { t.disabled = true; send({action: "kols_refresh"}); setTimeout(() => t.disabled = false, 8000); return; }
   if (d.lcwin != null) { LC.win = +d.lcwin; store.set("lc-win", LC.win); if (snap) renderCharts(snap); return; }

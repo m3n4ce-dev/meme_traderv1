@@ -4,6 +4,34 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #43: Market cap first; a lived-in house; give to the bots from Manual trade
+
+**Owner's request:** "Show what market cap we got into each coin at… market cap is a main metric to track."
+
+**Market cap in and out of every trade:**
+- **Recorded on every trade:** each closed trade records `entry_mcap_sol/usd` and `exit_mcap_sol/usd`, and positions carry their entry and current market cap.
+- **Where it shows:**
+  - position cards (`MC $7.3K → $21K`);
+  - the trade panel ("in at $X MC, now $Y");
+  - the Charts tab;
+  - a `MC in → out` column in Closed trades;
+  - Analytics → **By entry market cap** (All / You / Bots; buckets from <$5K to $160K+).
+- **The live charts' scale** is now market cap in dollars, not a tiny per-token price. The entry line reads "in at $X", and markers say the market cap they happened at.
+- **Older trades:** `python -m meme_trader.sniper mcap-backfill` rebuilt the market caps of trades from before this was logged, from the recorded feed (each trade line carries the curve's reserves). 294 of 328 were filled; the rest had no feed coverage. They're stored in `data/mcap_backfill.json`, applied at startup, and their dollars use today's SOL price.
+
+**The house is lived in** ("make some tasks in other parts of the buildings so it's not stale"):
+- **Multi-step tasks:**
+  - **Lab:** run a backtest (bench → rack → edge board), read the wallet study, service the rack, compare exits.
+  - **Lounge:** ping-pong for two (with a ball), the arcade, a fridge run then the TV, a nap, watching the pulse.
+- **More visits:** trips are 2–3x more frequent, and a quiet house gets a visitor now and then. A character set to "Stays put" never goes.
+- **The room tabs** say who's doing what.
+
+**Give to bots from Manual trade:** "🤖 Give to bots" (or "✋ Take back") on a coin you hold. On one you don't, "🤖 Buy & give to bots" buys the amount picked and the bots take it over once it fills; `hand_after` remembers it until then.
+
+**The chat and how-to questions:** a question that reads like "how do I / where is / turn off / hide…" now gets the matching manual sections attached automatically. It once answered "I don't have a tool" about a button.
+
+---
+
 ## 2026-10-05 — Entry #42: The chat knows the console; characters, corkboard and pinned charts
 
 **Owner's requests:**
