@@ -119,6 +119,7 @@ class Book:
         self.peak_equity = start_sol
         self.max_dd_pct = 0.0
         self.deposits: list[tuple[float, float]] = []     # paper top-ups: (ts, SOL)
+        self.kill_base = 0.0     # the kill switch's drawdown is measured from this; 0 = the starting balance
 
     @property
     def available(self) -> float:
@@ -286,6 +287,8 @@ class Engine:
         b.sol += sol
         b.start_sol += sol
         b.peak_equity += sol
+        if b.kill_base:
+            b.kill_base += sol
         b.equity_hist = deque(((t, e + sol) for t, e in b.equity_hist), maxlen=b.equity_hist.maxlen)
         b.deposits.append((self.now, sol))
         self._snap_cache = self._analytics = self._summary_cache = None
@@ -1438,7 +1441,7 @@ class Engine:
                 and not self.pending and not self.book.reserved:
             self._last_cash_check = self.now
             await self._dispatch(self.check_cash())
-        dd = (1 - eq / self.book.start_sol) * 100
+        dd = (1 - eq / (self.book.kill_base or self.book.start_sol)) * 100
         if not self.book.halted and dd >= self.p.capital.max_drawdown_pct:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
@@ -1560,7 +1563,7 @@ class Engine:
         state = {"saved_at": time.time(), "mode": self.mode,
                  "book": {"sol": b.sol, "start_sol": b.start_sol, "day": b.day, "day_pnl": b.day_pnl,
                           "halted": b.halted, "closed": b.closed[-500:], "reserved": b.reserved,
-                          "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct,
+                          "peak_equity": b.peak_equity, "max_dd_pct": b.max_dd_pct, "kill_base": b.kill_base,
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
@@ -1584,6 +1587,7 @@ class Engine:
         self.book.reserved = {m: v for m, v in (b.get("reserved") or {}).items() if m in open_buys}
         self.book.peak_equity = b.get("peak_equity", self.book.start_sol)
         self.book.max_dd_pct = b.get("max_dd_pct", 0.0)
+        self.book.kill_base = b.get("kill_base", 0.0)
         self.book.deposits = [tuple(x) for x in b.get("deposits") or []]
         self.book.equity_hist.extend(tuple(x) for x in b.get("equity_hist") or [])
         self.defense_until = (d.get("defense") or {}).get("until", 0.0)
@@ -2337,6 +2341,26 @@ class Engine:
         if mint in self.positions and mint in self.tokens:
             await self._sell(self.tokens[mint], self.positions[mint], 1.0, "manual sell")
 
+    def kill_at(self) -> float:
+        """Equity (SOL) at which the drawdown kill switch trips."""
+        return (self.book.kill_base or self.book.start_sol) * (1 - self.p.capital.max_drawdown_pct / 100)
+
+    def clear_halt(self, who: str = "dashboard") -> str:
+        """The owner lifts the kill switch. If the account is still past the drawdown limit, the limit is measured
+        from today's equity from now on, so it doesn't trip again at once. Never the agent's call. '' or why not."""
+        if who != "dashboard":
+            return "only the owner can lift the kill switch, from the dashboard"
+        if not self.book.halted:
+            return "trading isn't halted"
+        eq, base = self.equity(), self.book.kill_base or self.book.start_sol
+        if base and (1 - eq / base) * 100 >= self.p.capital.max_drawdown_pct - 1:
+            self.book.kill_base = eq
+        was, self.book.halted = self.book.halted, ""
+        self._snap_cache = None
+        self.save_state()
+        self.say("info", f"kill switch lifted by the owner (was: {was}); it trips again at {self.kill_at():.3f} SOL")
+        return ""
+
     async def kill(self) -> None:
         self.book.halted = self.book.halted or "manual kill switch"
         for mint in list(self.positions):
@@ -2767,7 +2791,8 @@ class Engine:
             "pulse": [list(r) for r in self.pulse][-60:], "deposits": self.book.deposits[-20:],
             "risk": self.risk_info(),
             "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
-                       "kill_dd_pct": self.p.capital.max_drawdown_pct},
+                       "kill_dd_pct": self.p.capital.max_drawdown_pct, "kill_base": self.book.kill_base,
+                       "kill_at_sol": self.kill_at(), "start_sol": self.book.start_sol},
             "feed": {"realtime": self.feed.realtime, "host": getattr(self.feed, "host", ""),
                      "degraded": bool(getattr(self.feed, "degraded", False)),
                      "degraded_reason": getattr(self.feed, "degraded_reason", ""),
