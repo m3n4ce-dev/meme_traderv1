@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #35: SOL or dollars, and does the wallet recorder slow the bot?
+
+- **◎ SOL / $ USD switch** (owner: "toggle between SOL format and current $ format"): a header button, or the `u` key, remembered per browser.
+  - **What converts** (at the live SOL price): equity, P&L, position values, costs and proceeds, the loss limit, the kill-switch level, market caps, money flows, per-token prices on the charts and their axes, the room's talk and the P&L board, and Analytics.
+  - **What stays in SOL:** order sizes, presets and deposits, because orders are sized in SOL. In dollar mode the trade panel shows what the amount is worth.
+  - **Not converted:** the Portfolio tab shows both, and posts to X keep SOL.
+  - **How:** the two amount helpers (`sol`, `signed`) follow the switch, so every place using them converts.
+- **The wallet recorder and latency** (the owner paused it hoping to cut lag):
+  - **Load:** it uses ~0.6% of the machine's CPU and streams ~1.2 MB/s, but from PublicNode, a different server from the bot's feed (api.mainnet-beta). They share no rate limit. The bot's own feed is ~0.17 MB/s.
+  - **When the lag happens:** the feed's "behind the chain" switches follow pump.fun's busy hours: 46–104 an hour from 11:00 to 16:00 CDT, 1–11 an hour otherwise.
+  - **The pause test:** during the recorder's 14:57–15:57 pause there were 46, against 47 the hour before and 49 the hour after. No effect.
+  - **Pause works:** it closes the stream. (I first misread a measurement taken just after the owner resumed it.)
+  - **What would cut the lag:** a better trade-feed endpoint than the free public RPC in busy hours, not pausing the study.
+
+---
+
 ## 2026-10-05 — Entry #34: GitHub refresh: README, keys, a one-row header, a correction
 
 - **README rewritten for what the bot does now:**

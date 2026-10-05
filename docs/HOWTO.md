@@ -72,6 +72,7 @@ Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls
   - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
   - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
   - Balances use your `SOLANA_RPC_URL` if you set one. The public endpoint is slow for big wallets.
+- **◎ SOL / $ USD** (header button, or the `u` key): every amount in SOL or in dollars at the current SOL price. Orders are still sized in SOL.
 - **💡 Tips:** after your own trades, a small tip can pop up: a big share of the account, red flags, a quiet coin, a losing streak, or a quick flip that only paid fees. They never block a trade. "Don't show this one again" or "Turn tips off" (Ctrl+K → tips brings them back).
 - **Graduated coins** (Pulse → Graduated, or a pasted address): paper trades them at the PumpSwap pool price from DexScreener, refreshed every 10 s. Live trading of graduated coins isn't wired up yet.
 - **>_ Terminal** (the `>_` button, or the backtick key `` ` ``): type commands instead of clicking. `help` lists them: `status`, `pos`, `buy BONK 0.1`, `sell all`, `alert BONK >= 1m`, `limit buy BONK <= 50k 0.1`, `hand all`, `away on`, `risk 2`, `desk on`, `unhalt`, `log 20`, `ask …` and more. Up arrow brings back earlier commands and Tab completes. It only runs bot commands (the same as the buttons), not system commands.
