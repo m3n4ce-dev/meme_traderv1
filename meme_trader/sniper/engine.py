@@ -232,6 +232,8 @@ class Engine:
         self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
         self._last_huddle, self._huddling, self.huddle_error = 0.0, False, ""
         self.plan: dict = {}                                 # the team's growth plan, updated at every huddle
+        from . import kols as kolmod
+        self.kols: dict = kolmod.load(DATA / "kols.json") if self.persist else {"kols": {}}   # named on the charts
         if self.persist and (DATA / "desk_plan.json").exists():
             try:
                 self.plan = json.loads((DATA / "desk_plan.json").read_text())
@@ -851,7 +853,9 @@ class Engine:
         R = self.p.risk_adapt
         if not R.enabled:
             return
-        recent = [c for c in self.book.closed if c["source"] != "callout"][-R.lookback_trades:]
+        # the bots' own results only: callout bags aren't trades, and the owner's manual trades (even ones handed to
+        # the bots) are the owner's decisions, so their losses must not slow the bots down (or their wins speed them up)
+        recent = [c for c in self.book.closed if c["source"] not in ("callout", "manual")][-R.lookback_trades:]
         streak = 0
         for c in reversed(recent):
             if c["pnl"] > 0:
@@ -860,7 +864,8 @@ class Engine:
         window = sum(c["pnl"] for c in recent)
         if streak >= R.loss_streak or (len(recent) >= R.lookback_trades and window <= -R.window_loss_sol):
             if not self._defensive():
-                why = f"{streak} losses in a row" if streak >= R.loss_streak else f"last {len(recent)} trades {window:+.3f} SOL"
+                why = (f"{streak} losses in a row by the bots" if streak >= R.loss_streak
+                       else f"the bots' last {len(recent)} trades {window:+.3f} SOL")
                 self.defense_reason = why
                 self.say("error", f"DEFENSE MODE for {R.minutes} min ({why}): size x{R.size_mult}, "
                                   f"min score +{R.min_score_add}")
@@ -2811,6 +2816,100 @@ class Engine:
             "audit": self._audit_view(mint),
         }
 
+    WHALE_SOL = 2.0          # a single trade this big gets a marker on the live chart
+
+    def _study_wallets(self) -> dict[str, str]:
+        """Wallets the wallet study qualified (data/wallets/view.json), re-read at most every 5 minutes."""
+        c = getattr(self, "_study_cache", None)
+        if c and time.time() - c[0] < 300:
+            return c[1]
+        out: dict[str, str] = {}
+        try:
+            from ..wallets.recorder import DATA as WDATA
+            v = json.loads((WDATA / "view.json").read_text())
+            for r in v.get("wallets", []):
+                out[r["wallet"]] = f"study wallet{' (cluster ' + str(r['cluster']) + ')' if r.get('cluster') else ''}"
+        except (OSError, ValueError, KeyError, ImportError):
+            pass
+        self._study_cache = (time.time(), out)
+        return out
+
+    def chart_data(self, mint: str, since: float = 0.0) -> dict | None:
+        """A coin's live chart: every trade the bot has seen on it (price in SOL per token, newest last), and
+        markers: your and the bots' entries and exits on it (this run's ledger), and trades by wallets worth
+        seeing (the dev, tracked leaders, the wallet study's qualified wallets, smart-money signals, whales).
+        since: only trades after this time (the dashboard streams updates); markers always come whole."""
+        s = self.tokens.get(mint)
+        if s is None:
+            return None
+        tr = list(s.trades)
+        pts = [[round(t, 2), p] for t, p, *_ in tr if t > since and p > 0]
+        # who's who on this coin
+        named: dict[str, tuple[str, str]] = {}
+        for w, lab in self._study_wallets().items():
+            named[w] = ("smart", lab)
+        for x in s.socials:
+            if x.source == "wallet":
+                named[x.author] = ("smart", "smart-money wallet")
+        for w, name in (self.kols.get("kols") or {}).items():
+            named[w] = ("kol", f"KOL {name}")
+        for w, lead in self.leaders.leaders.items():
+            named[w] = ("smart", f"copy leader {getattr(lead, 'label', '') or ''}".strip())
+        if s.creator:
+            named[s.creator] = ("dev", "dev")
+        marks = []
+        for t, p, side, sol, who in tr:
+            kind, lab = named.get(who, (None, ""))
+            if kind is None and sol >= self.WHALE_SOL:
+                kind, lab = "whale", "whale"
+            if kind:
+                marks.append({"t": round(t, 2), "p": p, "side": side, "who": kind,
+                              "label": f"{lab} {'bought' if side == 'buy' else 'sold'} {sol:.2f} SOL", "wallet": who})
+        keep = [m for m in marks if m["who"] != "whale"]   # dev, KOLs and smart wallets always; whales, the latest
+        marks = sorted(keep[-80:] + [m for m in marks if m["who"] == "whale"][-30:], key=lambda m: m["t"])
+
+        def at(t: float) -> float:                  # the coin's price at a moment (nearest trade before it)
+            best = tr[0][1] if tr else 0.0
+            for tt, p, *_ in tr:
+                if tt > t:
+                    break
+                best = p
+            return best
+
+        def owner(src: str, bot: str = "") -> tuple[str, str]:
+            if src == "manual":
+                return ("you", "you") if not bot else ("you", "you (bots riding it)")
+            return ("bot", f"bot ({src})")
+
+        for r in self.book.closed:
+            if r["mint"] != mint:
+                continue
+            k, lab = owner(r["source"])
+            marks.append({"t": round(r["opened"], 2), "p": at(r["opened"]), "side": "buy", "who": k, "label": f"{lab} bought {r['cost']:.2f} SOL"})
+            marks.append({"t": round(r["closed"], 2), "p": at(r["closed"]), "side": "sell", "who": k,
+                          "label": f"{lab} sold, {r['pnl_pct']:+.0f}% ({r['exit'][:40]})"})
+        pos = self.positions.get(mint)
+        if pos is not None:
+            k, lab = owner(pos.source, pos.bot or "")
+            marks.append({"t": round(pos.opened_at, 2), "p": pos.entry_price, "side": "buy", "who": k,
+                          "label": f"{lab} bought {pos.initial_cost_sol:.2f} SOL (open)"})
+            for t, _sol, _tok, p in pos.adds or []:
+                marks.append({"t": round(t, 2), "p": p, "side": "buy", "who": k, "label": f"{lab} added {_sol:.2f} SOL"})
+            for t, why, _tok, sol in pos.exits or []:
+                marks.append({"t": round(t, 2), "p": at(t), "side": "sell", "who": k, "label": f"{lab} sold part for {sol:.3f} SOL ({why[:40]})"})
+        marks.sort(key=lambda m: m["t"])
+        return {"mint": mint, "symbol": s.symbol, "pts": pts, "marks": marks, "now": round(self.now, 2),
+                "price": s.curve.price, "entry": pos.entry_price if pos else None,
+                "position": None if pos is None else {"source": pos.source, "bot": pos.bot or "",
+                                                       "gain_pct": round(pos.gain_pct(s.curve.price), 1),
+                                                       "cost_sol": pos.initial_cost_sol}}
+
+    async def refresh_kols(self) -> str:
+        """The owner asked for the KOL list: fetch kolscan.io's leaderboard once. '' or why not."""
+        from . import kols as kolmod
+        self.kols, err = await kolmod.refresh(DATA / "kols.json")
+        return err
+
     def _audit_view(self, mint: str) -> dict | None:
         a = self.audit.get(mint)
         if a is None:
@@ -2993,6 +3092,7 @@ class Engine:
             })
         return {
             "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
+            "kols": {"n": len(self.kols.get("kols") or {}), "fetched": self.kols.get("fetched")},
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},

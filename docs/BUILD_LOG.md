@@ -4,6 +4,73 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #39: Live charts, the owner's picks vs a volume rule, and what KOLs are worth
+
+**Owner's request:** "I bought these and took profit and defense mode turned on still. Look at what I did and also figure out an algo for volume and transaction counts", then "show previous entries and important wallet entries on a chart, or one chart page for all held coins; it still seems super slow", then "check out KOL scans".
+
+### Changes
+
+- **Defense mode counted the owner's trades:**
+  - **The bug:** it looked at the last 10 closed trades of any kind except callouts. The owner's manual losing run put the *bots* on half size, with a higher entry bar, while the owner was +27%.
+  - **The fix:** it now counts only the bots' trades (`source` not manual or callout). The banner says the owner's trades aren't affected. Regression test added.
+- **"Super slow" was measured, not guessed:**
+  - The page redraws in ~19 ms with no long tasks.
+  - The bot's endpoints answer in ~1 ms.
+  - The feed runs ~1.3 s behind the chain.
+  - **The slow part was the charts:** the trade panel polled every 2.5 s and the coin popup every 2 s, so a price could be ~4 s old.
+  - **Now:**
+    - The page sends `chart_sub` with the coins it shows: the trade panel's coin, the open popup's, and every held coin on the new Charts tab.
+    - The server streams each of their trades within ~0.25 s (`ticks`; only new trades after the first full history).
+    - The charts are drawn by time (`tickChart`).
+- **Markers on the chart** (`Engine.chart_data`):
+  - **Your and the bots' entries and exits:** this run's ledger, including earlier round trips on the same coin and partial sells.
+  - **Dev trades.**
+  - **KOLs, named.**
+  - **Smart wallets:** the wallet study's qualified wallets, copy leaders and smart-money signals.
+  - **Whales:** single trades of 2 SOL or more.
+  - Hovering a marker shows who.
+- **📈 Charts tab** (key 9): every open position's live chart, with P&L, a 1m/5m/15m/All window, and Sell 25/50/100% buttons.
+- **Helius was checked as a faster feed and not used.** Its free plan has 1M credits a month, and standard websockets cost 2 credits per 0.1 MB. The bot's full pump.fun trade stream is ~20 GB a day, so the month's credits would last ~2½ days.
+
+### Studies
+
+**The owner's buys vs the market** (recorded feed replayed through the bot's tracker; 19 evening buys matched):
+- **Where the buys sit:** in the busiest ~10% of coins at that moment (median percentile ~90 for buyers in 20 s, net inflow, 60-s volume and the 60-s price move). The winners were in the top ~5%.
+- **Where the curve was:** mid-curve (median ~55%).
+
+**A mechanical volume / transaction-count rule:**
+- **Method:**
+  - Thresholds on buyers in 20 s, net inflow in 20 s, volume in 60 s, buy/sell ratio, price change, near-high and a curve band, plus the usual rug caps (28,102 rules).
+  - Each rule fires once per coin. It's filled 2.5 s later at the next real trade, with ~7% round-trip cost.
+  - Searched on Oct 4 (24 h), then tested on Oct 3 and Oct 5 (days the search never saw).
+- **Results:**
+  - **Fixed targets** (scalp +30/−15, the owner's style +40/−25, +60/−30, +100/−35) all lost on the unseen days, typically −6% to −14% a trade.
+  - **Trailing exits** came closest. The best rule (net inflow over 20 s ≥ 8 SOL, 60-s volume ≥ 40 SOL, buy/sell ≥ 2, within 20% of the high, curve 30–95%), with a trail armed at +50% and set 25% off the high:
+    - Oct 4 (the search day): +9.9% a trade;
+    - Oct 3: +1.8% [−8.1, +13.4];
+    - Oct 5: −2.3% [−16.3, +9.6].
+- **Conclusion:** not an edge. Whatever made the owner's picks work isn't captured by these counts alone. Candidates are timing within the move, and exits sold into spikes by hand.
+
+**KOLScan** (kolscan.io: ~570 named KOL wallets and a leaderboard):
+- **Data:** in our recordings, 241 of those wallets made 4,449 first buys on pump.fun bonding-curve coins.
+- **They are fast sellers:** median hold 34 s; 66% sold within a minute and 95% within 5 minutes.
+- **Copying them loses, mirroring their exits:**
+  - at their own price: +1.6% a trade;
+  - 1 s late: −12.6% [−14.1, −11.1];
+  - 2.5 s late: −13.9%;
+  - 5 s late: −15.0%;
+  - holding 5 minutes: −17.6%.
+- **Picking the "good" ones doesn't help:**
+  - the monthly top 50 copied for −12.7%;
+  - wallets that made over +5% a copy on Oct 3 lost −9.3% on Oct 4;
+  - the best of Oct 3–4 lost −11.9% on Oct 5.
+- **So KOLs are shown, not followed:**
+  - The live charts name them.
+  - Buying within 2 minutes of a KOL buy shows a tip with these numbers (tips only, never a block).
+  - The list is fetched only on the owner's click or `python -m meme_trader.sniper kols`, into the git-ignored `data/kols.json`.
+
+---
+
 ## 2026-10-05 — Entry #38: The bots talk to each other, as a team with a plan
 
 - **Desk huddles** (owner: "do the bots talk to each other? It doesn't seem like it… they should be close to AGI… they should think how can we grow this account… there has to be a strategy or they are useless"):

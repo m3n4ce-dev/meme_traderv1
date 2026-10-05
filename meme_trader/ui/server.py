@@ -328,6 +328,35 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
         await send(jsonsafe.dumps({"type": "hello", "ui": ui_version()[0]}))
         task = asyncio.create_task(pump())
+        # live charts: the page names the coins it's charting; every trade on them goes out within ~0.25 s
+        # (the full snapshot only goes out once a second, and the charts used to poll every 2-2.5 s)
+        charts: dict[str, float] = {}               # mint -> time of the last trade sent
+
+        async def chart_pump():
+            marks_seen: dict[str, str] = {}
+            while not sock.closed:
+                await asyncio.sleep(0.25)
+                out = {}
+                for m in list(charts)[:12]:
+                    d = engine.chart_data(m, charts[m])
+                    if d is None:
+                        continue
+                    mk = json.dumps(d["marks"])[-4000:]
+                    d["full"] = charts[m] == 0.0              # the whole history: the page replaces what it had
+                    fresh = d["full"] or marks_seen.get(m) != mk
+                    if d["pts"] or fresh:
+                        if d["pts"]:
+                            charts[m] = d["pts"][-1][0]
+                        elif charts[m] == 0.0:
+                            charts[m] = 0.001
+                        if not fresh:
+                            d.pop("marks")
+                        marks_seen[m] = mk
+                        out[m] = d
+                if out:
+                    await send(jsonsafe.dumps({"type": "ticks", "charts": out}))
+
+        chart_task = asyncio.create_task(chart_pump())
         chat_q = chat.subscribe() if chat else None
 
         async def chat_pump():
@@ -342,6 +371,14 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                         cmd = json.loads(msg.data)
                     except ValueError:
                         continue
+                    if isinstance(cmd, dict) and cmd.get("action") == "chart_sub":   # (not a bot action: just what to stream)
+                        want = [m for m in (cmd.get("mints") or []) if isinstance(m, str) and 30 <= len(m) <= 50][:12]
+                        for m in list(charts):
+                            if m not in want:
+                                charts.pop(m)
+                        for m in want:
+                            charts.setdefault(m, 0.0)
+                        continue
                     if isinstance(cmd, dict):
                         try:
                             reply = await control(cmd)
@@ -351,6 +388,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                             await send(jsonsafe.dumps({"type": "ack", "action": cmd.get("action"), **reply}))
         finally:
             task.cancel()
+            chart_task.cancel()
             if chat_task:
                 chat_task.cancel()
                 chat.unsubscribe(chat_q)
@@ -485,6 +523,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": why}
             asyncio.ensure_future(engine.huddle("the owner called a meeting"))
             return {"ok": True, "text": "The team is gathering at the AI table…"}
+        if action == "kols_refresh":                      # the owner's click: one fetch of kolscan.io's list
+            err = await engine.refresh_kols()
+            n = len(engine.kols.get("kols") or {})
+            return {"ok": not err, "text": err or f"{n} KOL wallets loaded: the live charts name them when they trade"}
         if action == "huddle_apply":                      # the owner approves one of the team's setting changes
             try:
                 err = engine.apply_huddle_action(str(cmd.get("id") or ""), int(cmd.get("i")))
