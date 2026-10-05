@@ -178,6 +178,10 @@ def test_real_router_prices_ride_along_and_no_route_means_no_buy(monkeypatch):
     asyncio.run(x.step(time.time()))
     p = next(iter(x.positions.values()))
     assert p["real"]["buy_gap_pct"] is not None and abs(p["real"]["buy_gap_pct"]) < 2     # the router agrees with the paper fill
+    assert p["dec"] == 18                                                         # decimals, from the router's dollar value
+    state["price"] = 0.0011
+    asyncio.run(x.refresh(time.time() + 5))
+    assert p["px_src"] == "router" and abs(p["last"] / 0.0011 - 1) < 0.02       # held coins are priced by the router
     state["price"] = 0.0008
     asyncio.run(x.step(time.time() + 20))
     row = e.book.closed[-1]
