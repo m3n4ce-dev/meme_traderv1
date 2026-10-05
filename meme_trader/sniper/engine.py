@@ -3096,6 +3096,8 @@ class Engine:
 
         cfg = self.p.get("lab") or {}
         x["status"], x["started"] = "running", time.time()
+        x["baseline"] = self.lab_baseline()              # compared with the settings as they are now, landing like the bot
+        x["now"] = x["baseline"].get(x["key"], x["now"])
         out = DATA / "lab" / f"{x['id']}.result.json"
         out.unlink(missing_ok=True)
         cmd = [sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"]]
