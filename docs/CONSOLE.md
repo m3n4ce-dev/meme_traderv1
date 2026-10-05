@@ -196,7 +196,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **Open it:** on the trading floor, click the corkboard on the right wall. It zooms in.
 - **Add a note:** type a note, an X or article link, or a contract address, plus a comment if you like, then **📌 Pin it** (or Enter). The desk reads it and replies.
 - **🙈 Hide from board:** takes a note off the board; the desk still remembers it and reads it. **👁 Show on board** puts it back.
-- **🗑 Delete:** removes it for good. Click it twice to confirm.
+- **🗑 Delete:** removes it for good. Press the 🗑 Delete button, then press it again (it asks "Delete for good?") to confirm.
 - **What the board shows:** the newest 6 notes that aren't hidden. Desk → Teach the desk shows all of them, with the personas' replies.
 
 ## The AI desk and its huddles
