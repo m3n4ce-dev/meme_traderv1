@@ -231,11 +231,12 @@ class OpenAICompat:
         body = {"model": model, "temperature": 0.3, "max_tokens": max_tokens, "response_format": {"type": "json_object"},
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {self.key}"} if self.key else {})}
+        tin = tout = 0
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
-            for attempt in (0, 1):
+            for attempt in range(3):
                 async with s.post(self.base + "/chat/completions", json=body, headers=headers) as r:
                     d = await r.json(content_type=None)
-                if r.status == 400 and attempt == 0 and "response_format" in json.dumps(d):
+                if r.status == 400 and "response_format" in body and "response_format" in json.dumps(d):
                     body.pop("response_format")              # the server doesn't do JSON mode: ask in words instead
                     continue
                 if r.status >= 300:
@@ -243,9 +244,44 @@ class OpenAICompat:
                     msg = err.get("message") if isinstance(err, dict) else err
                     raise RuntimeError(f"HTTP {r.status}: {str(msg)[:200]}")
                 u = d.get("usage") or {}
-                return parse_json(d["choices"][0]["message"]["content"]), int(u.get("prompt_tokens") or 0), \
-                    int(u.get("completion_tokens") or 0)
+                tin, tout = tin + int(u.get("prompt_tokens") or 0), tout + int(u.get("completion_tokens") or 0)
+                ch = (d.get("choices") or [{}])[0]
+                msg = ch.get("message") or {}
+                text = msg.get("content") or ""
+                thought = msg.get("reasoning_content") or msg.get("reasoning") or ""
+                if not text.strip() and thought and ch.get("finish_reason") == "length" and body["max_tokens"] < 4000:
+                    body["max_tokens"] = min(body["max_tokens"] * 3, 4000)   # a thinking model ran out of room: once more
+                    continue
+                if not text.strip():
+                    raise RuntimeError("the model spent its whole answer budget thinking and gave no reply: "
+                                       "pick an Instruct (non-thinking) model" if thought else "the model sent an empty reply")
+                return parse_json(text), tin, tout
         raise RuntimeError("no answer")
+
+
+async def model_price(base_url: str, key: str, model: str) -> tuple[float, float] | None:
+    """$ per million tokens (in, out) from an OpenAI-compatible server's model list: Hugging Face's router lists
+    each provider's price (the highest live one is used, so the estimate never runs low), OpenRouter its
+    per-token price. None when the list doesn't say (GitHub Models, a local server)."""
+    import aiohttp
+
+    want = model.split(":")[0]                            # "Qwen/...:fastest" is a routing policy, not a model
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            async with s.get(base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {key}"} if key else {}) as r:
+                d = await r.json(content_type=None)
+    except Exception:
+        return None
+    m = next((x for x in (d.get("data") or []) if isinstance(x, dict) and x.get("id") == want), None)
+    if not m:
+        return None
+    live = [p.get("pricing") for p in m.get("providers") or [] if p.get("status", "live") == "live" and p.get("pricing")]
+    if live:
+        return max(float(p.get("input") or 0) for p in live), max(float(p.get("output") or 0) for p in live)
+    pr = m.get("pricing") or {}
+    if pr.get("prompt") is not None:
+        return float(pr["prompt"]) * 1e6, float(pr.get("completion") or 0) * 1e6
+    return None
 
 
 def client_kwargs() -> dict:

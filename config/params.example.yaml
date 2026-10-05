@@ -183,7 +183,7 @@ sniper:
     take_profit_pct: 0           # sell take_profit_frac at this gain; 0 = off
     take_profit_frac: 0.5        # share of the bag sold at that take profit
     trail_pct: 0                 # once in profit, sell everything this far below the peak; 0 = off
-    sell_on_graduation: true     # the bot prices and sells on the bonding curve only: exit when it migrates
+    sell_on_graduation: true     # live only: exit when a coin migrates (its price then updates every 10 s); paper keeps it
     queue_s: 60                  # a coin with no live price yet: buy it when its first trade shows up, within this
   desk:                          # AI trading desk (Claude persona agents vote on entries; needs ANTHROPIC_API_KEY)
     enabled: false               # TBD - turn on once the key is set
@@ -197,6 +197,10 @@ sniper:
     max_price_move_pct: 20       # skip if price ran this much while the desk deliberated
     price_in_per_mtok: 4.0       # for the cost meter on the dashboard (USD)
     price_out_per_mtok: 20.0
+    provider: anthropic          # anthropic | github | huggingface | openrouter | local (Desk -> AI desk model)
+    base_url: ""                 # other providers: their server (blank = the provider's default)
+    other_price_in_per_mtok: 0   # other providers: $ per million tokens, looked up when you pick a model
+    other_price_out_per_mtok: 0
     note_replies: true           # every persona reads each note you save (Teach the desk) and replies; 4 calls a note
     note_effort: low             # thinking effort for those replies
 
