@@ -621,3 +621,42 @@ def test_coins_the_desk_passes_are_followed_by_the_gate_audit(monkeypatch):
     s.price_known = True
     asyncio.run(e._desk_then_buy(s, "late", 60, 0.1, [], "late", "", 0.0))
     assert e.audit[s.mint][0] == "AI desk passed (graduation): 3 of 4 said buy"
+
+
+def test_the_desk_can_think_with_cheaper_or_local_models(monkeypatch):
+    """Owner: 'an option to add local models or something cheaper' (and GitHub Models / Hugging Face)."""
+    from meme_trader.config import Params
+    from meme_trader.sniper import desk as deskmod
+
+    for k in ("ANTHROPIC_API_KEY", "GITHUB_MODELS_TOKEN", "HF_TOKEN", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    base = dict(P.sniper.desk)
+    assert "Anthropic" in deskmod.provider_ready(Params(base))
+    assert "GITHUB_MODELS_TOKEN" in deskmod.provider_ready(Params({**base, "provider": "github"}))
+    assert deskmod.provider_ready(Params({**base, "provider": "local"})) == ""          # no key for a local server
+    assert deskmod.model_of(Params({**base, "provider": "github"})) == "openai/gpt-4.1-mini"   # not a Claude id
+    assert deskmod.parse_json('Sure! ```json\n{"vote": "buy", "conviction": 70}\n```') == {"vote": "buy", "conviction": 70}
+
+    calls = []
+
+    async def fake_chat_json(self, model, system, user, max_tokens=700):
+        calls.append((self.base, model, "JSON object" in system))
+        return {"vote": "BUY", "conviction": 140, "reasons": ["flow"], "red_flags": []}, 900, 80
+    monkeypatch.setattr(deskmod.OpenAICompat, "chat_json", fake_chat_json)
+    d = deskmod.Desk(Params({**base, "enabled": True, "provider": "local", "model": "qwen2.5:7b"}))
+    assert d.enabled and d.compat is not None and d.client is None
+    v = asyncio.run(d._ask("veteran", {"symbol": "X"}))
+    assert (v.vote, v.conviction, v.error) == ("buy", 100, "") and calls[0] == ("http://127.0.0.1:11434/v1", "qwen2.5:7b", True)
+    assert d.cost_usd() == 0.0 and d.calls == 1
+
+    e = engine()
+    saved = []
+    e.persist = True
+    monkeypatch.setattr(e, "save_setting", lambda k, v, path=None: saved.append((k, v)))
+    assert e.set_desk_brain("github") == "" and e.p.desk.model == "openai/gpt-4.1-mini"
+    assert ("desk.provider", "github") in saved
+    assert "http" in e.set_desk_brain("local", "llama3.2", "ftp://nope")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-test")
+    assert e.set_desk_brain("anthropic", "claude-haiku-4-5") == ""
+    b = e.desk_brain()
+    assert b["model"] == "claude-haiku-4-5" and b["per_review_usd"] < 0.02 and b["ready"] == ""
