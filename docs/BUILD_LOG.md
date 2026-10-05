@@ -4,6 +4,27 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #34: GitHub refresh: README, keys, a one-row header, a correction
+
+- **README rewritten for what the bot does now:**
+  - the edge check's results table: graduation plays +6.5% per SOL over 162 paper trades, "promising, not proven", with why;
+  - the AI desk's model choices;
+  - manual trading (chart, tips, limit orders, hand-over riding, graduated coins on paper);
+  - the terminal, Resume after a halt, Restart, and the full key list.
+  - New screenshots: most from the real-market paper bot, the terminal and AI-model panel from the demo. No video yet.
+- **`.env.example`:**
+  - It said the real market needs a PumpPortal key; it hasn't since the free on-chain feed.
+  - It now lists the AI-provider keys (GitHub Models, Hugging Face, OpenRouter), the Anthropic workspace, and the X posting keys.
+- **`scripts/start.sh edge` and `start.sh calls`** pass through to the CLI.
+- **One-row header** on screens up to 2240 px: the tab icons, the subtitle and the clock hide, and Pause and Restart shorten to icons. Measured at 1440 to 2560 px: one row. At 1280 it wraps; on phones it stacks; nothing scrolls sideways.
+- **Correction:**
+  - **The mistake:** entries #32 and #33 said live orders reach the bonding curve only. They don't: the live executor sends `pool=auto`, which routes to PumpSwap after graduation.
+  - **The reason that holds:** live still refuses graduated coins, because their price only updates every 10 s from DexScreener, too stale for real money. The messages, the guide and the log now say so.
+- **Terminal:** it no longer prints the trade panel's background coin lookups.
+- **CLAUDE.md:** the operator's facts are updated: the edge-check numbers, manual trading is the owner's, hand-over riding, and lifting a halt is the owner's call only.
+
+---
+
 ## 2026-10-05 — Entry #33: Handed-over positions ride for a runner, a chart in the trade panel, Market Pulse fixed
 
 - **Hand-over rides instead of dumping** (owner: "whenever I hand over to the bots they pretty much sell instantly. I'm trying to catch 2xs"):
@@ -14,8 +35,8 @@ A running record of decisions, research, parameters and status. Newest entries a
     - A stop 40% below the lower of the entry and the hand-over price.
     - No time, stall, momentum, dev-sold or cluster exits.
   - **Coverage:** away mode and older saved hand-overs use the same rules.
-  - **Graduated coins** keep riding on paper (the pool price). Live sells them, since its orders reach the curve only.
-  - **Manual positions on a graduated coin** are no longer auto-sold on paper ("graduated (curve only)" applies to live only), now that paper prices them.
+  - **Graduated coins** keep riding on paper (the pool price). Live sells them at graduation: its orders would reach PumpSwap (`pool=auto`), but the price after graduation only updates every 10 s.
+  - **Manual positions on a graduated coin** are no longer auto-sold on paper; the sale at graduation applies to live only, now that paper prices them.
 - **A chart in the trade panel** (owner: "whenever I click trade ... it should pop up the chart"): picking a coin opens its live price chart.
   - It refreshes every 2.5 s and marks your entry.
   - Coins the bot doesn't track show the pool's candles from the lookup.
@@ -54,7 +75,7 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **Tested on the demo with Claude:** all four personas named the same losing copy leader with its trades, the positions limit blocking entries, and the sample sizes, each from its own angle.
 - **Graduated coins on paper** (owner hit "it has graduated off the bonding curve" from Pulse's Graduated column):
   - **Paper buys:** they fill at DexScreener's PumpSwap pool price, refreshed every 10 s while held, with curve fees modelled (a bit worse than the pool's ~0.3%). A pasted address the bot never saw trading is priced the same way.
-  - **Live** refuses with a clear reason: its orders go to the bonding curve only.
+  - **Live** refuses with a clear reason. Its orders would route to PumpSwap (`pool=auto`), but a price that updates every 10 s is too stale for real money. (Corrected 2026-10-05: an earlier message wrongly said live orders reach the curve only.)
 - **Endpoint keys:**
   - **Test buttons** for the Solana RPC URL (one getSlot), the websocket URL (one slot update, then unsubscribe) and the Helius key. A result never echoes the URL, since it can hold a key.
   - **A Helius key fills in an empty RPC URL.**

@@ -2,50 +2,46 @@
 
 Paper-first memecoin trading bots for **Solana**, in two parts:
 
-- **pump.fun engine** (the main one). It watches every new pump.fun token as it launches and screens out rugs and insider launches. It trades late-curve "graduation plays" and early momentum, and can copy chosen wallets or act on calls from Telegram and X. A live dashboard shows every decision as it happens.
+- **pump.fun engine** (the main one). It watches every new pump.fun token as it launches and screens out rugs and insider launches. It trades late-curve "graduation plays" and early momentum, and can copy chosen wallets or act on calls from Telegram and X. A live dashboard shows every rule, every setting and every decision as it happens, with AI personas that vote on entries and an edge check that says whether a result is real or luck.
 - **DexScreener momentum bot.** It scans trending Solana tokens on DexScreener, any token rather than only pump.fun launches, checks them with RugCheck and a sell-back test, and trades through Jupiter.
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Tests: 144 passing](https://img.shields.io/badge/tests-144%20passing-brightgreen.svg)
+![Tests: 286 passing](https://img.shields.io/badge/tests-286%20passing-brightgreen.svg)
 ![Mode: paper by default](https://img.shields.io/badge/mode-paper%20by%20default-orange.svg)
 
 ![Live dashboard during a real-market paper run](docs/dashboard.png)
-<sub>Live view during a real-market paper run (2026-10-03): pretend money, real pump.fun data.</sub>
+<sub>Live view during a real-market paper run (2026-10-05): pretend money, real pump.fun data.</sub>
 
 > **Status: paper trading.** The bot has only been tested with pretend money so far. Most pump.fun tokens go to zero. Nothing here is financial advice. Never trade money you can't afford to lose.
 
 ## Results so far
 
-**No trading edge has been demonstrated yet.** Paper profits so far come from small samples and depend on a few big winners. The bot now has a research process built to confirm or reject one strategy at a time ([docs/RESEARCH.md](docs/RESEARCH.md)):
+**No trading edge has been proven yet.** The paper bot's own **edge check** (Analytics tab, or `scripts/start.sh edge`) judges each strategy the way a skeptical group would:
+
+| Strategy | Paper trades | Per SOL staked | Average trade (90% range) | Without its best 3 trades | Verdict |
+|---|---|---|---|---|---|
+| Graduation plays | 162 | **+6.5%** | +7.1% (+0.3% to +14.3%) | +0.39 SOL | promising, not proven |
+| Early sniper (now off) | 55 | −13.8% | −13.8% (−17.6% to −9.9%) | −1.71 SOL | losing, not by bad luck |
+
+<sub>Real market, pretend money, 2026-10-03 to 10-04. Fills are modelled: a 2.5 s delay to land, curve fees, and failed orders.</sub>
+
+Why "promising" and not more:
+- the best three graduation trades made 92% of its profit, so one missed runner changes the picture;
+- it covers only 1.5 days, and the settings changed 8 times in that span;
+- a replay of 16 h of earlier development data with realistic order delay **lost** 0.4–1.0 SOL. The two results disagree, which is why a frozen test decides.
+
+**The frozen test.** The research process ([docs/RESEARCH.md](docs/RESEARCH.md)) confirms or rejects one strategy at a time:
 - the strategy is written down and frozen first;
 - it's judged only on data recorded after freezing;
 - the costs are net and measured;
 - there are baselines and day-level uncertainty.
 
-The first candidate, `graduation-v1`, is collecting its holdout. On 16 h of development data it made +1.55 SOL at $20 a trade with instant fills. With orders landing 1–3 s after the decision, at the price they find (today's realistic delay), it **lost** 0.4–1.0 SOL instead: it misses most of its biggest winners, which run away before a delayed buy lands (BUILD_LOG #16, #18). The paper bot now models that delay.
-
-A second candidate, `wallets-v1`, tests the "follow wallets that were early on several runners" idea on coins at least 14 days old, where a few seconds of delay don't matter. Its rules were registered before any data. A recorder collects wallet-level trades for two weeks to pick the wallets, then two more weeks judge them against random coins and random wallets ([docs/WALLETS.md](docs/WALLETS.md)).
-
-Earlier paper sessions are below for history. They used tiny samples, and partly a feed later measured to run 12 s behind the chain.
-
-| Session | Data feed | Launches screened | Trades | Win rate | P&L |
-|---|---|---|---|---|---|
-| 2026-10-02, 48 min | PumpPortal (metered) | 1,959 | 7 | 29% | **+0.136 SOL** (+13.6%) |
-| 2026-10-03, 1 h | Solana on-chain logs (free) | 1,465 | 13 | 38% | **+0.164 SOL** (+16.4%) |
-
-By strategy, 2026-10-03:
-
-| Strategy | Trades | Win rate | P&L |
-|---|---|---|---|
-| Graduation plays | 5 | 60% | +0.239 SOL |
-| Early sniper | 6 | 17% | −0.074 SOL |
-| $1 callouts | 2 | 50% | −0.001 SOL |
+`graduation-v1` is collecting its holdout; its verdict is due around 2026-10-17. A second candidate, `wallets-v1`, tests "follow wallets that were early on several runners" on coins at least 14 days old, with its rules registered before any data ([docs/WALLETS.md](docs/WALLETS.md)).
 
 What's known so far:
-- **Graduation plays made the paper profit in both sessions,** but that profit depends on a few winners and on entering fast; the frozen research run will decide. The early sniper lost (off).
 - **About 8% of launches double within minutes.** The hard part is telling them apart from the ~92% that don't. The safety gates reject far more losers than winners: of 574 "serial deployer" rejects, 7% doubled before falling 30%, while 27% fell 30% first.
-- **Completeness isn't enough: a feed must also be on time.** The free on-chain feed was complete, but PublicNode delivered it ~12 s behind the chain; the public RPC is 1–2 s behind. The watchdog now checks both.
+- **Completeness isn't enough: a feed must also be on time.** The free on-chain feed was complete, but PublicNode delivered it ~12 s behind the chain; the public RPC is 1–2 s behind. The watchdog checks both and remembers which endpoint was fastest.
 
 ## What it does
 
@@ -58,16 +54,48 @@ What's known so far:
 - **Trades two main strategies:**
   - **Graduation plays:** strong momentum late on the bonding curve, sold before the token migrates.
   - **Early sniper:** confirms momentum first, then rides it. It doesn't try to win block-0 races against insiders.
-  - Optional: **copy trading** of chosen wallets (mirror their buys, or use them as a signal), **Telegram/X call signals** (contract addresses posted in channels you choose), and **$1 callout positions**.
-- **Sells after graduation too.** Exits route to the bonding curve or, once a token has migrated, to its PumpSwap pool.
+  - Optional: **copy trading** of chosen wallets, **Telegram/X call signals** (contract addresses posted in channels you choose), and **$1 callout positions**.
+- **Lets AI personas vote.** Four personas (veteran, skeptic, narrative, quant) can review every entry the rules pick before it's bought. They run on Claude, or on something cheaper or free:
+  - GitHub Models, Hugging Face, OpenRouter;
+  - a model on your own machine (Ollama, LM Studio).
+
+  The dashboard shows what a review costs (about 2 cents on Claude Opus) and has a Test button. They also read every note you save, and answer questions like "what's holding us back?" from the bot's real numbers.
 - **Manages risk:**
-  - a dollar hard cap per buy, a daily loss limit and a drawdown kill switch;
+  - one **risk dial** (Cautious to Max) scales trade size, open positions and the daily loss limit together;
+  - a dollar hard cap per buy, a daily loss limit and a **drawdown kill switch**;
+  - after a halt, **Resume trading** re-measures the kill switch from where you resumed;
   - a "defense mode" that halves size after a losing run;
   - position sizing at quarter-Kelly.
 - **Measures itself:**
-  - expectancy, profit factor and bootstrap confidence in the edge;
-  - a gate audit that checks whether each rejection rule costs more than it saves;
-  - a calibrated P(2×) prediction model, plus backtests, walk-forward sweeps and A/B comparisons on recorded data.
+  - the **edge check**: per strategy, a 90% range, the result without its best 3 trades, and day by day;
+  - the **exit lab**: every other exit rule, run in the shadows on the same entries with fees;
+  - expectancy, profit factor, and a gate audit that checks whether each rejection rule costs more than it saves;
+  - a calibrated P(2×) model, plus backtests, walk-forward sweeps and A/B comparisons on recorded data.
+- **Keeps a record nobody can rewrite.** Every 📣 call goes into a hash-chained ledger and is scored after costs at fixed horizons. You can publish the ledger's head to X or Telegram ([EDGE_PROOF.md](docs/EDGE_PROOF.md)).
+
+## Trading by hand
+
+Manual trading is yours: the bot never blocks or resizes your trades.
+- **Paste a contract address** (or press Trade on any coin) and the coin's **live price chart** opens with its metrics: price, market cap, liquidity, volume, buys vs sells, holders, dev share, RugCheck and the bot's own red flags.
+- **Buy or add, then sell:** sell 25% or 50%, take **Initials**, or **Exit**. Your positions exit only on the stop, take profit or trail you set on each card.
+- **Limit orders and alerts by market cap:** buy the dip, sell into strength, or just get pinged. They survive restarts.
+- **💡 Tips after your trades.** A small box can appear for:
+  - a big share of the account;
+  - red flags;
+  - a quiet coin;
+  - a losing streak;
+  - a quick flip that only paid fees (about 6% round trip).
+
+  They never block anything, and you can turn them off.
+- **🤖 Hand a position to the bots** (or 🚶 **Away** for all of them). They ride it for a runner:
+  - half comes out at 2x;
+  - the rest trails 30% off its peak;
+  - a stop sits 40% down;
+  - there are no time or stall exits.
+- **Graduated coins** (Pulse's Graduated column, or a pasted address) trade on paper at their PumpSwap pool price.
+- **⚡ Pulse** lists new launches, the final stretch and fresh graduates, with filters and one-click buys.
+
+![Pulse: new launches, the final stretch and fresh graduates](docs/img/pulse.png)
 
 ## How it works
 
@@ -78,7 +106,8 @@ flowchart LR
   F --> T["Token tracker<br/>curve, holders, flow"]
   T --> G{"Safety gates"}
   G -- pass --> S["Strategies<br/>graduation · sniper · copy"]
-  S --> R["Risk + sizing"]
+  S --> D["AI desk<br/>(optional vote)"]
+  D --> R["Risk + sizing"]
   R --> X["Paper or live executor"]
   F --> REC[("data/feed-*.jsonl<br/>recordings")]
   REC --> BT["backtest · sweep · compare · train"]
@@ -106,78 +135,80 @@ Step-by-step guides with screenshots: [Mac](docs/MAC_SETUP.md) · [Ubuntu, inclu
 | `scripts/start.sh demo` | Simulated market. Good for learning the dashboard; its P&L means nothing. |
 | `scripts/start.sh paper` | Real market, pretend money. Records the feed to `data/`. |
 | `scripts/start.sh doctor` | Checks packages, data feeds, keys and wallet. |
+| `scripts/start.sh edge` | The edge check in plain text, ready to paste into a group (`--days 14`, `--mode paper`). |
 | `scripts/start.sh report` | Shareable HTML report + CSV of your trades (`--mode paper` / `live`; demo, paper and live are never mixed). |
+| `scripts/start.sh calls verify` | Checks the call ledger's hash chain (`calls stats`, `calls list` too). |
 | `scripts/start.sh backtest` | Replays your recordings with the current settings. |
 | `scripts/start.sh sweep --grid exit.stop_loss_pct=20,30,40` | Walk-forward parameter tuning with a noise guard. |
 | `scripts/start.sh compare --variant "no_late: late.enabled=false"` | A/B test strategies across recorded days. |
-| `scripts/start.sh train` | Fits and grades a candidate P(2×) model on your recordings. |
-| `scripts/start.sh promote` | Deploys the candidate, only if trained on real recordings with skill on unseen launches. It stays display-only until `predict.display_only: false`. |
+| `scripts/start.sh research eval graduation-v1` | Evaluates a frozen research policy (`data`, `freeze`, `final`, `log`). |
+| `scripts/start.sh train` / `promote` | Fits a candidate P(2×) model; deploys it only with skill on unseen launches. |
 | `scripts/start.sh leaders` | Ranks wallets in your recordings worth copying. |
 | `scripts/start.sh live` | **Real money.** Locked until you complete [SETUP.md step 5](docs/SETUP.md). |
 
 Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 
-## AI operator: chat with Claude in the dashboard
+## The dashboard
 
-The engine makes split-second decisions on its own. An AI operator works one level up, through tools exposed by the running bot: it reads status, positions, the radar, token detail and analytics, and can pause or resume entries, lower risk, turn strategies off, buy or sell, and top up the paper balance, always with a stated reason.
+- **Tabs:** Live, Pulse, Desk, Calls, Chat, Portfolio, Analytics, Controls, Guide.
+  - **Ctrl+K** finds anything: tabs, coins, settings, guide pages.
+  - **✎ Arrange** lets you drag, resize and hide any panel.
+- **>_ Terminal** (the `` ` `` key): every command, typed.
+  - `status`, `pos`, `buy BONK 0.1`, `sell all`, `alert BONK >= 1m`, `limit buy BONK <= 50k 0.1`;
+  - `hand all`, `away on`, `risk 2`, `desk on`, `unhalt`, `log 20`, `ask …`.
+  - It runs bot commands only, the same as the buttons, never shell commands.
+- **↻ Restart** (next to KILL) saves everything, reloads the code and settings, and picks up where it left off.
+- **Controls:** every setting, live, with Save. API keys set and tested from the page, with Test buttons for the Anthropic key, the RPC, the websocket and Helius.
+- **Desk:** the bots as Habbo-style pixel people in an isometric trading room.
+  - The scanner carries coins to the AI table, and the personas vote out loud.
+  - The P&L board and the weather in the window follow the day.
+  - Edit the room, dress the bots, or click one to see its screen.
+- **✦ Chat:** ask Claude about the bot, or paste a contract address for a metrics card. Every action it proposes waits for your Approve. It runs Claude Code headless on your Claude plan, so no API key is needed.
 
-**In the dashboard:** open the **✦ Chat** tab (or press `c`) and type.
-- Ask it anything: "how are we doing?", "anything to sell?". It reads the bot's data before it answers.
-- Paste a token's **contract address** for an instant metrics card. It covers any Solana token, tracked or not: price, market cap, liquidity, candles, buys vs sells, top holders, mint/freeze authority, RugCheck flags, and Mayhem mode. Claude adds its read underneath.
-- **Every action shows up as a card with Approve / Decline.** Reads run without asking.
-- It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
-- Claude gets only the bot's tools here: no shell, no files, no other connectors.
+The AI operator's limits live in the bot, not in the prompt:
+- it can lower any risk setting, but never raise sizing, positions, the loss limit or the stop loss above your config;
+- it can't re-enable a strategy you turned off, switch to live, save risk settings, or press or lift the kill switch;
+- paper deposits only, capped per deposit; they count as capital, not profit;
+- its buys pass the bot's normal risk checks and are rate-limited;
+- every action carries a reason, journaled and shown on the dashboard, and asks you first.
 
-**Manual trading:** paste a contract address and Buy (or add to a position you hold); sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Paste any contract address to see its metrics first.
-
-**⚡ Pulse, limit orders, and a provable record:** Pulse shows new launches, the final stretch and fresh graduates with filters and one-click buys. Limit orders and alerts fire on market-cap levels. Every 📣 call goes into a hash-chained ledger, scored after costs at fixed horizons, and you can publish its head to X or Telegram so the record can't be rewritten ([EDGE_PROOF.md](docs/EDGE_PROOF.md)). Post calls, trade cards and proofs from the dashboard or `python -m meme_trader.social`.
-
-![Pulse: new launches, the final stretch and fresh graduates](docs/img/pulse.png)
-
-**The trading room:** on the Desk tab the agents, drawn as Habbo-style pixel people, work in an isometric room with a P&L board on the wall, and it gets dark at night. They type, walk to the coffee machine, talk about real numbers, and hand coins to each other: the scanner carries a coin to the AI table for a vote, then to the exit manager. Click any bot to zoom into its screen. Rename and dress the bots in the wardrobe, and rearrange any page with ✎ Arrange. Teach the desk with X posts, articles and contract addresses: each persona reads it and replies, and you can answer back.
-
-**Risk dial:** five levels on the Live and Controls tabs: Cautious, Normal (your settings), Bold, Aggressive and Max. Each scales trade size, open positions and the daily loss limit together. Say "more risk" in Chat and Claude asks you to approve a higher level. It can always turn the dial down, but only raises it with your click, and never above `risk.max_level`. The kill switch, stop losses and entry rules never move.
-
-**In a terminal:** the same tools load in Claude Code from `.mcp.json`.
+The same tools load in Claude Code from `.mcp.json`:
 
 ```bash
 cd ~/meme_traderv1 && claude
 > /desk-check                     # full review: feed, P&L, positions, radar, analytics -> act or not
-> is the market hot enough for graduation plays right now?
 ```
-
-The limits live in the bot, not in the prompt:
-- the agent can lower any risk setting, but never raise sizing, positions, the loss limit or the stop loss above your config;
-- it can't re-enable a strategy you turned off, switch to live, save risk settings or press the kill switch;
-- paper deposits only, capped per deposit (`sniper.agent.max_deposit_sol`); they count as capital, not profit;
-- its buys pass the bot's normal risk checks and are rate-limited (`sniper.agent` in the config);
-- every action carries a reason, journaled and shown on the dashboard;
-- read-only tools run freely; each action asks you first (Approve in the dashboard, or `.claude/settings.json` in a terminal).
 
 ## Screenshots
 
-| Desk: what each bot is thinking | Live: risk dial, positions, market pulse |
+| Analytics: the edge check | Trade panel: live chart, metrics, red flags |
 |---|---|
-| ![Desk view](docs/img/desk.png) | ![Live view](docs/img/live.png) |
-| **Chat: ask, approve actions, paste a contract address** | **Token detail: every gate, live** |
-| ![Chat with Claude](docs/img/chat.png) | ![Token detail with gate checklist](docs/img/token-detail.png) |
-| **Analytics: P&L by strategy and exit reason** | |
-| ![Analytics view](docs/img/analytics.png) | |
+| ![Edge check](docs/img/analytics.png) | ![Trade panel with chart](docs/img/trade.png) |
+| **Desk: the trading room** | **Token detail: every gate, live** |
+| ![Desk view](docs/img/desk.png) | ![Token detail with gate checklist](docs/img/token-detail.png) |
+| **AI desk model: Claude, or cheaper** | **Terminal** |
+| ![AI desk model panel](docs/img/desk-model.png) | ![Terminal](docs/img/terminal.png) |
+| **Chat: ask, approve actions, paste a contract address** | |
+| ![Chat with Claude](docs/img/chat.png) | |
 
-Screenshots are from the built-in demo (`scripts/start.sh demo`, a simulated market), so the profits in them aren't results. Real results are under [Results so far](#results-so-far).
+Most screenshots are from the real-market paper bot (pretend money). The terminal and AI-model panel are from the built-in demo (`scripts/start.sh demo`, a simulated market), whose numbers aren't results.
 
 ## Configuration
 
 - **Settings:** defaults are in [`config/params.example.yaml`](config/params.example.yaml), with every option commented. Put your overrides in `config/params.yaml`, which is git-ignored. The dashboard's **Controls → Save** writes there too.
-- **Keys:** go in `.env`; see [`.env.example`](.env.example). All are optional for paper trading:
+- **Keys:** go in `.env` (see [`.env.example`](.env.example)), or set them on the dashboard under **Controls → API keys**. All are optional for paper trading:
 
 | Variable | Used for |
 |---|---|
-| `SOLANA_WS_URL` | Trade data websocket (default: the free public RPC). Use a flat-rate endpoint if you change it: the stream is ~20 GB/day. |
-| `ANTHROPIC_API_KEY` | Optional AI trading desk (`--desk`) and post-mortem review agent |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | Phone alerts for buys, closes and errors |
-| `SOLANA_RPC_URL`, `SOLANA_KEYPAIR_PATH`, `MEME_TRADER_CONFIRM_LIVE` | Live trading only |
+| `SOLANA_WS_URL` | Trade data websocket (default: free public endpoints). The stream is ~20 GB/day: a plan billed by data or credits can run out fast. |
+| `SOLANA_RPC_URL` | Lookups, balances, the Portfolio tab and live trading. Helius: `https://mainnet.helius-rpc.com/?api-key=…` (set for you when you save a Helius key). |
+| `HELIUS_API_KEY` | Wallet-funding lookups with exchange labels (insider clusters) |
+| `ANTHROPIC_API_KEY` | AI desk on Claude, and the post-mortem review agent |
+| `GITHUB_MODELS_TOKEN`, `HF_TOKEN`, `OPENROUTER_API_KEY` | AI desk on cheaper or free models (a local Ollama needs no key) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID`, `TELEGRAM_CHANNEL_ID` | Phone alerts, and posting calls and cards to a channel |
+| `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET` (or `X_CLIENT_ID` / `X_CLIENT_SECRET`) | Posting to X from the dashboard (your own developer app) |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `X_BEARER_TOKEN` | Call signals from Telegram channels / X accounts |
+| `SOLANA_KEYPAIR_PATH`, `MEME_TRADER_CONFIRM_LIVE` | Live trading only |
 | `JUPITER_API_KEY` | DexScreener bot: realistic paper quotes + sell-back check; required for its live mode |
 | `PUMPPORTAL_API_KEY` | Only for the metered PumpPortal trade stream (`sniper.feed.trades: pumpportal`) |
 
@@ -195,7 +226,8 @@ Live mode is locked behind `--live`, `MEME_TRADER_CONFIRM_LIVE=yes` and a matchi
 - an order whose outcome is unclear is looked up on-chain, never blindly re-sent;
 - buys reserve their cash before they're sent;
 - the ledger is checked against the wallet's real balance;
-- only one bot can trade a wallet at a time.
+- only one bot can trade a wallet at a time;
+- graduated coins trade on paper only: their price only updates every 10 s after graduation.
 
 These have been tested against simulated failures, not yet with real money.
 
@@ -209,8 +241,8 @@ These have been tested against simulated failures, not yet with real money.
 | [STRATEGY.md](docs/STRATEGY.md) | Market research, strategy reasoning and sources |
 | [RESEARCH.md](docs/RESEARCH.md) | How a strategy is frozen, evaluated and judged (and what's been found) |
 | [WALLETS.md](docs/WALLETS.md) | The wallet study: rules, data sources and their limits, timeline |
-| [OPEN_SOURCE_NOTES.md](docs/OPEN_SOURCE_NOTES.md) | What open-source trading bots on GitHub do, which ones are bait, and what we took |
 | [EDGE_PROOF.md](docs/EDGE_PROOF.md) | Proving an edge to a group: the call ledger, honest scoring, publishing proofs, and a plan for splitting into repos |
+| [OPEN_SOURCE_NOTES.md](docs/OPEN_SOURCE_NOTES.md) | What open-source trading bots on GitHub do, which ones are bait, and what we took |
 | [BUILDS_RESEARCH.md](docs/BUILDS_RESEARCH.md) | The best "agents in a room" builds (Pixel Agents, Habbo engines, Axiom) and what the trading room took from them |
 | [BUILD_LOG.md](docs/BUILD_LOG.md) | Every decision, measurement and result, newest first |
 | [MULTICHAIN.md](docs/MULTICHAIN.md) | Can it trade other chains? Feasibility, plan and costs (on hold) |
@@ -218,13 +250,15 @@ These have been tested against simulated failures, not yet with real money.
 ## Project layout
 
 ```
-meme_trader/sniper/   pump.fun engine: feeds, tracker, strategies, risk, analytics, CLI
-meme_trader/ui/       dashboard server + single-page UI
+meme_trader/sniper/   pump.fun engine: feeds, tracker, strategies, risk, AI desk, edge check, exit lab, CLI
+meme_trader/ui/       dashboard server + single-page UI, keys, posting to X / Telegram
 meme_trader/agents/   DexScreener momentum bot: scout, safety, analyst, risk, executor, monitor
+meme_trader/wallets/  the wallet study recorder and evaluation
+research/policies/    frozen research policies (one file per idea)
 config/               params.example.yaml (all settings, commented)
 scripts/              setup and start scripts for Mac / Ubuntu
-deploy/               systemd service
-tests/                pytest suite (144 tests)
+deploy/               systemd services
+tests/                pytest suite (286 tests)
 ```
 
 ### DexScreener momentum bot

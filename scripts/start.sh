@@ -5,7 +5,7 @@
 #   scripts/start.sh paper --desk         ...with the AI trading desk (needs ANTHROPIC_API_KEY)
 #   scripts/start.sh live                 REAL money (needs everything in docs/SETUP.md step 5)
 #   scripts/start.sh train | backtest | sweep | compare | leaders    (use your recordings in data/ by default)
-#   scripts/start.sh report | review | doctor | promote              (extra args are passed through)
+#   scripts/start.sh report | review | doctor | promote | edge | calls  (extra args are passed through)
 #   scripts/start.sh research eval graduation-v1                     (data | eval | freeze | final | log)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -48,7 +48,7 @@ case "$MODE" in
           fi ;;
   research)
           "$PY" -m meme_trader.sniper research "$@" ;;
-  doctor|review|report|promote)
+  doctor|review|report|promote|edge|calls)
           "$PY" -m meme_trader.sniper "$MODE" "$@" ;;
   *)      sed -n '2,8p' "$0"; exit 1 ;;
 esac

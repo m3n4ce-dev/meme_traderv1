@@ -1526,10 +1526,11 @@ class Engine:
 
     async def _graduated_ok(self, s: TokenState) -> str:
         """A coin that left the curve for PumpSwap: paper trades it at DexScreener's pool price (refreshed
-        every 10 s while held, curve fees modelled - a little worse than the pool's real ~0.3%). Live orders
-        here go to the bonding curve only, so live refuses. '' or why not."""
+        every 10 s while held, curve fees modelled - a little worse than the pool's real ~0.3%). Live refuses:
+        its orders would route to PumpSwap (pool=auto), but a price that updates every 10 s is too stale to
+        trade real money on. '' or why not."""
         if self.mode.startswith("live"):
-            return "it has graduated to PumpSwap: the bot's live orders go to the bonding curve only (paper can trade it)"
+            return "it has graduated to PumpSwap: live trading of graduated coins is off, since their price only updates every 10 s (paper can trade it)"
         if not self.feed.realtime:                        # a replay or demo: no pool to ask
             return "" if s.price_known else "it has graduated and there's no pool price for it here"
         if s.mint not in await self._dex_price([s.mint]):   # a fresh price to buy at

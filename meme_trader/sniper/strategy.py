@@ -312,7 +312,7 @@ def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
     pos.peak_price = max(pos.peak_price, price)
     gain = pos.gain_pct(price)
     if s.migrated and m.get("sell_on_graduation", True):
-        return 1.0, "manual: graduated (curve only)"
+        return 1.0, "manual: graduated (live sells at graduation)"
     if m.get("sl") and gain <= -m["sl"]:
         return 1.0, f"manual stop {gain:.0f}%"
     if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:
@@ -334,7 +334,7 @@ def evaluate_ride_exit(pos: SniperPosition, s: TokenState, r: dict, live: bool =
     handed = pos.handed_price or pos.entry_price
     pos.handed_peak = max(pos.handed_peak or handed, price)
     if s.migrated and live:
-        return 1.0, "bots: graduated (live orders work on the curve only)"
+        return 1.0, "bots: graduated (live sells at graduation)"
     if price <= min(pos.entry_price, handed) * (1 - r["stop_pct"] / 100):
         return 1.0, f"bots: stop {pos.gain_pct(price):.0f}%"
     if not pos.ride_tp and r.get("take_x") and price >= pos.entry_price * r["take_x"]:
