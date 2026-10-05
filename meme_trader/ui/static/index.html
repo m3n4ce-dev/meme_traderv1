@@ -4630,7 +4630,7 @@ function connect() {
         if (m.lookup.now_tracking) S.drawerTimer = setTimeout(refreshDrawer, 4000);
       }
       if (m.text) toast(esc(m.text), m.ok ? "ok" : "bad");
-      if (m.text && !$("term").hidden) termPrint(m.text, m.ok ? "ok" : "bad");
+      if (m.text && !$("term").hidden && m.action !== "lookup") termPrint(m.text, m.ok ? "ok" : "bad");   // (lookups run in the background)
       if (m.controls) { S.controls = m.controls; if (S.tab === "controls") renderControls(); }
       if (m.advanced) { S.adv = m.advanced; if (S.tab === "controls") renderAdvanced(); }
       if (m.keys) { S.keys = m.keys; renderKeys(); }
