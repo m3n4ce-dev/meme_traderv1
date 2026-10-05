@@ -256,14 +256,15 @@ def gate_checklist(s: TokenState, now: float, p, ctx: dict) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- graduation play
+SKIP_FOR_GOOD = ("too young", "one-sided buying")   # graduation rejections that end the coin's chance
+
+
 def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, str]:
     """Late-curve momentum ("graduation play"): a token already filling its curve fast, bought for the
     final leg and sold before migration. L: params.sniper.late. red: red-flag limits + context."""
     prog = s.curve.progress * 100
     if s.migrated or not (L.min_curve_pct <= prog <= L.max_curve_pct) or s.age(now) > L.max_age_s:
         return False, "window"
-    if s.age(now) < (L.get("min_age_s") or 0):
-        return False, "too young"
     if s.dev_sold or s.bundle_pct() > red["max_bundle_pct"] or s.early_sold_ratio() > red["max_early_sold_ratio"]:
         return False, "red flag"
     if red["creator_launches"] > red["max_creator_launches_24h"]:
@@ -272,9 +273,6 @@ def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, 
         return False, "insider cluster"
     if L.get("entry_mode", "rule") == "window":          # research baseline: no momentum condition at all
         return True, f"window baseline: curve {prog:.0f}%"
-    need = L.get("min_recent_sells") or 0
-    if need and sum(1 for t in s.window(now, 20) if t[2] == "sell") < need:
-        return False, "one-sided buying"                   # big inflow, nobody selling: the dump profile
     w = s.window(now, L.flow_window_s)
     nb = sum(1 for t in w if t[2] == "buy")
     ns = sum(1 for t in w if t[2] == "sell")
@@ -284,6 +282,13 @@ def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, 
     if flow < L.min_net_flow_sol or buyers < L.min_buyers or nb / max(ns, 1) < L.min_buy_sell_ratio \
             or near < L.min_near_high:
         return False, "momentum"
+    # The dump profile (2026-10-05 replays): checked only once the coin qualifies, and a coin that matches it is
+    # passed over for good (SKIP_FOR_GOOD). Waiting instead for a first sell or an older coin tested worse.
+    if s.age(now) < (L.get("min_age_s") or 0):
+        return False, "too young"
+    need = L.get("min_recent_sells") or 0
+    if need and sum(1 for t in s.window(now, 20) if t[2] == "sell") < need:
+        return False, "one-sided buying"                   # big inflow, nobody selling
     return True, f"late play: curve {prog:.0f}%, +{flow:.1f} SOL/{L.flow_window_s}s, {buyers} buyers"
 
 
