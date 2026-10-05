@@ -338,7 +338,7 @@ def test_server_desk_keys_and_actions(tmp_path, monkeypatch):
             assert (await c.get("/api/keys", headers={"Host": "evil.example"})).status == 403
             d = await (await c.get("/api/desk", headers=H)).json()
             assert "late" in d and "recorder" in d and "research" in d
-            assert (await c.get("/api/logo/not-a-mint", headers=H)).status == 404
+            assert (await c.get("/api/logo/not-a-mint", headers=H)).status == 204      # no logo: empty, not an error
             ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
             assert (await ws.receive_json())["type"] == "hello"
 

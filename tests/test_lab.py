@@ -157,3 +157,15 @@ def test_lab_replays_land_orders_like_the_live_bot():
     assert "late.stop_loss_pct" in b
     from meme_trader.sniper.lab import EXECUTION
     assert set(EXECUTION) & set(b) and not any(k.startswith("execution.") for k in labmod.TESTABLE)   # copied, never "tested"
+
+
+def test_tests_judged_with_instant_fills_are_marked_and_tried_again(tmp_path):
+    lab = Lab(tmp_path / "lab")
+    old, _ = lab.add("late.stall_s", 60, "", "team", 1000.0, {"late.stall_s": 45})                     # before the fix
+    new, _ = lab.add("late.stall_s", 30, "", "team", 1000.0, {"late.stall_s": 45, "execution.paper_delay_s": 2.5})
+    for x in (old, new):
+        x.update(status="done", result={"verdict": "no clear difference"})
+    v = {x["value"]: x for x in lab.view()["done"]}
+    assert v[60]["instant_fills"] and not v[30]["instant_fills"]
+    picks = {lab.auto_candidate({"late.stall_s": 45}, 2000.0 + h * 3600) for h in range(40)}
+    assert ("late.stall_s", 60) in picks and ("late.stall_s", 30) not in picks      # the old one is fair game again

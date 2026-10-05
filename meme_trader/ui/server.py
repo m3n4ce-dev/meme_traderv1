@@ -379,8 +379,8 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
     async def logo(request):
         img = await logos.get(request.match_info["mint"])
-        if not img:
-            return web.Response(status=404, headers={"Cache-Control": "max-age=60"})
+        if not img:     # 204, not 404: the page falls back to initials either way, without an error per coin in the console
+            return web.Response(status=204, headers={"Cache-Control": "max-age=60"})
         return web.Response(body=img, content_type="image/webp",
                             headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"})
 
