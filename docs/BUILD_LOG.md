@@ -4,6 +4,24 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #37: The bots get a house; the desk back on Claude
+
+- **A house** (owner: "give the bots another room or a whole house if they want"): the trading floor plus a **lounge** and a **research lab**, with a switcher in the room showing how many bots are in each.
+  - **Getting around:** every room has its door in the same spot, so a bot walks out of one room and in through the next room's door, using pathfinding per room.
+  - **The lounge:**
+    - a TV with the live Market Pulse, a sofa facing it, four bunk beds (blankets in the personas' colours), an arcade machine, a ping-pong table, bean bags, and a fridge and kitchen;
+    - the AI personas rest there while the desk sleeps: in bed at night, on the sofa by day, swapping at bedtime and morning;
+    - bots take breaks there.
+  - **The lab:**
+    - whiteboards with the live wallet study and edge check, the recorder's server rack with blinking lights, two workbenches, a research table and a bookshelf;
+    - the recorder visits often and the others now and then, and they read the boards' real numbers aloud.
+  - **Chat:** talk from another room goes to the room log, tagged with the room, not over the room you're looking at.
+- **The desk was awake again** on Hugging Face Qwen with no credit left, so every vote failed and entries were blocked. It's now on **Claude Sonnet 5.5** (tested: 2.7 s, about 1.2¢ a review).
+  - The bots said "Can't reach Claude" even when the model wasn't Claude; it's now "Can't reach the AI model".
+  - Errors now say what failed: a provider out of credits (402), a rejected token, rate limits, or a local server that isn't running.
+
+---
+
 ## 2026-10-05 — Entry #36: Why the bot stopped trading, the desk's goal, the wallet study in Analytics, Calls moved
 
 - **No graduation entries since 16:03 on Oct 4** (owner: "they should be making more trades"). Before that it averaged 3–9 an hour, 14–23 around midday.

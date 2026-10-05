@@ -297,8 +297,17 @@ def client_kwargs() -> dict:
 
 
 def friendly_error(err: str) -> str:
-    """One plain sentence for the dashboard from an Anthropic SDK error string."""
+    """One plain sentence for the dashboard from a model error (Anthropic SDK, or "HTTP nnn" from the
+    OpenAI-compatible providers: Hugging Face, OpenRouter, GitHub Models, a local server)."""
     e = (err or "").lower()
+    if "http 402" in e or "depleted" in e or "included credits" in e:
+        return "the model provider's credits are used up (a free Hugging Face account gets a few cents a month)"
+    if "http 401" in e or "http 403" in e:
+        return "the model provider rejected the token (check it under Controls → API keys)"
+    if "http 429" in e:
+        return "the model provider is rate-limiting this account"
+    if "cannot connect" in e or "connection refused" in e or "clientconnectorerror" in e:
+        return "can't reach the model's server (is the local model running?)"
     if "not scoped to a workspace" in e:
         return "the API key is a user key: add your Anthropic workspace ID in Controls (or use a workspace key)"
     if "invalid x-api-key" in e or "authentication" in e or "401" in e:
