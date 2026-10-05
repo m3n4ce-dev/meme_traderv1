@@ -558,6 +558,7 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    sub.add_parser("kols", help="fetch kolscan.io's KOL wallet list once (data/kols.json): the live charts name them")
     ed = sub.add_parser("edge", help="is each strategy's edge real? margin of error, big-winner dependence, day by day")
     ed.add_argument("--days", type=int, default=14, help="the last N days of trade files (default 14)")
     ed.add_argument("--mode", default="paper", help="paper | live | paper-synthetic (never mixed; default paper)")
@@ -575,6 +576,12 @@ def main() -> None:
     args = ap.parse_args()
     if args.cmd == "calls":                        # reads the ledger only: no config needed
         _calls(args)
+        return
+    if args.cmd == "kols":
+        from .kols import refresh
+
+        d, err = asyncio.run(refresh(DATA / "kols.json"))
+        print(err or f"{len(d['kols'])} KOL wallets saved to data/kols.json ({len(d.get('board', []))} leaderboard rows)")
         return
     if args.cmd == "edge":                         # reads recorded trades only
         from .edge import as_text, report

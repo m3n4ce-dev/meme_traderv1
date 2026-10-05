@@ -349,3 +349,63 @@ def test_the_exit_manager_describes_your_positions_by_your_rules_not_the_bots():
     e.hand_over(a.mint, True)
     labels = [g["label"] for g in {h["mint"]: h for h in e.desk_view()["holding"]}[a.mint]["watch"]]
     assert labels[0] == "stop" and any("2x" in x for x in labels) and "trailing stop" in labels
+
+
+def test_live_chart_marks_your_trades_and_wallets_worth_seeing(tmp_path):
+    import time
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    e = market()
+    s = live_coin(e)
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
+    smart = "S" * 44
+    e._study_cache = (time.time(), {smart: "study wallet (cluster 1)"})
+    t, p = s.trades[-1][0], s.trades[-1][1]
+    if s.creator:
+        s.trades.append((t + 1, p, "sell", 0.4, s.creator))
+    s.trades.append((t + 2, p, "buy", 3.0, "W" * 44))                # a whale
+    s.trades.append((t + 3, p, "buy", 0.3, smart))
+    d = e.chart_data(s.mint)
+    who = {m["who"] for m in d["marks"]}
+    assert {"you", "whale", "smart"} <= who and ("dev" in who or not s.creator)
+    assert d["entry"] == e.positions[s.mint].entry_price and len(d["pts"]) > 2
+    assert e.chart_data(s.mint, since=t + 3)["pts"] == []             # updates carry only new trades
+    assert asyncio.run(e.manual_sell(s.mint, 1.0)) == ""
+    d = e.chart_data(s.mint)
+    assert any(m["who"] == "you" and m["side"] == "sell" for m in d["marks"])   # your past trade on it stays marked
+    assert e.chart_data("nope") is None
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.send_json({"action": "chart_sub", "mints": [s.mint, "x", 5]})
+            for _ in range(20):
+                m = await ws.receive_json(timeout=5)
+                if m.get("type") == "ticks":
+                    return m
+    m = asyncio.run(go())
+    assert list(m["charts"]) == [s.mint] and m["charts"][s.mint]["full"] and m["charts"][s.mint]["pts"]
+
+
+def test_kol_list_parses_and_names_kols_on_the_chart(tmp_path):
+    import json as _json
+
+    from meme_trader.sniper import kols
+
+    k1, k2 = "K" * 43 + "a", "J" * 44
+    rsc = ('[{"wallet_address":"%s","name":"Cook\\u00e9r","telegram":null,"twitter":"https://x.com/c","profit":146.9,'
+           '"wins":45,"losses":8,"timeframe":1},{"wallet_address":"%s","name":"Zef","telegram":null,"twitter":null,"pfp":"x"}]' % (k1, k2))
+    html = '<script>self.__next_f.push([1,%s])</script>' % _json.dumps(rsc)
+    d = kols.parse(html)
+    assert d["kols"] == {k1: "Cookér", k2: "Zef"} and d["board"][0]["wins"] == 45 and d["board"][0]["days"] == 1
+    assert kols.load(tmp_path / "missing.json") == {"kols": {}}
+    e = market()
+    s = live_coin(e)
+    e.kols = {"kols": {k1: "Cooker"}}
+    s.trades.append((s.trades[-1][0] + 1, s.trades[-1][1], "buy", 0.5, k1))
+    m = [x for x in e.chart_data(s.mint)["marks"] if x["who"] == "kol"]
+    assert m and m[-1]["label"] == "KOL Cooker bought 0.50 SOL"
