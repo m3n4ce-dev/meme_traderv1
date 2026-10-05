@@ -201,6 +201,7 @@ sniper:
     base_url: ""                 # other providers: their server (blank = the provider's default)
     other_price_in_per_mtok: 0   # other providers: $ per million tokens, looked up when you pick a model
     other_price_out_per_mtok: 0
+    huddle_minutes: 30           # the team meets this often while the desk is awake (one model call, ~1¢ on Sonnet); 0 = only on request
     note_replies: true           # every persona reads each note you save (Teach the desk) and replies; 4 calls a note
     note_effort: low             # thinking effort for those replies
 

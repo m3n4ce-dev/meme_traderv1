@@ -4,6 +4,35 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #38: The bots talk to each other, as a team with a plan
+
+- **Desk huddles** (owner: "do the bots talk to each other? It doesn't seem like it… they should be close to AGI… they should think how can we grow this account… there has to be a strategy or they are useless"):
+  - **Before:** the room's exchanges were scripted line pairs with numbers filled in.
+  - **Now:** every `desk.huddle_minutes` (30) while the desk is awake, or on 📣 Call a huddle, one model call writes a real meeting from the bot's state (`desk_brief`).
+    - Each bot speaks from its role: the operator chairs; scanner, exits, risk, feed and recorder report; the four personas argue.
+    - They answer each other by name and challenge with numbers.
+    - The room plays it out at the AI table as speech bubbles.
+- **A growth plan carried between meetings** (`data/desk_plan.json`): a goal with a date, a strategy, and experiments with pass tests and status (proposed, running, passed, failed, stopped). Each meeting reviews it against the results.
+- **Changes need the owner's Apply:** up to 3 setting changes per meeting, kept only if the key is a real setting. Apply sets and saves it; the agent can't apply them.
+- **Advice for the owner** about their own trading (never limits).
+- **New in the briefing:**
+  - **Exit what-ifs** on the graduation bot's past trades:
+    - as traded +4.91 SOL;
+    - selling all at +30% −2.45, at +50% −1.03, at +100% +2.79;
+    - banking a third at +30% +2.46.
+
+    So "stacking wins" would cost this bot its runners.
+  - **The owner's manual pattern:** sells at +50% or better made money; losers below −40% (none ever above +24%) cost more.
+  - **Plain names for settings and strategy switches.** The first meeting read `entry.enabled: false` as "all entries off" and suggested turning on the losing sniper. Another blamed the bot's stops for the owner's manual losses. The briefing and instructions now make both clear, and the next meetings got them right.
+- **First real meeting** (Sonnet, ~2¢):
+  - **Plan:** hold the graduation config unchanged for a week toward 100+ clean trades.
+  - **Proposed change:** a daily loss limit of 1.5 SOL instead of 3, as the account is 6.3 SOL.
+  - **Advice for the owner:** a −25% stop on manual positions, with the numbers.
+  - **Not adopted:** banking a third at +30%, because it trails as-traded by ~2.45 SOL.
+- **Desk side column:** the scanner card no longer sticks over the panels below it.
+
+---
+
 ## 2026-10-05 — Entry #37: The bots get a house; the desk back on Claude
 
 - **A house** (owner: "give the bots another room or a whole house if they want"): the trading floor plus a **lounge** and a **research lab**, with a switcher in the room showing how many bots are in each.
