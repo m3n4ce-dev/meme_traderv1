@@ -12,6 +12,10 @@ not upgradeable, no blacklist, no pausing, no owner balance changes); on Solana 
 authorities must be renounced. Measured 2026-10-05: 3 of the 8 trending BNB Chain pools and 1 of 8 on Base were
 honeypots, and honeypot.is didn't know most brand-new pools or some large BNB Chain ones.
 
+Live prices for held coins come from the same routers (a small sell quote every poll_s): measured 2026-10-05,
+router quotes changed every 2.5-5 s while DexScreener's price changed once in 41 s, so stops decided on DexScreener
+filled 7-10% past their level. DexScreener stays the fallback, and the source of liquidity and market cap.
+
 Real-price check: at every paper buy and sell, a real swap router is asked what the same swap would return
 (KyberSwap on BNB Chain / Base / Ethereum, Jupiter on Solana; no key or wallet needed). A coin no router can buy is
 skipped, and each closed trade carries its "real" P&L next to the paper one. readiness() turns those into the
@@ -32,7 +36,7 @@ from pathlib import Path
 DEFAULTS = {
     "enabled": True,
     "chains": ["bsc", "base", "solana"],   # "eth" too if you like: its gas (~$1-3 a swap) eats small trades
-    "poll_s": 10, "scan_s": 90, "max_open": 4,
+    "poll_s": 5, "scan_s": 90, "max_open": 4,
     "size_usd": 0,                         # 0 = the risk dial's sizing.base_usd
     "min_liq_usd": 20_000, "min_vol_h1_usd": 20_000, "min_age_min": 15, "max_age_h": 168,
     "min_mcap_usd": 50_000, "max_mcap_usd": 20_000_000,
@@ -335,8 +339,30 @@ class XChain:
             for p in self.positions.values():
                 x = q.get(self._k(p["chain"], p["pool"])) if p["chain"] == chain else None
                 if x:
-                    p.update(last=x["price"], last_ts=now, liq=x["liq"] or p["liq"], mcap=x["mcap"])
-                    p["peak"], p["trough"] = max(p["peak"], x["price"]), min(p["trough"], x["price"])
+                    p.update(liq=x["liq"] or p["liq"], mcap=x["mcap"])
+                    if now - p.get("router_ts", 0) > 3 * float(self.cfg["poll_s"]):   # the router's price is fresher
+                        self._mark(p, x["price"], now, "dexscreener")
+        for p in list(self.positions.values()):
+            px = await self.router_price(p)
+            if px:
+                p["router_ts"] = now
+                self._mark(p, px, now, "router")
+
+    def _mark(self, p: dict, price: float, now: float, src: str) -> None:
+        p.update(last=price, last_ts=now, px_src=src)
+        p["peak"], p["trough"] = max(p["peak"], price), min(p["trough"], price)
+
+    async def router_price(self, p: dict) -> float | None:
+        """The coin's price now, from a small sell quote at a real router (market price: the pool fee added back)."""
+        r, dec = p.get("real"), p.get("dec")
+        if not r or dec is None or r["raw_left"] <= 0:
+            return None
+        amt = max(1, r["raw_left"] // 50)               # ~2% of the holding: next to no price impact
+        st, q = await self.real_quote(p["chain"], p["token"], STABLE[p["chain"]][0], amt)
+        if st != "ok":
+            return None
+        usd = q["out_raw"] / 10 ** STABLE[p["chain"]][1]
+        return usd / (amt / 10 ** dec) / max(1 - p["fee_pct"] / 100, 0.5)
 
     def block(self, cost_sol: float) -> str:
         e, cfg = self.e, self.cfg
@@ -457,6 +483,11 @@ class XChain:
                "why": f"1h {r.get('chg_h1'):+.0f}%, {r.get('buys_h1')}/{r.get('sells_h1')} buys/sells, ${(r.get('vol_h1') or 0) / 1000:,.0f}k vol"}
         if real:                                          # the same buy at a real router's price
             dec = info.get("decimals")
+            if dec is None and real.get("out_usd"):        # EVM: the token's decimals, from the router's own dollar value
+                import math
+                d = round(math.log10(real["out_raw"] / (real["out_usd"] / q["price"])))
+                dec = d if 0 <= d <= 30 else None
+            pos["dec"] = dec
             val = real["out_usd"] if real.get("out_usd") else (real["out_raw"] / 10 ** dec * q["price"] if dec is not None else None)
             paper_val = tokens * q["price"]
             pos["real"] = {"raw": real["out_raw"], "raw_left": real["out_raw"],

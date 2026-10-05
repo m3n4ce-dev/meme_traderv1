@@ -319,7 +319,7 @@ sniper:
   xchain:                        # paper trading on other chains: young DEX coins (sniper/xchain.py). Paper only.
     enabled: true
     chains: [bsc, base, solana]  # bsc, base, eth, solana (Solana DEX coins outside the pump.fun curve)
-    poll_s: 10                   # live prices for held coins this often (DexScreener)
+    poll_s: 5                    # live prices for held coins this often (a router quote; DexScreener as fallback)
     scan_s: 90                   # look for new candidates this often (GeckoTerminal trending + new pools)
     max_open: 4                  # other-chain positions at once
     size_usd: 0                  # per trade; 0 = the risk dial's sizing.base_usd
