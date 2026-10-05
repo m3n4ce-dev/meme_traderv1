@@ -4,6 +4,32 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #45: Feed outages: stop flapping, and a budgeted Helius backup
+
+**Owner's request:** "We gotta figure out the latency… missed a few paper trades because the mainnet was down."
+
+**What happened:**
+- From 00:29 Solana's public RPC (`api.mainnet-beta`) hung up the trade-log websocket every 20 s–5 min. Each time, the watchdog moved to the next endpoint, PublicNode, which it already knew was ~10 s behind. It measured that and moved back.
+- That was dozens of switches an hour, and each one paused entries while the new connection was checked.
+- Later in the night the public RPC itself ran 4–10 s behind, with stalls.
+
+**Fixes:**
+1. **A hang-up on the fastest known endpoint is a reconnect to it** (1 s), not a move to a slower one, unless it hangs up 4 times in 3 minutes.
+   - With your own endpoint configured (`SOLANA_WS_URL`), a hang-up on a fallback goes back to yours.
+   - Quality problems (slow, missing trades) are handled as before: the bot never moves to an endpoint known to be slower.
+2. **A metered backup:**
+   - **When:** `feed.backup_ws_url`, else `SOLANA_WS_BACKUP_URL`, else the owner's `HELIUS_API_KEY` websocket. It's used only while the free endpoints hang up repeatedly or fall behind with no faster free one.
+   - **Back to free:** it tries the free endpoints again every 5 minutes. It never starts on the backup, and is never picked just for being faster.
+   - **Allowance:** up to `feed.backup_mb_per_day` (1200 MB) of uncompressed stream a day. Helius bills websockets at 2 credits per 0.1 MB, so that's ≈24k credits a day, ≈720k of the free plan's 1M a month. 0 turns it off.
+3. **Measured, not guessed:**
+   - The feed now reports reconnects and switches in the last hour, the stream's uncompressed MB per hour, and the backup's use today. The feed badge shows the real delay ("1.3s behind" instead of seconds since the last event), with ⚠ when it keeps dropping.
+   - The stream measured 405–465 MB an hour over whole minutes (about 800 MB/h in a busy 10-s burst), roughly 10 GB a day.
+   - A 10-second test of the owner's Helius websocket: 419 pump.fun trades, median 1.22 s behind the chain (block times are whole seconds, so ~0.5 s of that is rounding).
+
+**The paid option:** for less delay all day, the Helius Developer plan ($49/month, 10M credits) covers the whole stream (~6M credits a month at this rate) as the primary endpoint (`SOLANA_WS_URL`). Lower still needs gRPC/LaserStream, which is a bigger plan.
+
+---
+
 ## 2026-10-05 — Entry #44: KOL tracker and optional views on the Charts tab
 
 **Owner's request:** "An optional KOL known wallet tracker on the charts page, plus other optional charts and visualizations."

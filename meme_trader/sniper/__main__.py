@@ -82,7 +82,8 @@ async def _run(args, params) -> None:
         feed = PumpPortalFeed(f.fallback_ws_urls)
     else:
         feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls, f.commitment, f.max_gap_pct, f.stall_s, f.max_lag_s,
-                               memory_path=DATA / "feed_endpoints.json")
+                               memory_path=DATA / "feed_endpoints.json", backup_ws_url=f.get("backup_ws_url", ""),
+                               backup_mb_per_day=float(f.get("backup_mb_per_day", 1200)))
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"
