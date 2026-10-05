@@ -111,7 +111,7 @@ def test_manual_exit_rules():
     S.curve.price = 1.5
     assert evaluate_manual_exit(pos, S, {"trail": 25})[1].startswith("manual trail")
     S.migrated = True
-    assert evaluate_manual_exit(pos, S, {})[1] == "manual: graduated (curve only)"
+    assert evaluate_manual_exit(pos, S, {})[1] == "manual: graduated (live sells at graduation)"
 
 
 def test_set_manual_exits_validates():

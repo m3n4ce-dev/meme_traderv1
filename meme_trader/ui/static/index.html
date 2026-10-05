@@ -196,6 +196,10 @@ input[type="number"] { width: 110px; }
 .fact .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .fact .v { font-weight: 650; }
 /* toasts */
+@media (max-width: 2239px) {                 /* one header row on ordinary screens: drop the extras, keep every control */
+  header .brand > span, #clock, header nav.tabs kbd, header nav.tabs .ic, header .lbl { display: none; }
+  header .status { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 .tipbox { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 140; width: min(400px, calc(100vw - 32px));
   background: var(--surface); border: 1px solid var(--ring); border-left: 4px solid var(--warn-mark); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px; }
 .tipbox .tip-h { font-weight: 700; margin-bottom: 4px; } .tipbox p, .tipbox ul { margin: 0 0 8px; } .tipbox ul { padding-left: 18px; } .tipbox li { margin: 3px 0; }
@@ -938,11 +942,11 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <div class="spacer"></div>
   <span class="note num hide-sm" id="clock"></span>
   <button id="palette" class="ghost small" title="Command palette (Ctrl+K)">⌘K</button>
-  <button id="arrange" class="ghost small" title="Arrange this page: drag panels, hide some (a)" aria-pressed="false">✎ Arrange</button>
+  <button id="arrange" class="ghost small" title="Arrange this page: drag panels, hide some (a)" aria-pressed="false">✎<span class="lbl"> Arrange</span></button>
   <button id="theme" class="ghost small" title="Theme (t)" aria-label="Switch theme">◐</button>
-  <button id="pause" title="Stop/start opening new positions (p). Open positions keep being managed.">Pause entries</button>
+  <button id="pause" title="Stop/start opening new positions (p). Open positions keep being managed.">⏸ Pause<span class="lbl"> entries</span></button>
   <button id="term-btn" title="Terminal: type commands to the bot (the ` key)" aria-label="Terminal">&gt;_</button>
-  <button id="restart" title="Restart the bot: saves everything, reloads its code and settings, and picks up where it left off">↻ Restart</button>
+  <button id="restart" title="Restart the bot: saves everything, reloads its code and settings, and picks up where it left off">↻<span class="lbl"> Restart</span></button>
   <button id="kill" class="kill" title="Sell everything and stop opening positions">KILL</button>
 </header>
 
@@ -1474,7 +1478,8 @@ function renderChrome(s) {
   $("dot").className = "dot" + (s.halted ? " dead" : s.paused ? " off" : "");
   $("state").textContent = s.halted ? "halted" : s.paused ? "entries paused" : s.blocked ? "running · " + s.blocked : "running";
   $("clock").textContent = s.now ? hhmmss(s.now) : "";
-  $("pause").textContent = s.paused ? "Resume entries" : "Pause entries";
+  const pz = s.paused ? '▶ Resume<span class="lbl"> entries</span>' : '⏸ Pause<span class="lbl"> entries</span>';
+  if ($("pause").innerHTML !== pz) $("pause").innerHTML = pz;
   const m = s.model;
   $("model-badge").textContent = m ? `model AUC ${fx(m.auc, 2)}` : "no model";
   $("model-badge").className = "badge " + (m ? (m.auc >= 0.65 ? "ok" : "warn") : "");
@@ -4029,7 +4034,7 @@ function renderChatSide(s) {
 const PL = {data: null, timer: 0, hover: {}, seen: new Set(), qb: null, open: {},
   filters: {new: {}, stretch: {}, graduated: {}}, sort: {new: "new", stretch: "curve", graduated: "new"}};
 const PL_COLS = [["new", "🌱 New", "launches under 50% of the curve"], ["stretch", "🔥 Final stretch", "50–100% of the curve: close to graduating"],
-                 ["graduated", "🎓 Graduated", "just moved to PumpSwap (the bot trades the curve only)"]];
+                 ["graduated", "🎓 Graduated", "just moved to PumpSwap (paper trades them at the pool price)"]];
 const PL_F = [["age_max", "Max age (min)", 0], ["mc_min", "Min MC ($K)", 0], ["mc_max", "Max MC ($K)", 0], ["buyers_min", "Min buyers", 0],
   ["flow_min", "Min inflow 30s (SOL)", 1], ["top10_max", "Max top-10 %", 0], ["dev_max", "Max dev %", 0], ["bundle_max", "Max bundled %", 0]];
 const PL_CHK = [["socials", "Has a social link"], ["x", "Has X"], ["nodevsold", "Dev hasn't sold"], ["nomayhem", "Not Mayhem mode"]];
@@ -4314,7 +4319,7 @@ const GUIDE = [
       <li><b>The chart:</b> pick a coin (Trade, or paste its address) and its live price chart opens in the panel, with your entry marked once you hold it.</li>
       <li><b>🤖 Hand to the bots</b> (on a position, or 🚶 Away for all of them): the bots ride it for a runner. Half comes out at 2x; the rest trails 30% off its peak once it's up 30%; a stop sits 40% down. There are no time or stall exits, so a coin you've held a while isn't sold the moment you hand it over. Tune it under <code>manual.handover</code> in the config.</li>
       <li><b>Selling:</b> 25%, 50%, <b>Initials</b> (sell just enough to get your cost back; the rest rides free) and <b>Exit</b>, on any position.</li>
-      <li><b>Your exit rules:</b> each of your positions exits only on the stop, take profit or trail you set on its card, plus a sale at graduation (the bot trades the curve only).</li>
+      <li><b>Your exit rules:</b> each of your positions exits only on the stop, take profit or trail you set on its card, plus, in live mode only, a sale at graduation (after it, a coin's price only updates every 10 s).</li>
       <li><b>Limit orders and alerts</b> (under the metrics): buy when the market cap dips to a level or breaks out above one, sell part of a position at a target, or just get a 🔔. The quick buttons fill sensible levels from the current market cap. Orders fire on the live curve price, survive restarts, and expire (24 h by default).</li>
       <li><b>📣 Call</b> puts the coin on your record at today's market cap (see <a href="#" data-help="calls">Calls</a>).</li>
       <li>In live mode every manual trade and every limit order asks you to confirm first.</li></ul>`},
@@ -4852,7 +4857,7 @@ $("kill").onclick = () => confirm("Sell ALL positions and stop opening new ones?
 $("restart").onclick = () => {
   if (!confirm("Restart the bot? Everything is saved first; open positions and orders resume after it comes back (about 10–30 seconds, while it reconnects to the market feed).")) return;
   if (send({action: "restart"})) { $("restart").disabled = true; $("restart").textContent = "↻ Restarting…"; $("state").textContent = "restarting";
-    setTimeout(() => { $("restart").disabled = false; $("restart").textContent = "↻ Restart"; }, 30000); }
+    setTimeout(() => { $("restart").disabled = false; $("restart").innerHTML = '↻<span class="lbl"> Restart</span>'; }, 30000); }
 };
 $("dr-close").onclick = closeDrawer;
 $("scrim").onclick = closeDrawer;
