@@ -192,6 +192,7 @@ class XChain:
         self._chains = None
         self._recorded = None                          # the lists last kept (their fetch time)
         self._ready: tuple[float, dict] | None = None
+        self._selling: set[str] = set()                 # one sale at a time per coin (a sale waits on the router)
         self.load()
 
     @property
@@ -501,9 +502,16 @@ class XChain:
         return pos
 
     async def sell(self, key: str, frac: float, reason: str, now: float, price: float | None = None) -> None:
-        pos = self.positions.get(key)
-        if pos is None:
+        if self.positions.get(key) is None or key in self._selling:
             return
+        self._selling.add(key)
+        try:
+            await self._sell(key, frac, reason, now, price)
+        finally:
+            self._selling.discard(key)
+
+    async def _sell(self, key: str, frac: float, reason: str, now: float, price: float | None) -> None:
+        pos = self.positions[key]
         real, rq, st, amt = pos.get("real"), None, "", 0
         if real and real["raw_left"] > 0 and price != 0.0:   # ask a real router first: what would this sale fetch?
             amt = real["raw_left"] if frac >= 0.999 else int(real["raw_left"] * frac)
@@ -609,6 +617,8 @@ class XChain:
     async def sell_now(self, key: str) -> str:
         if key not in self.positions:
             return "no such position"
+        if key in self._selling:
+            return "a sale of this coin is already going through"
         await self.sell(key, 1.0, "you sold", time.time())
         return ""
 

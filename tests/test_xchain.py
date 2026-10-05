@@ -203,3 +203,26 @@ def test_the_real_money_checklist_passes_only_on_a_real_edge(monkeypatch):
     e.book.closed[:] = [dict(win) for _ in range(3)] + [dict(loss) for _ in range(57)]
     r = x.readiness()
     assert not r["ready"] and not r["checks"][1]["ok"] and not r["checks"][2]["ok"]
+
+
+def test_one_sale_at_a_time_per_coin(monkeypatch):
+    e, x, state = _trader(monkeypatch)
+    asyncio.run(x.step(time.time()))
+    key = next(iter(x.positions))
+    gate = asyncio.Event()
+    real = x.real_quote
+
+    async def slow_quote(*a):
+        await gate.wait()
+        return await real(*a)
+    monkeypatch.setattr(x, "real_quote", slow_quote)
+
+    async def go():
+        t1 = asyncio.create_task(x.sell(key, 0.5, "take profit +40%", time.time()))
+        await asyncio.sleep(0)
+        assert "already going through" in await x.sell_now(key)          # your click while the bot's sale waits
+        gate.set()
+        await t1
+    asyncio.run(go())
+    p = x.positions[key]
+    assert abs(p["tokens"] / p["tokens0"] - 0.5) < 1e-9 and p["real"]["raw_left"] > 0
