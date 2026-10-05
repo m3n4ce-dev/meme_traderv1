@@ -132,15 +132,26 @@ def test_other_chains_rows_and_cache(monkeypatch):
     assert r["symbol"] == "PEPE" and r["chain_name"] == "BNB Chain" and r["token"] == "0xtoken" and r["mcap_usd"] == 123456.7
     assert r["buys_h1"] == 120 and abs(r["age_s"] - 3600) < 120 and r["dex"].startswith("https://dexscreener.com/bsc/")
     assert chains.pool_row("bsc", {"attributes": {}}) is None
+    monkeypatch.setattr(chains, "GAP_S", 0.0)
     c = chains.Chains()
-    calls = []
+    calls, answer = [], {"status": 200}
 
-    async def fake_refresh():
-        calls.append(1)
-        c.data = {"trending": {"bsc": [r]}, "new": {}, "fetched": _t.time(), "error": "", "chains": {"bsc": "BNB Chain"}}
-    c._refresh = fake_refresh
-    asyncio.run(c.get()); asyncio.run(c.get())
-    assert len(calls) == 1 and c.names() == {"BNB Chain": ["PEPE"]}     # cached: one fetch per 90 s
+    async def fake_fetch(s, net, kind):
+        calls.append((net, kind))
+        return answer["status"], {"data": [p]}
+    c._fetch = fake_fetch
+    asyncio.run(c.get())
+    assert calls == []                                                    # nobody looking, no trader: no calls at all
+    asyncio.run(c.get(viewer=True)); asyncio.run(c.get(viewer=True))
+    assert len(calls) == 8 and c.names() == {n: ["PEPE"] for n in ("Solana", "BNB Chain", "Base", "Ethereum")}   # cached
+    c.trade_nets = {"bsc"}
+    asyncio.run(c.get())
+    assert calls[8:] == [("bsc", "hot")]                                  # the trader adds its last-hour list
+    c.fetched_at.clear(); calls.clear(); answer["status"] = 429
+    asyncio.run(c.get(viewer=True))
+    assert len(calls) == 1 and "limit" in c.data["error"] and c.data["trending"]["bsc"]   # stops, keeps the old lists
+    asyncio.run(c.get(viewer=True))
+    assert len(calls) == 1                                                # and waits before asking again
 
 
 def test_hq_status(tmp_path):

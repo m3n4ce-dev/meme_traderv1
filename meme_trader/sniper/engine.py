@@ -64,6 +64,7 @@ RISK_KEYS = ("sizing.base_usd", "sizing.max_usd", "capital.max_open_positions", 
 CONTROLS = [
     ("entry.enabled", "bool", None, None, "Sniper entries", "Early-entry sniper buys"),
     ("copy.enabled", "bool", None, None, "Copy trading", "Mirror leader wallets"),
+    ("xchain.enabled", "bool", None, None, "Other chains (paper)", "Young DEX coins on BNB Chain, Base and Solana, paper money"),
     ("callouts.enabled", "bool", None, None, "Callouts", "$1 bags + callout cards"),
     ("late.enabled", "bool", None, None, "Graduation plays", "Late-curve momentum, out before migration"),
     ("risk_adapt.enabled", "bool", None, None, "Defense mode", "Halve size + raise the bar after a bad run"),
@@ -81,8 +82,9 @@ CONTROLS = [
 # Every other scalar setting in these sections can be changed live from the dashboard's "All settings" (owner
 # only: the AI agent keeps to CONTROLS and its ceilings). Lists, endpoints, keys and paths are config-file only.
 ADVANCED_SECTIONS = ("capital", "sizing", "entry", "exit", "late", "callouts", "copy", "execution", "risk_adapt",
-                     "predict", "signals", "manual")
-ADVANCED_SKIP = {"capital.starting_sol", "predict.enabled", "predict.model_path", "predict.checkpoints_s",
+                     "predict", "signals", "manual", "xchain")
+ADVANCED_SKIP = {"xchain.gas_usd.bsc", "xchain.gas_usd.base", "xchain.gas_usd.eth", "xchain.gas_usd.solana",
+                 "capital.starting_sol", "predict.enabled", "predict.model_path", "predict.checkpoints_s",
                  "sizing.enabled", "copy.use_own_exits"}
 ADVANCED_ENUMS = {"late.entry_mode": ("rule", "window")}
 _EXAMPLE_SNIPER: dict | None = None
@@ -243,6 +245,8 @@ class Engine:
         self.plan: dict = {}                                 # the team's growth plan, updated at every huddle
         from .lab import Lab
         self.xlab = Lab(DATA / "lab" if self.persist else None)   # the team's experiments on the recorded market
+        from .xchain import XChain
+        self.xchain = XChain(self, DATA / "xchain.json" if self.persist else None)   # paper trades on other chains
         self._lab_task: asyncio.Task | None = None
         self._lab_check, self._lab_auto_at = 0.0, time.time() + 600
         from . import kols as kolmod
@@ -303,7 +307,7 @@ class Engine:
         return s.curve.price if s and s.price_known else pos.entry_price
 
     def equity(self) -> float:
-        return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items())
+        return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items()) + self.xchain.value_sol()
 
     def _pulse_row(self) -> list:
         if not self.pulse_since:
@@ -516,6 +520,7 @@ class Engine:
         if self.persist:
             await self.restore_state()
         ticker = asyncio.create_task(self._ticker()) if self.feed.realtime else None
+        xtask = asyncio.create_task(self.xchain.run()) if self.feed.realtime and self.persist else None   # other chains (paper)
         if self.p.copy.enabled and self.leaders.leaders:
             await self.feed.watch_accounts(list(self.leaders.leaders))
             self.say("info", f"copy trading {len(self.leaders.leaders)} wallet(s)")
@@ -530,6 +535,9 @@ class Engine:
         finally:
             if ticker:
                 ticker.cancel()
+            if xtask:
+                xtask.cancel()
+                await self.xchain.close()
             if self.order_tasks:                # let sent orders finish so their outcome is booked and saved
                 await asyncio.wait(set(self.order_tasks), timeout=120)
             if self.record_file:
@@ -872,7 +880,8 @@ class Engine:
             return
         # the bots' own results only: callout bags aren't trades, and the owner's manual trades (even ones handed to
         # the bots) are the owner's decisions, so their losses must not slow the bots down (or their wins speed them up)
-        recent = [c for c in self.book.closed if c["source"] not in ("callout", "manual")][-R.lookback_trades:]
+        # (other-chain paper trades are a different game: they don't slow the pump.fun bots either)
+        recent = [c for c in self.book.closed if c["source"] not in ("callout", "manual", "chains")][-R.lookback_trades:]
         streak = 0
         for c in reversed(recent):
             if c["pnl"] > 0:
@@ -1460,20 +1469,26 @@ class Engine:
             "entry_delay_s": pos.entry_delay_s, "exit_delay_s": pos.exit_delay_s,
             "failed_fees_sol": round(pos.failed_fees_sol, 6),
         }
-        self.book.closed.append(row)
-        self.stats["wins" if pnl > 0 else "losses"] += 1
-        self._update_defense()
-        self.say("close", f"{pos.symbol} {'+' if pnl >= 0 else ''}{pnl:.3f} SOL ({pnl / max(pos.initial_cost_sol, 1e-12):+.0%}) "
-                          f"[{pos.source}]", pos.mint)
-        if self.journal:
-            DATA.mkdir(exist_ok=True)
-            with (DATA / f"trades-{time.strftime('%Y-%m-%d', time.gmtime(self.now))}.jsonl").open("a") as f:
-                f.write(json.dumps(row) + "\n")
+        self.record_close(row, pos.mint)
         if pos.leader:
             paused = self.leaders.on_copy_closed(pos.leader, pnl, self.p.copy.pause_after_losses)
             if paused:
                 self.say("error", f"paused copying {self.leaders.label(pos.leader)}: {paused}")
         asyncio.ensure_future(self._unwatch(pos.mint))
+
+    def record_close(self, row: dict, mint: str = "") -> None:
+        """Book a closed trade: the session's list, win/loss counts, defense mode, the log line and the trade journal."""
+        pnl = row["pnl"]
+        self.book.closed.append(row)
+        self.stats["wins" if pnl > 0 else "losses"] += 1
+        self._update_defense()
+        where = f" on {row['chain']}" if row.get("chain") else ""
+        self.say("close", f"{row['symbol']}{where} {'+' if pnl >= 0 else ''}{pnl:.3f} SOL ({row['pnl_pct'] / 100:+.0%}) "
+                          f"[{row['source']}]", mint if not row.get("chain") else "")
+        if self.journal:
+            DATA.mkdir(exist_ok=True)
+            with (DATA / f"trades-{time.strftime('%Y-%m-%d', time.gmtime(row['closed']))}.jsonl").open("a") as f:
+                f.write(json.dumps(row) + "\n")
 
     async def _tick(self) -> None:
         if self.deferred:
@@ -2623,7 +2638,8 @@ class Engine:
                      "degraded": getattr(self.feed, "degraded_reason", "") or None},
             "ai_desk_voting": bool(self.desk and self.desk.enabled), "recent_notes": notes,
             "graduation_exit_whatifs": whatifs, "owner_manual_trading": owner, "lab": self.lab_brief(),
-            "trending_on_other_chains": self.chains.names() if getattr(self, "chains", None) else {},   # (watched, not traded)
+            "trending_on_other_chains": self.chains.names() if getattr(self, "chains", None) else {},
+            "other_chain_bot": self.xchain.brief(),      # paper trades on BNB Chain / Base / Solana DEX coins
         }
 
     # ------------------------------------------------------------------ hand your positions to the bots
@@ -3421,6 +3437,7 @@ class Engine:
             })
         return {
             "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
+            "xchain": self.xchain.view(),
             "kols": {"n": len(self.kols.get("kols") or {}), "fetched": self.kols.get("fetched")},
             "lab": {"running": (lambda x: x and {"id": x["id"], "key": x["key"], "now": x["now"], "value": x["value"], "by": x["by"],
                                                  "started": x["started"]})(self.xlab.running()),
