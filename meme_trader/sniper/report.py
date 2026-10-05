@@ -242,7 +242,9 @@ def write(closed: list[dict], equity_hist: list, start_sol: float, max_dd_pct: f
 def row_mode(c: dict) -> str:
     """paper / live / paper-synthetic (demo) ... Rows written before trades were tagged are 'unknown':
     they can't be told apart, so they're never mixed into paper or live results."""
-    return c.get("mode") or "unknown"
+    if c.get("mode"):
+        return c["mode"]
+    return "paper" if c.get("source") == "chains" else "unknown"   # (other chains only ever trade paper; 2026-10-05 rows)
 
 
 def load_trades(data_dir: Path, days: int | None = None, mode: str | None = None,

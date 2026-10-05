@@ -1604,7 +1604,7 @@ function renderXchain(s) {
   (s.closed || []).forEach(c => { if (c.chain && c.url) XURL[c.mint] = c.url; });
   const names = {bsc: "BNB Chain", base: "Base", eth: "Ethereum", solana: "Solana"}, sc = x.scan || [], now = Date.now() / 1000;
   $("xc-sub").textContent = !x.enabled ? "off" : x.mode_note ? x.mode_note
-    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.today.trades ? ` (real prices ${usdS(x.today.real_usd)})` : ""}${x.blocked ? " · " + x.blocked : ""}`;
+    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.today.real_n ? ` (router-checked ${x.today.real_n}: real ${usdS(x.today.real_usd)} vs paper ${usdS(x.today.real_paper_usd)})` : ""}${x.blocked ? " · " + x.blocked : ""}`;
   $("xc-scansub").textContent = x.last_scan ? `${sc.filter(r => !r.why).length} passing of the top ${sc.length} · ${dur(now - x.last_scan)} ago` : "";
   const R = x.ready || {checks: []};
   $("xc-readysub").textContent = `${R.passed || 0} of ${R.checks.length} checks passed${R.ready ? ": ready to talk about a wallet" : ""}`;
@@ -1626,7 +1626,7 @@ function renderXchain(s) {
     : `<div class="empty">${x.mode_note ? esc(x.mode_note) + "." : x.active ? "No other-chain positions. It scans BNB Chain, Base and Solana DEX coins every 90 seconds and buys only coins that pass every rule and can be sold again." : "Off. Turn on “Other chains (paper)” in Controls."}</div>`;
   $("xc-scan").innerHTML = sc.length ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Chain</th><th class="r">Market cap</th><th class="r">Liquidity</th><th class="r">Vol 1h</th><th class="r">1h</th><th>Verdict</th></tr></thead><tbody>${sc.map(r => `<tr>
       <td><a href="${esc(r.dex || "")}" target="_blank" rel="noopener noreferrer"><b>${esc(r.symbol)}</b></a></td><td><span class="tag">${esc(r.chain_name || r.chain)}</span></td>
-      <td class="r">${r.mcap_usd ? "$" + fmtUsd(r.mcap_usd) : "–"}</td><td class="r">${r.liq_usd ? "$" + fmtUsd(r.liq_usd) : "–"}</td><td class="r">${r.vol_h1 ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
+      <td class="r">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r">${r.liq_usd ? "$" + fmtUsd(r.liq_usd) : "–"}</td><td class="r">${r.vol_h1 ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
       <td class="r ${cls(r.chg_h1)}">${r.chg_h1 != null ? pct(r.chg_h1) : "–"}</td><td class="note">${r.why ? esc(r.why) : "<b>passes</b>"}</td></tr>`).join("")}</tbody></table></div>`
     : `<div class="empty">No scan yet.</div>`;
 }

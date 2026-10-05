@@ -104,6 +104,8 @@ def test_a_paper_round_trip_pays_real_costs_and_lands_in_the_shared_book(monkeyp
     assert not x.positions
     row = e.book.closed[-1]
     assert row["source"] == "chains" and row["chain"] == "base" and row["exit"].startswith("stop loss")
+    from meme_trader.sniper.report import row_mode
+    assert row["mode"] == "paper" and row["session"] and row_mode({"source": "chains"}) == "paper"   # counted in paper results
     assert -30 < row["pnl_pct"] < -22 and row["pnl_usd"] < -6                   # -20% move plus a 2% sell tax and costs
     assert abs((e.book.day_pnl - day0) - row["pnl"]) < 1e-9                      # counts toward the daily loss limit
     assert abs(e.book.sol - (sol0 + row["pnl"])) < 1e-9
