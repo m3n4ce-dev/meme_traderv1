@@ -796,6 +796,9 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.dh-plan { border: 1px solid var(--ring); border-radius: 10px; padding: 8px 10px; margin: 6px 0 10px; font-size: 13px; } .dh-plan p { margin: 4px 0; }
+.dh-plan-h { font-weight: 700; margin-bottom: 4px; } .dh-exps { display: grid; gap: 4px; margin: 6px 0; }
+.dh-acts { display: grid; gap: 6px; margin: 8px 0; } .dh-act { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 .dh-lines { display: grid; gap: 6px; margin: 6px 0; max-height: 360px; overflow: auto; } .dh-take { margin: 6px 0 2px; font-size: 13px; }
 .dh-sugg { margin: 4px 0; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--warn-mark) 14%, transparent); font-size: 13px; }
 .cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
@@ -4862,11 +4865,19 @@ function renderHuddles(d) {
   const head = `<div class="form-row" style="margin-bottom:6px"><button class="small primary" data-huddle="1" ${d.huddling ? "disabled" : ""}>${d.huddling ? "Meeting…" : "📣 Call a huddle"}</button>
     <span class="note">${awake && every ? `every ${every} min while the desk is awake` : "the desk is resting: call one any time"} · one call on ${esc((d.desk.brain || {}).model || "the desk's model")}${h && h.cost_usd ? ` (~$${h.cost_usd.toFixed(3)})` : ""}</span></div>
     ${d.huddle_error ? `<p class="note down">Last try failed: ${esc(d.huddle_error)}</p>` : ""}`;
-  if (!h) { setHTML(box, head + `<div class="empty">No huddles yet.</div>`); return; }
-  setHTML(box, head + `<div class="note">${ago(h.ts)} ago · ${esc(h.reason)}</div>
+  const pl = d.plan || {}, stTag = {proposed: "", running: "late", passed: "ok", failed: "bad", stopped: ""};
+  const plan = pl.goal ? `<div class="dh-plan"><div class="dh-plan-h">📈 Growth plan <span class="note">updated ${pl.updated ? dur(Date.now() / 1000 - pl.updated) + " ago" : ""}</span></div>
+    <p><b>Goal:</b> ${esc(pl.goal)}</p><p><b>Strategy:</b> ${esc(pl.strategy)}</p>
+    ${(pl.experiments || []).length ? `<div class="dh-exps">${pl.experiments.map(x => `<div><span class="tag ${stTag[x.status] || ""}">${esc(x.status)}</span> <b>${esc(x.name)}</b>: ${esc(x.change)} <span class="note">· passes if ${esc(x.success_if)}</span></div>`).join("")}</div>` : ""}
+    ${pl.next ? `<p class="note"><b>Next:</b> ${esc(pl.next)}</p>` : ""}</div>` : "";
+  if (!h) { setHTML(box, head + plan + `<div class="empty">No huddles yet.</div>`); return; }
+  const acts = (h.actions || []).map((a, i) => `<div class="dh-act"><code>${esc(a.key)}</code> → <b>${esc(a.value)}</b> <span class="note">${esc(a.why)}</span>
+      ${a.applied ? `<span class="tag ok">✓ applied</span>` : `<button class="small primary" data-hap="${esc(h.id)}:${i}">Apply</button>`}</div>`).join("");
+  setHTML(box, head + plan + `<div class="note">${ago(h.ts)} ago · ${esc(h.reason)}</div>
     <div class="dh-lines">${h.lines.map(l => `<div class="msg">${avatarChip(l.who)}<div class="mb"><div class="mh"><b>${who(l.who)}</b></div><div>${esc(l.say)}</div></div></div>`).join("")}</div>
     <p class="dh-take"><b>Takeaway:</b> ${esc(h.takeaway)}</p>
-    ${h.suggestion ? `<p class="dh-sugg">💡 <b>Suggestion for you:</b> ${esc(h.suggestion)} <span class="note">(their idea, not an action: change it yourself if you agree)</span></p>` : ""}
+    ${acts ? `<div class="dh-acts"><div class="note">The team's proposed changes: nothing changes until you press Apply.</div>${acts}</div>` : ""}
+    ${h.suggestion ? `<p class="dh-sugg">💡 <b>For you:</b> ${esc(h.suggestion)}</p>` : ""}
     ${hs.length > 1 ? `<details><summary class="note">Earlier huddles (${hs.length - 1})</summary>${hs.slice(1).map(x => `<p class="note">${ago(x.ts)} ago: ${esc(x.takeaway)}${x.suggestion ? ` · 💡 ${esc(x.suggestion)}` : ""}</p>`).join("")}</details>` : ""}`);
   if (h.id !== IO.huddleSeen) {
     IO.huddleSeen = h.id;
@@ -5261,7 +5272,7 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -5290,6 +5301,7 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.hap) { const [hid, i] = d.hap.split(":"); t.disabled = true; send({action: "huddle_apply", id: hid, i: +i}); setTimeout(loadDesk, 700); return; }
   if (d.huddle) { t.disabled = true; t.textContent = "Meeting…"; send({action: "huddle"}); setTimeout(loadDesk, 6000); setTimeout(loadDesk, 15000); return; }
   if (d.room) { showRoom(d.room); return; }
   if (d.edgecopy) { const txt = S.analytics?.edge?.text || ""; navigator.clipboard.writeText(txt).then(() => toast("Copied: paste it into your group", "ok"), () => toast("Couldn't copy: select the text in Analytics instead", "bad")); return; }
