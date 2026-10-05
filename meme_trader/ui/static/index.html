@@ -592,7 +592,7 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 @keyframes c-zz { 0% { opacity: 0; transform: translate(0, 0); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(9px, -14px); } }
 @keyframes c-hop { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(-9px); } 60% { transform: translateY(0); } 80% { transform: translateY(-3px); } }
 @keyframes c-blinkred { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-.inspector { position: sticky; top: 64px; }
+.inspector { position: relative; }   /* (was sticky: it covered the panels below it once the side column grew) */
 /* the trading room (isometric) */
 :root { --iso-wall-l: #e6e1f2; --iso-wall-r: #d8d1ea; --iso-skirt: #9c8ab8; --iso-tile1: #c9b28c; --iso-tile2: #bea47c; --iso-rug: #9d8fd6;
   --iso-ln: rgba(30,22,10,.55); --iso-board: #1e2a24; --iso-cork: #b8865a; --iso-frame: #f4f1fa; }
