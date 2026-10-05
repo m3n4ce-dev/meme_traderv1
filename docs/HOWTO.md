@@ -72,9 +72,11 @@ Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls
   - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
   - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
   - Balances use your `SOLANA_RPC_URL` if you set one. The public endpoint is slow for big wallets.
+- **💡 Tips:** after your own trades, a small tip can pop up: a big share of the account, red flags, a quiet coin, a losing streak, or a quick flip that only paid fees. They never block a trade. "Don't show this one again" or "Turn tips off" (Ctrl+K → tips brings them back).
+- **Graduated coins** (Pulse → Graduated, or a pasted address): paper trades them at the PumpSwap pool price from DexScreener, refreshed every 10 s. Live trading of graduated coins isn't wired up yet.
 - **>_ Terminal** (the `>_` button, or the backtick key `` ` ``): type commands instead of clicking. `help` lists them: `status`, `pos`, `buy BONK 0.1`, `sell all`, `alert BONK >= 1m`, `limit buy BONK <= 50k 0.1`, `hand all`, `away on`, `risk 2`, `desk on`, `unhalt`, `log 20`, `ask …` and more. Up arrow brings back earlier commands and Tab completes. It only runs bot commands (the same as the buttons), not system commands.
 - **↻ Restart** (next to KILL): saves everything, reloads the bot's code and settings, and carries on. Open positions and orders resume.
-- **Analytics**: what is working, in plain English, plus charts (and the **Exit lab**: other exit rules run on the same entries, to see which would have done better):
+- **Analytics**: what is working, in plain English, plus charts. **Edge check**: is each strategy's result real or luck (a 90% range, the result without its best 3 trades, day by day), with a button to copy the bots' results for a group. Also from a terminal: `python -m meme_trader.sniper edge`. And the **Exit lab**: other exit rules run on the same entries, to see which would have done better:
   - equity and drawdown;
   - a projection of the next 100 trades;
   - breakdowns by strategy, exit, hour and model score;

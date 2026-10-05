@@ -170,8 +170,11 @@ def test_every_persona_replies_to_a_note_and_answers_follow_ups(monkeypatch, tmp
     it = asyncio.run(e.memory.add("Watch AI agent coins tonight", "my hunch"))
     seen = []
 
-    async def fake(client, p, persona, item, live=None):
+    briefs = []
+
+    async def fake(client, p, persona, item, live=None, brief=None):
         seen.append((persona, [m["who"] for m in item.get("thread") or []]))
+        briefs.append(brief)
         return {"reply": f"{persona} take", "stance": "neutral", "input_tokens": 10, "output_tokens": 5}
     monkeypatch.setattr(deskmod, "reply_note", fake)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -180,6 +183,9 @@ def test_every_persona_replies_to_a_note_and_answers_follow_ups(monkeypatch, tmp
     assert asyncio.run(e.discuss_note(it["id"])) == ""
     th = e.memory.items_[0]["thread"]
     assert [m["who"] for m in th] == list(e.p.desk.personas) and e.note_stats["calls"] == 4
+    b = briefs[-1]                                       # they answer questions from the bot's real state
+    assert {"edge_check_14d", "top_rejections", "settings", "recent_trades", "recent_notes", "entries_blocked"} <= set(b)
+    assert "error" not in b
     e.memory.add_reply(it["id"], "you", "@skeptic what could go wrong?")
     asyncio.run(e.discuss_note(it["id"], ["skeptic"]))
     assert e.memory.items_[0]["thread"][-1]["who"] == "skeptic" and seen[-1][1][-1] == "you"

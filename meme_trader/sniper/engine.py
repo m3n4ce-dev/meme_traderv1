@@ -1029,7 +1029,7 @@ class Engine:
         self.book.reserved[s.mint] = sol + self._order_overhead(source)
         self.pending.add(s.mint)
         s.decided = "entered"
-        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add)}
+        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add), "amm": bool(s.migrated)}
         if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
             self._defer({"side": "buy", "mint": s.mint, "score": score, "sol": sol, "notes": list(notes),
                          "source": source, "leader": leader, "then": then, **meta})
@@ -1100,7 +1100,7 @@ class Engine:
         prio = self.p.callouts.priority_fee_sol if o["source"] == "callout" else None
         tx = (prio if prio is not None else self.p.execution.priority_fee_sol) + 0.000005
         tol = float(self.p.execution.slippage_pct)
-        if s is None or not s.price_known or s.migrated:
+        if s is None or not s.price_known or (s.migrated and not o.get("amm")):
             fill = SniperFill(False, error="token gone before the order landed", fees_lost=tx)
         elif s.curve.price > o["quote"] * (1 + tol / 100):
             fill = SniperFill(False, fees_lost=tx, error=f"price up {(s.curve.price / o['quote'] - 1) * 100:.0f}% "
@@ -1512,23 +1512,42 @@ class Engine:
                 {"ts": self.now, "summary": self.summary(), "rejects": dict(self.rejects),
                  "leaders": self.leaders.snapshot(), "desk": self.desk_stats()}, default=str, indent=1))
 
+    async def _graduated_ok(self, s: TokenState) -> str:
+        """A coin that left the curve for PumpSwap: paper trades it at DexScreener's pool price (refreshed
+        every 10 s while held, curve fees modelled - a little worse than the pool's real ~0.3%). Live orders
+        here go to the bonding curve only, so live refuses. '' or why not."""
+        if self.mode.startswith("live"):
+            return "it has graduated to PumpSwap: the bot's live orders go to the bonding curve only (paper can trade it)"
+        if not self.feed.realtime:                        # a replay or demo: no pool to ask
+            return "" if s.price_known else "it has graduated and there's no pool price for it here"
+        if s.mint not in await self._dex_price([s.mint]):   # a fresh price to buy at
+            return "it has graduated, and DexScreener has no SOL pool price for it right now"
+        return ""
+
     async def _price_fallback(self) -> None:
-        """Held tokens with no price (just restored) or no trade for 90s (quiet / migrated outside our stream):
-        fetch a price from DexScreener every 15s so exits and equity keep working."""
-        if not self.feed.realtime or self.now - self._last_price_fallback < 15:
+        """Held tokens with no price (just restored), no trade for 90s (quiet), or graduated to PumpSwap (outside
+        our stream): fetch a price from DexScreener every 10s so exits and equity keep working."""
+        if not self.feed.realtime or self.now - self._last_price_fallback < 10:
             return
         stale = [m for m, p in self.positions.items()
-                 if m in self.tokens and (not self.tokens[m].price_known or self.now - self.tokens[m].last_trade_ts > 90)]
+                 if m in self.tokens and (not self.tokens[m].price_known or self.tokens[m].migrated
+                                          or self.now - self.tokens[m].last_trade_ts > 90)]
         if not stale:
             return
         self._last_price_fallback = self.now
+        await self._dex_price(stale)
+
+    async def _dex_price(self, mints: list[str]) -> set[str]:
+        """DexScreener's price for these coins: exact curve reserves while on pump.fun, the pool price after.
+        Returns the mints it priced."""
         from .curve import FINAL_V_TOKENS, INITIAL_V_SOL, INITIAL_V_TOKENS
         from ..clients import dexscreener
 
         try:
-            pairs = await asyncio.to_thread(dexscreener.best_pair_by_mint, stale)
+            pairs = await asyncio.to_thread(dexscreener.best_pair_by_mint, mints)
         except Exception:
-            return
+            return set()
+        done: set[str] = set()
         k = INITIAL_V_SOL * INITIAL_V_TOKENS
         for m, pair in pairs.items():
             px = float(pair.get("priceNative") or 0)
@@ -1543,6 +1562,8 @@ class Engine:
             s.price_known = True
             s.peak_price = max(s.peak_price, px)
             s.last_trade_ts = self.now
+            done.add(m)
+        return done
 
     # ------------------------------------------------------------------ persistence (live, and the real-feed paper bot)
     def save_state(self) -> None:
@@ -1937,7 +1958,11 @@ class Engine:
             return "an order for that coin is already in flight: wait a moment"
         if mint in self.positions:                       # you already hold it: this adds to the position
             s = self.tokens.get(mint)
-            if s is None or not s.price_known or s.migrated:
+            if s is not None and s.migrated:
+                why = await self._graduated_ok(s)
+                if why:
+                    return why
+            if s is None or not s.price_known:
                 return "no live price for it right now, so nothing to add at"
             why = self._authorize(mint, sol, "manual")
             if why:
@@ -1948,8 +1973,12 @@ class Engine:
         if s is None:
             s = self.tokens[mint] = TokenState(mint, None, self.now)
             await self._watch(mint)
+        if not s.price_known and self.feed.realtime:      # not seen trading yet: maybe it graduated long ago
+            await self._dex_price([mint])
         if s.migrated:
-            return "it has graduated off the bonding curve: this bot trades the curve only"
+            why = await self._graduated_ok(s)
+            if why:
+                return why
         why = self._authorize(mint, sol, "manual")
         if why:
             return why
@@ -2282,9 +2311,13 @@ class Engine:
 
         brain = deskmod.Desk(Params({**pd, "enabled": True}))     # the desk's model, awake or not
         self.note_waiting[item_id] = set(personas)
+        try:
+            brief = await self.desk_brief(item_id)
+        except Exception as e:                                     # a briefing problem never blocks the replies
+            brief = {"error": f"couldn't build the briefing: {type(e).__name__}"}
 
         async def one(persona: str) -> None:
-            r = await deskmod.reply_note(brain, pd, persona, it, live)
+            r = await deskmod.reply_note(brain, pd, persona, it, live, brief)
             self.note_stats["calls"] += 1
             self.note_stats["input_tokens"] += r.get("input_tokens", 0)
             self.note_stats["output_tokens"] += r.get("output_tokens", 0)
@@ -2298,6 +2331,46 @@ class Engine:
             self.note_waiting.pop(item_id, None)
         self.say("desk", f"the desk replied to “{it.get('title', '')[:60]}”")
         return ""
+
+    async def desk_brief(self, item_id: str = "") -> dict:
+        """The bot's real state, compact, so the personas can answer questions about it ("what's holding us
+        back?") with numbers instead of guessing. Only facts the dashboard already shows; no keys or wallets."""
+        from .edge import check
+
+        if self.persist:
+            from .report import load_trades
+            rows = await asyncio.to_thread(load_trades, DATA, 14, self.mode)
+        else:
+            rows = list(self.book.closed)
+        edge = []
+        for src in ("late", "sniper", "copy", "callout", "manual"):
+            if any((t.get("source") or "").split(":")[0] == src for t in rows):
+                v = await asyncio.to_thread(check, rows, src, 1000)
+                edge.append({k: (round(x, 3) if isinstance(x, float) else x) for k, x in v.items()
+                             if k in ("label", "n", "ret_pct", "mean_pct", "median_pct", "win_rate", "lo_pct", "hi_pct",
+                                      "without_best3_sol", "pnl_sol", "verdict", "caveats", "span_days")})
+        s = self.summary()
+        recent = [{"symbol": c.get("symbol"), "strategy": (c.get("source") or "").split(":")[0],
+                   "pnl_pct": round(c.get("pnl_pct") or 0, 1), "exit": (c.get("exit") or "")[:60],
+                   "held_s": round((c.get("closed") or 0) - (c.get("opened") or 0))} for c in self.book.closed[-12:]]
+        lab = self.lab.view("late")
+        notes = [{"title": (i.get("title") or "")[:80], "note": (i.get("note") or "")[:200], "kind": i.get("kind"),
+                  "mint": i.get("mint") or None} for i in self.memory.items_[-8:] if i.get("id") != item_id]
+        return {
+            "mode": self.mode, "equity_sol": round(self.equity(), 3), "start_sol": round(self.book.start_sol, 3),
+            "halted": self.book.halted or None, "paused": self.paused, "entries_blocked": self.entries_blocked() or None,
+            "risk": self.risk_info().get("name"), "today_pnl_sol": round(self.book.day_pnl, 3),
+            "strategies_on": [k for k, on in (("graduation plays", self.p.late.enabled), ("sniper", self.p.entry.enabled),
+                                              ("copy", self.p.copy.enabled), ("callouts", self.p.callouts.enabled)) if on],
+            "edge_check_14d": edge, "session": {k: s.get(k) for k in ("closed", "win_rate", "realized_pnl_sol", "launches", "entries")},
+            "top_rejections": [[why, n] for why, n in self.rejects.most_common(10)],
+            "recent_trades": recent,
+            "exit_lab": [{"rule": v["variant"], "n": v["n"], "mean_pct": round(v["mean_pct"], 1)} for v in (lab.get("variants") or [])[:7]],
+            "settings": {c["key"]: c["value"] for c in self.controls()},
+            "feed": {"host": getattr(self.feed, "host", ""), "lag_s": getattr(self.feed, "lag_s", None),
+                     "degraded": getattr(self.feed, "degraded_reason", "") or None},
+            "ai_desk_voting": bool(self.desk and self.desk.enabled), "recent_notes": notes,
+        }
 
     # ------------------------------------------------------------------ hand your positions to the bots
     def _bot_rules_for(self, s: TokenState | None) -> str:

@@ -148,10 +148,22 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         return web.Response(body=raw.replace(b"__UI_VERSION__", version.encode()), content_type="text/html",
                             charset="utf-8", headers={"Cache-Control": "no-store"})
 
+    edge_cache: list = [0.0, None]
+
     async def analytics(_):
         d = await engine.analytics_async()
         if isinstance(d, dict):
-            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper")}}
+            if time.time() - edge_cache[0] > 120:             # the trade files only change when a trade closes
+                from ..journal import DATA
+                from ..sniper.edge import as_text, report
+                from ..sniper.report import load_trades
+                closed = list(engine.book.closed)
+
+                def build():                                  # the real bot: 14 days of its trade files; a demo: this run
+                    rep = report(load_trades(DATA, 14, engine.mode) if engine.persist else closed, engine.mode)
+                    return {**rep, "text": as_text(rep)}
+                edge_cache[:] = [time.time(), await asyncio.to_thread(build)]
+            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper")}, "edge": edge_cache[1]}
         return _json(d)
 
     async def token(request):
@@ -384,7 +396,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
         if action == "key_test":
-            ok, text = await keymod.test_anthropic()
+            ok, text = await keymod.test_key(str(cmd.get("name") or "ANTHROPIC_API_KEY"))
             return {"ok": ok, "text": ("✓ " if ok else "✕ ") + text}
         if action == "key_clear":
             try:
