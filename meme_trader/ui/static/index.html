@@ -805,7 +805,7 @@ a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: 
 .cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
 .lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; padding: 4px 0 16px; }
 .lc-card { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
-.lc-card.you { border-color: #22d3ee66; } .lc-card canvas { width: 100%; display: block; margin-top: 6px; }
+.lc-card.you { border-color: #22d3ee66; } .lc-card.pin { border-style: dashed; } .lc-card canvas { width: 100%; display: block; margin-top: 6px; }
 .lc-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .lc-h .spacer { flex: 1; } .lc-g { font-weight: 700; font-size: 15px; }
 .lc-legend { display: inline-flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .lc-legend i { font-style: normal; letter-spacing: -2px; margin-right: 2px; } .lc-dash { display: inline-block; width: 14px; border-top: 1px dashed var(--axis); vertical-align: middle; }
@@ -1838,13 +1838,26 @@ function renderDrawer(d) {
 // ---------------------------------------------------------------- live charts: every trade, streamed
 // The page names the coins it's charting (chart_sub); the server streams each trade on them within ~0.25 s,
 // with markers: your and the bots' entries and exits, and trades by the dev, smart wallets and whales.
-const LC = {data: {}, want: "", raf: 0, win: +(store.get("lc-win") || 600)};
+const LC = {data: {}, want: "", raf: 0, win: +(store.get("lc-win") || 600), pins: (() => { try { return JSON.parse(store.get("lc-pins") || "[]").filter(x => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x && x.mint || "")); } catch { return []; } })()};
+const lcPinned = mint => LC.pins.some(x => x.mint === mint);
+function lcPin(mint) {
+  if (!isMint(mint)) return;
+  if (lcPinned(mint)) { LC.pins = LC.pins.filter(x => x.mint !== mint); toast("Unpinned from Charts", "ok"); }
+  else {
+    if (LC.pins.length >= 8) { toast("8 pins at most: unpin one on the Charts tab first", "bad"); return; }
+    const c = LC.data[mint], last = c && c.pts.length ? c.pts[c.pts.length - 1][1] : null;
+    LC.pins.push({mint, sym: tokenName(mint).replace(/<[^>]+>/g, ""), t: Date.now() / 1000, p: last});
+    toast("Pinned: it's on the Charts tab, live", "ok");
+  }
+  store.set("lc-pins", JSON.stringify(LC.pins));
+  lcSync(); if (S.tab === "charts" && snap) renderCharts(snap);
+}
 const LCWHO = {you: ["#22d3ee", "You"], bot: ["#a78bfa", "Bots"], dev: ["#ef4444", "Dev"], kol: ["#f472b6", "KOLs"], smart: ["#f59e0b", "Smart wallets"], whale: ["#94a3b8", "Whales (2+ SOL)"]};
 function lcWanted() {
   const m = new Set();
   if (isMint(TR.mint) && S.tab === "live") m.add(TR.mint);
   if (S.drawer) m.add(S.drawer);
-  if (S.tab === "charts" && snap) (snap.positions || []).forEach(p => m.add(p.mint));
+  if (S.tab === "charts" && snap) { (snap.positions || []).forEach(p => m.add(p.mint)); LC.pins.forEach(x => m.add(x.mint)); }
   return [...m].slice(0, 12);
 }
 function lcSync() {
@@ -1857,7 +1870,10 @@ function onTicks(m) {
     const c = LC.data[mint] && !d.full ? LC.data[mint] : (LC.data[mint] = {pts: [], marks: []});
     if (d.pts && d.pts.length) { c.pts.push(...d.pts); if (c.pts.length > 3000) c.pts.splice(0, c.pts.length - 3000); }
     if (d.marks) c.marks = d.marks;
-    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, fam: d.fam, got: Date.now()});
+    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, fam: d.fam, got: Date.now(),
+      mcap_usd: d.mcap_usd, curve_pct: d.curve_pct, age_s: d.age_s, migrated: d.migrated});
+    const pin = LC.pins.find(x => x.mint === mint);
+    if (pin && pin.p == null && c.pts.length) { pin.p = c.pts[c.pts.length - 1][1]; store.set("lc-pins", JSON.stringify(LC.pins)); }
   }
   if (!LC.raf) LC.raf = requestAnimationFrame(lcDraw);
 }
@@ -1950,6 +1966,15 @@ function tickChart(cv, c, o = {}) {
 }
 // ---------------------------------------------------------------- Charts tab: every coin you hold, live
 function lcCardNums() {
+  for (const x of LC.pins) {
+    const card = document.querySelector(`.lc-card.pin[data-mint="${CSS.escape(x.mint)}"]`), c = LC.data[x.mint];
+    if (!card) continue;
+    if (!c || !c.pts.length) { card.querySelector(".lc-sub").textContent = "waiting for its trades… (the bot may have stopped tracking it)"; continue; }
+    const last = c.pts[c.pts.length - 1][1], ch = x.p ? (last / x.p - 1) * 100 : null, g = card.querySelector(".lc-g");
+    g.textContent = ch == null ? "" : pct(ch, 1); g.className = "lc-g num " + cls(ch || 0);
+    card.querySelector(".lc-sub").textContent = `since you pinned it ${ago(x.t)} ago · MC $${fmtUsd(c.mcap_usd || 0)} · curve ${fx(c.curve_pct || 0, 0)}%${c.migrated ? " · graduated" : ""} · ${dur(c.age_s || 0)} old`;
+    card.querySelector(".lc-fam").innerHTML = famBadge(c.fam);
+  }
   for (const p of (snap && snap.positions) || []) {
     const el = document.querySelector(`.lc-card[data-mint="${CSS.escape(p.mint)}"] .lc-g`);
     if (el) { el.textContent = pct(p.gain_pct, 1); el.className = "lc-g num " + cls(p.gain_pct); }
@@ -1957,19 +1982,28 @@ function lcCardNums() {
 }
 function lcOwner(p) { return p.source === "manual" ? (p.bot ? ["you", "yours · bots riding it"] : ["you", "yours"]) : ["bot", "bot · " + p.source]; }
 function renderCharts(s) {
-  const ps = s.positions || [], box = $("lc-grid"), key = ps.map(p => p.mint + p.source + (p.bot || "")).join("|");
-  $("lc-count").textContent = ps.length ? `${ps.length} open · every trade, live · ▲ buys ▼ sells, hover a marker for who` : "";
+  const ps = s.positions || [], box = $("lc-grid"), held = new Set(ps.map(p => p.mint)), pins = LC.pins.filter(x => !held.has(x.mint));
+  const key = ps.map(p => p.mint + p.source + (p.bot || "")).join("|") + "#" + pins.map(x => x.mint).join("|");
+  $("lc-count").textContent = ps.length || pins.length ? `${ps.length} open${pins.length ? ` · ${pins.length} pinned` : ""} · every trade, live · ▲ buys ▼ sells, hover a marker for who` : "";
   if (box.dataset.key !== key) {
     box.dataset.key = key;
-    box.innerHTML = ps.length ? ps.map(p => { const [who, lab] = lcOwner(p);
+    box.innerHTML = ps.map(p => { const [who, lab] = lcOwner(p);
       return `<div class="lc-card ${who}" data-mint="${esc(p.mint)}">
         <div class="lc-h">${logo(p.mint, p.symbol)} <b>${esc(p.symbol)}</b> ${famBadge(p.fam)} <span class="tag">${esc(lab)}</span> <span class="lc-g num"></span>
           <span class="note lc-sub"></span><span class="spacer"></span><button class="small ghost" data-lcopen="${esc(p.mint)}">Details</button></div>
         <canvas data-lc="${esc(p.mint)}" height="200"></canvas><div class="lc-legend"></div>
         <div class="lc-act"><span class="note">Sell</span>${[.25, .5, 1].map(f => `<button class="small" data-lcsell="${esc(p.mint)}" data-f="${f}">${f * 100}%</button>`).join("")}
           <button class="small ghost" data-lctrade="${esc(p.mint)}">Trade panel</button></div></div>`; }).join("")
-      : `<div class="empty">No open positions. Coins you or the bots hold show up here, each with its live chart.</div>`;
+      + pins.map(x => { const qs = ((s.manual && s.manual.presets_sol) || [0.1, 0.25, 0.5]).slice(0, 4);
+        return `<div class="lc-card pin" data-mint="${esc(x.mint)}">
+        <div class="lc-h">${logo(x.mint, x.sym)} <b>${esc(x.sym || short(x.mint))}</b> <span class="lc-fam"></span> <span class="tag">📌 watching</span> <span class="lc-g num"></span>
+          <span class="note lc-sub"></span><span class="spacer"></span><button class="small ghost" data-lcopen="${esc(x.mint)}">Details</button></div>
+        <canvas data-lc="${esc(x.mint)}" height="200"></canvas><div class="lc-legend"></div>
+        <div class="lc-act"><span class="note">Buy</span>${qs.map(v => `<button class="small tb-buy" data-mbuy="${esc(x.mint)}" data-sol="${v}">${v} SOL</button>`).join("")}
+          <button class="small ghost" data-lcpin="${esc(x.mint)}">Unpin</button></div></div>`; }).join("")
+      || `<div class="empty">Nothing here yet. Coins you or the bots hold show up with their live charts; to watch any other coin, pin it (📈 Pin in its details, or right-click it anywhere).</div>`;
   }
+  for (const x of pins) { const card = box.querySelector(`.lc-card.pin[data-mint="${CSS.escape(x.mint)}"]`); if (card) card.querySelector(".lc-legend").innerHTML = lcLegend(LC.data[x.mint]); }
   for (const p of ps) {
     const card = box.querySelector(`.lc-card[data-mint="${CSS.escape(p.mint)}"]`); if (!card) continue;
     card.querySelector(".lc-sub").textContent = `${sol(p.cost_sol)}${U()} in · held ${dur(p.held_s)} · peak ${pct(p.peak_gain_pct, 0)}${p.last_trade_s > 30 ? ` · no trades for ${dur(p.last_trade_s)}` : ""}`;
@@ -3777,7 +3811,8 @@ function tradeBar(mint, sym) {
   const m = (snap && snap.manual) || {presets_sol: [0.05, 0.1, 0.25, 0.5, 1]};
   const pos = snap && snap.positions.find(p => p.mint === mint);
   return `<div class="tbar"><div class="tbar-row"><span class="note">Buy</span>
-      ${m.presets_sol.map(v => `<button class="small tb-buy" data-mbuy="${esc(mint)}" data-sol="${v}">${v} SOL</button>`).join("")}</div>
+      ${m.presets_sol.map(v => `<button class="small tb-buy" data-mbuy="${esc(mint)}" data-sol="${v}">${v} SOL</button>`).join("")}
+      <button class="small ghost" data-lcpin="${esc(mint)}" title="Watch its live chart on the Charts tab">📈 ${lcPinned(mint) ? "Unpin" : "Pin"}</button></div>
     ${pos ? `<div class="tbar-row"><span class="note">Sell</span>${sellBtns(mint)}</div>` : ""}</div>`;
 }
 function sellBtns(mint) {
@@ -4936,7 +4971,7 @@ function runPalette(i) { const x = CK.items[i]; if (!x) return; closePalette(); 
 // ---------------------------------------------------------------- right-click any coin
 function coinMenu(mint, x, y) {
   const qb = PL.qb ?? 0.1, sym = tokenName(mint).replace(/<[^>]+>/g, "");
-  const items = [["Trade…", "trade"], [`⚡ Quick buy ${qb} SOL`, "qb"], ["📣 Call it", "call"], ["🔔 Alert…", "alert"], ["📌 Save to memory", "mem"],
+  const items = [["Trade…", "trade"], [`⚡ Quick buy ${qb} SOL`, "qb"], [lcPinned(mint) ? "📈 Unpin from Charts" : "📈 Pin to Charts", "pin"], ["📣 Call it", "call"], ["🔔 Alert…", "alert"], ["📌 Save to memory", "mem"],
     ["✎ Post about it", "post"], ["⧉ Copy address", "copy"], ["pump.fun ↗", "pf"], ["DexScreener ↗", "dex"]];
   setHTML($("ctx"), `<div class="ctx-h">${logo(mint, sym)}<b>${esc(sym)}</b></div>` + items.map(([l, k]) => `<button data-ctxdo="${k}" data-m="${esc(mint)}">${l}</button>`).join(""));
   const m = $("ctx"); m.hidden = false;
@@ -4977,6 +5012,7 @@ function coinAction(k, mint) {
   $("ctx").hidden = true;
   if (k === "trade") { closeDrawer(); setTab("live"); setTradeMint(mint); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); }
   else if (k === "qb") trBuy(mint, PL.qb ?? 0.1);
+  else if (k === "pin") lcPin(mint);
   else if (k === "call") { openCalls(); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 120); }
   else if (k === "alert") { setTab("live"); setTradeMint(mint); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }
   else if (k === "mem") send({action: "mem_add", text: mint});
@@ -5191,7 +5227,7 @@ function buyTips(mint, sol) {
   const i = TR.info && TR.info.mint === mint ? TR.info : null, bad = ((i && i.flags) || []).filter(f => f.level === "bad").map(f => esc(f.text));
   if (bad.length) out.push({kind: "flags", html: `Red flags on <b>${sym}</b>: ${bad.slice(0, 3).join(" · ")}.`});
   const fm = famOf(mint);
-  if (fm && !fm.og) out.push({kind: "copy", html: `<b>${sym}</b> is copy ${fm.rank} of ${fm.n} coins with this name or ticker: the first, <b>$${esc(fm.og_symbol)}</b>, launched ${dur(fm.after_og_s)} earlier${fm.lead_symbol ? `; the biggest now is <b>$${esc(fm.lead_symbol)}</b>${fm.lead_mcap_usd ? " at $" + fmtUsd(fm.lead_mcap_usd) : ""}` : ""}. Copies split the same buyers, and the weaker ones usually fade.`});
+  if (fm && !fm.og) out.push({kind: "copy", html: `<b>${sym}</b> is copy ${fm.rank} of ${fm.n} coins with this name or ticker: the first, <b>$${esc(fm.og_symbol)}</b>, launched ${dur(fm.after_og_s)} earlier${fm.lead_symbol ? `; the biggest now is <b>$${esc(fm.lead_symbol)}</b>${fm.lead_mcap_usd ? " at $" + fmtUsd(fm.lead_mcap_usd) : ""}` : ""}. Being the OG isn't an edge by itself: in our recordings, copies that reached the graduation setup did as well as OGs or better. Momentum decides which one wins.`});
   const kb = ((LC.data[mint] || {}).marks || []).filter(m => m.who === "kol" && m.side === "buy" && (s.now || 0) - m.t < 120);
   if (kb.length) out.push({kind: "kol", html: `<b>${esc(kb[kb.length - 1].label)}</b> ${dur(Math.max(0, (s.now || 0) - kb[kb.length - 1].t))} ago. In our recordings KOLs sold a median 34 s after buying, and copying them 1-2.5 s late lost ~13% a trade: if you're in for the KOL, be ready to get out fast.`});
   const q = quietFor(mint);
@@ -5461,12 +5497,13 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.lcpin) { lcPin(d.lcpin); if (S.drawer === d.lcpin) t.textContent = `📈 ${lcPinned(d.lcpin) ? "Unpin" : "Pin"}`; return; }
   if (d.kolref) { t.disabled = true; send({action: "kols_refresh"}); setTimeout(() => t.disabled = false, 8000); return; }
   if (d.lcwin != null) { LC.win = +d.lcwin; store.set("lc-win", LC.win); if (snap) renderCharts(snap); return; }
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }

@@ -2966,6 +2966,8 @@ class Engine:
                 marks.append({"t": round(t, 2), "p": at(t), "side": "sell", "who": k, "label": f"{lab} sold part for {sol:.3f} SOL ({why[:40]})"})
         marks.sort(key=lambda m: m["t"])
         return {"mint": mint, "symbol": s.symbol, "pts": pts, "marks": marks, "now": round(self.now, 2), "fam": self.family(mint),
+                "mcap_usd": round(s.market_cap_sol * self.sol_price.usd), "curve_pct": round(s.curve.progress * 100, 1),
+                "age_s": round(s.age(self.now)), "migrated": s.migrated,
                 "price": s.curve.price, "entry": pos.entry_price if pos else None,
                 "position": None if pos is None else {"source": pos.source, "bot": pos.bot or "",
                                                        "gain_pct": round(pos.gain_pct(s.curve.price), 1),
