@@ -283,3 +283,27 @@ def test_the_owner_can_lift_the_kill_switch_and_it_counts_from_there(tmp_path):
             return m
     m = asyncio.run(go())
     assert m["ok"] and "trips again at" in m["text"] and not e.book.halted
+
+
+def test_graduated_coins_trade_on_paper_at_the_pool_price_and_live_says_why_not():
+    """Owner hit 'it has graduated off the bonding curve' buying from Pulse's Graduated column."""
+    e = market()
+    e.p.execution["paper_delay_s"] = 2.0
+    s = live_coin(e)
+    s.migrated = True                                    # left the curve; the price now comes from its pool
+
+    async def go():
+        assert await e.manual_buy(s.mint, 0.1) == ""
+        e.now += 3
+        await e._settle_deferred()                       # the delayed paper order still lands on a graduated coin
+        held = s.mint in e.positions
+        assert await e.manual_sell(s.mint, 1.0) == ""
+        e.now += 3
+        await e._settle_deferred()
+        return held
+    assert asyncio.run(go()) and s.mint not in e.positions
+    e2 = market(launches=1)
+    s2 = live_coin(e2)
+    s2.migrated = True
+    e2.mode = "live"
+    assert "PumpSwap" in asyncio.run(e2.manual_buy(s2.mint, 0.1))

@@ -196,6 +196,10 @@ input[type="number"] { width: 110px; }
 .fact .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .fact .v { font-weight: 650; }
 /* toasts */
+.tipbox { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 140; width: min(400px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--ring); border-left: 4px solid var(--warn-mark); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px; }
+.tipbox .tip-h { font-weight: 700; margin-bottom: 4px; } .tipbox p, .tipbox ul { margin: 0 0 8px; } .tipbox ul { padding-left: 18px; } .tipbox li { margin: 3px 0; }
+.tip-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; width: min(380px, calc(100vw - 32px)); }
 .toast { background: var(--surface); border: 1px solid var(--ring); border-left: 4px solid var(--axis); border-radius: 10px;
   padding: 9px 12px; box-shadow: var(--shadow); font-size: 13px; transition: opacity .3s, transform .3s; }
@@ -722,8 +726,8 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
 .teach textarea { width: 100%; min-height: 58px; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--ring);
   background: var(--surface); color: var(--ink); resize: vertical; }
 .teach .form-row input { flex: 1; }
-.mem-list { display: grid; gap: 6px; max-height: 420px; overflow: auto; margin-top: 10px; }
-.mem { padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--axis); font-size: 12.5px; display: grid; gap: 3px; }
+.mem-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-height: 420px; overflow: auto; margin-top: 10px; }
+.mem { padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--axis); font-size: 12.5px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }   /* replies wrap to the column, never past it */
 .mem.ca { border-left-color: var(--warn-mark); } .mem.x { border-left-color: var(--ink-2); } .mem.web { border-left-color: var(--series); } .mem.note { border-left-color: var(--accent); }
 .mem-h { display: flex; gap: 6px; align-items: center; } .mem-h b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mem-h .logo { width: 16px; height: 16px; font-size: 8px; margin-right: 4px; }
@@ -783,6 +787,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.edge-why { margin-top: 8px; } .edge-why summary { cursor: pointer; } .edge-why ul { margin: 6px 0; padding-left: 20px; }
 .db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .db-grid label { display: grid; gap: 3px; font-size: 12px; } .db-grid .db-url { grid-column: 1 / -1; }
 .db-grid select, .db-grid input { width: 100%; } .db-cost { margin: 6px 0 8px; font-size: 13px; }
 tr.lab-base td { background: var(--series-soft); } tr.lab-best td:first-child { font-weight: 700; }
@@ -799,7 +804,7 @@ tr.lab-base td { background: var(--series-soft); } tr.lab-best td:first-child { 
 #tr-ordform select { max-width: 150px; } #tr-ord-mc { width: 150px; } #tr-ord-frac { width: 64px; }
 .call-btn { background: linear-gradient(135deg, #7a5af8, #3c5bd6); color: #fff; border-color: transparent; font-weight: 700; }
 /* memory threads */
-.thread { display: grid; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--ring); }
+.thread { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--ring); }
 .msg { display: flex; gap: 8px; align-items: flex-start; } .msg .mb { min-width: 0; flex: 1; font-size: 12.5px; }
 .msg.me .mb { background: var(--series-soft); border-radius: 8px; padding: 4px 8px; }
 .mh { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; } .mh .tag.up { color: var(--good); } .mh .tag.down { color: var(--bad); }
@@ -1234,6 +1239,10 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <section class="panel"><h2>By model P(2x) at entry</h2><div id="an-p"></div></section>
     </div>
     <section class="panel"><h2>By hour <small>UTC, P&amp;L of trades opened in that hour</small></h2><div id="an-hour"></div></section>
+    <section class="panel" id="edge-check"><h2>Edge check <small>real, or luck? each strategy's trades over the last 14 days</small></h2>
+      <p class="note">The <b>90% range</b> is where each strategy's average trade most likely sits, found by resampling its trades many times. If it spans zero, the result could be luck.
+        <b>Without its best 3</b> shows how much rests on a few runners. Measurement only: it never changes a setting.</p>
+      <div id="an-edge"></div></section>
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
@@ -1305,6 +1314,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <div class="dr-body" id="dr-body"></div>
 </aside>
 <div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="tipbox" class="tipbox" hidden role="status" aria-live="polite"><div class="tip-h">💡 Tip <span class="note">about your trade, which went through</span></div><div id="tip-body"></div>
+  <div class="tip-btns"><button class="small primary" id="tip-ok">Got it</button><button class="small" id="tip-never">Don't show this one again</button><button class="small" id="tip-off">Turn tips off</button></div></div>
 <div class="modal" id="wardrobe" hidden><div class="modal-box wd2" role="dialog" aria-label="Change your looks">
   <div class="wd2-head"><b>👕 Change your looks</b><span class="note">Pick a bot, then its hair, hat, glasses, clothes and skin. Saved on the bot: every browser sees the same team.</span>
     <div class="spacer"></div><button class="small ghost" id="wd-cancel" aria-label="Close">×</button></div>
@@ -1860,7 +1871,7 @@ function groupTable(rows, keyLabel = "") {
       <td class="r ${cls(r.pnl_sol)}">${signed(r.pnl_sol)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function renderAnalytics(a) {
-  S.analytics = a; renderExitLab();
+  S.analytics = a; renderExitLab(); renderEdge();
   const k = a.kpis || {}, dd = a.drawdown || {}, mc = a.monte_carlo;
   $("an-status").textContent = `Updated ${new Date().toLocaleTimeString([], {hour12: false})} · ${k.n || 0} closed trades (callout bags kept separate: ${a.callouts?.n || 0})`;
   const card = (l, v, sub = "", c = "") => `<div class="kpi"><div class="label">${l}</div><div class="value num ${c}">${v}</div><div class="sub">${sub}</div></div>`;
@@ -2909,12 +2920,13 @@ function renderBoards() {
   const spark = (s.equity_hist || []).slice(-60).map(e => e[1]);
   let path = "";
   if (spark.length > 1) { const lo = Math.min(...spark), hi = Math.max(...spark), r = hi - lo || 1;
-    path = spark.map((v, i) => `${(10 + i / (spark.length - 1) * (w * .42)).toFixed(1)},${(66 - (v - lo) / r * 24).toFixed(1)}`).join(" "); }
+    path = spark.map((v, i) => `${(10 + i / (spark.length - 1) * (w * .4)).toFixed(1)},${(80 - (v - lo) / r * 20).toFixed(1)}`).join(" "); }
   setHTML(pnl, `<text x="10" y="14" class="pb-t">P&amp;L BOARD</text>
-    <text x="10" y="32" class="pb-big">${sol(s.equity)} SOL</text><text x="10" y="44" class="pb-s ${cls(eqd)}">${signed(eqd)} vs start · today ${signed(s.day_pnl)}</text>
+    <text x="10" y="32" class="pb-big">${sol(s.equity)} SOL</text><text x="10" y="43" class="pb-s ${cls(eqd)}">${signed(eqd)} vs start</text>
+    <text x="10" y="53" class="pb-s ${cls(s.day_pnl)}">today ${signed(s.day_pnl)}</text>
     <polyline points="${path}" class="pb-line ${eqd >= 0 ? "up" : "down"}"/>
-    <text x="${(w * .5).toFixed(0)}" y="14" class="pb-s">${sm.closed} trades · ${sm.closed ? Math.round(sm.win_rate * 100) + "% won" : "–"}</text>
-    <text x="${(w * .5).toFixed(0)}" y="26" class="pb-s">${s.positions.length} open · ${s.risk ? esc(s.risk.name) : ""} dial</text>
+    <text x="${(w * .5).toFixed(0)}" y="14" class="pb-s">${sm.closed} trade${sm.closed === 1 ? "" : "s"} · ${sm.closed ? Math.round(sm.win_rate * 100) + "% won" : "–"}</text>
+    <text x="${(w * .5).toFixed(0)}" y="26" class="pb-s">${s.positions.length} open · risk ${s.risk ? esc(s.risk.name) : ""}</text>
     ${closed.map((c, i) => `<text x="${(w * .5).toFixed(0)}" y="${42 + i * 11}" class="pb-s">${esc((c.symbol || "").slice(0, 9))}</text><text x="${(w * .95).toFixed(0)}" y="${42 + i * 11}" text-anchor="end" class="pb-s ${cls(c.pnl)}">${signed(c.pnl)}</text>`).join("")}`);
 }
 function renderCork(items) {
@@ -3323,16 +3335,13 @@ function quietFor(mint) {
 }
 function trBuy(mint, sol) {
   if (!isMint(mint)) { toast("Paste a contract address first", "bad"); $("tr-ca").focus(); return; }
-  const q = quietFor(mint);
-  if (q != null && q > 180 && !confirm(q === Infinity ? "Nobody has traded this coin since the bot started watching it. Buying it may be easy; selling it may not. Buy anyway?"
-      : `No trades on this coin for ${dur(q)}. A quiet coin can be hard to sell. Buy anyway?`)) return;
   if (!(sol > 0)) { toast("Pick an amount", "bad"); return; }
   if (!liveConfirm(`Buy ${sol} SOL of ${tokenName(mint).replace(/<[^>]+>/g, "")}`)) return;
-  send({action: "m_buy", mint, sol});
+  if (send({action: "m_buy", mint, sol})) buyTips(mint, sol);
 }
 function trSell(mint, fraction) {
   if (!liveConfirm(`Sell ${Math.round(fraction * 100)}% of ${tokenName(mint).replace(/<[^>]+>/g, "")}`)) return;
-  send({action: "m_sell", mint, fraction});
+  if (send({action: "m_sell", mint, fraction})) sellTips(mint, fraction);
 }
 function tradeBar(mint, sym) {
   const m = (snap && snap.manual) || {presets_sol: [0.05, 0.1, 0.25, 0.5, 1]};
@@ -3372,7 +3381,7 @@ function renderTradePanel(s) {
   const i = TR.info && TR.info.mint === mint ? TR.info : null;
   const sym = (w && w.symbol) || (p && p.symbol) || (i && i.symbol) || short(mint);
   const facts = p ? `<b class="${cls(p.gain_pct)}">${pct(p.gain_pct, 1)}</b> · worth ${sol(p.value_sol)} SOL · held ${dur(p.held_s)}`
-    : w ? `curve ${(w.progress * 100).toFixed(0)}% · MC ${fx(w.mcap_sol, 0)} SOL · ${w.buyers} buyers`
+    : w ? `curve ${(w.progress * 100).toFixed(0)}% · MC ${fx(w.mcap_sol, 0)} SOL · ${w.buyers} buyers · <span title="What the bot's own rules make of it">bot's take: ${esc(w.status)}, score ${fx(w.score, 0)}</span>`
     : i ? `${esc(i.stage || "")}${i.mcap_usd ? " · MC $" + fmtUsd(i.mcap_usd) : ""}${i.curve_pct != null ? ` · curve ${fx(i.curve_pct, 0)}%` : ""}` : "looking it up…";
   setHTML($("tr-coin"), `<span class="tok" data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym, "md")}<b>${esc(sym)}</b></span>
     <span class="note">${facts}</span>${q ? `<span class="tag late">queued: buying at its first trade</span>` : ""}${p ? `<span class="tbar-row">${sellBtns(mint)}</span>` : ""}`);
@@ -3423,7 +3432,7 @@ async function loadMemory() {
   const busy = Object.keys(MEM.waiting).length;
   if (S.tab === "desk" || busy) MEM.timer = setTimeout(loadMemory, busy ? 2500 : 10000);
 }
-const STANCE = {bullish: ["up", "bullish"], bearish: ["down", "bearish"], neutral: ["", "neutral"], skip: ["", "not for us"]};
+const STANCE = {bullish: ["up", "bullish"], bearish: ["down", "bearish"], neutral: ["", "neutral"], skip: ["", "not for us"]};   // (info: an answer, no tag)
 function avatarChip(who) {
   if (who === "you") return `<span class="hm-av you">You</span>`;
   const l = botLook(who);
@@ -3561,7 +3570,7 @@ function renderKeys() {
       ${k.set ? `<span class="tag ok">✓ set${k.hint ? " · " + esc(k.hint) : ""}${k.source === "environment" ? " (from the environment)" : ""}</span>` : `<span class="tag">not set</span>`}</div>
     <span class="note">${esc(k.help)}</span>${k.warn ? `<span class="note" style="color:var(--warn)">⚠ ${esc(k.warn)}</span>` : ""}
     <div class="form-row"><input type="password" id="key-${esc(k.name)}" placeholder="${k.set ? "Replace…" : k.kind === "https" ? "https://…" : k.kind === "wss" ? "wss://…" : "Paste it here"}" autocomplete="off" spellcheck="false" aria-label="${esc(k.label)}">
-      <button class="small primary" data-keyset="${esc(k.name)}">Save</button>${k.set && k.testable ? `<button class="small" data-keytest="1">Test</button>` : ""}${k.set && k.source === ".env" ? `<button class="small ghost" data-keyclr="${esc(k.name)}">Remove</button>` : ""}</div>
+      <button class="small primary" data-keyset="${esc(k.name)}">Save</button>${k.set && k.testable ? `<button class="small" data-keytest="${esc(k.name)}">Test</button>` : ""}${k.set && k.source === ".env" ? `<button class="small ghost" data-keyclr="${esc(k.name)}">Remove</button>` : ""}</div>
     <span class="note"><code>${esc(k.name)}</code> · ${k.effect === "restart" ? "used after the bot restarts" : "used right away"}</span></div>`).join("");
 }
 function saveKey(name, btn) {
@@ -4409,7 +4418,7 @@ function ckActions() {
     {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
     {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
-    {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: ">_ Open the terminal", hint: "`", run: () => termOpen(true)},
+    {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: `💡 Turn trade tips ${store.get("tips") === "off" ? "on" : "off"}`, hint: "tips", run: () => setTips(store.get("tips") === "off")}, {label: ">_ Open the terminal", hint: "`", run: () => termOpen(true)},
     ...(s.halted ? [{label: "▶ Resume trading (lift the kill switch)", run: () => unhaltAsk((q, f) => { if (confirm(q)) f(); })}] : []), {label: "🧠 Wake / rest the AI desk", run: () => { setTab("desk"); }});
   for (const g of GUIDE) a.push({label: `${g.icon} Guide: ${g.title}`, hint: "help", run: () => openHelp(g.id)});
   for (const x of (S.adv || []).slice(0, 400)) a.push({label: `⚙ ${x.label || x.key}`, hint: x.key, run: () => { setTab("controls"); setTimeout(() => { $("adv-q").value = x.key; renderAdvanced(); $("adv-panel").scrollIntoView({block: "start"}); }, 120); }});
@@ -4436,7 +4445,7 @@ function renderPalette() {
     items = [{label: "Trade it (Manual trade)", run: () => { setTab("live"); setTradeMint(m); }}, {label: "Open its details", run: () => openDrawer(m)},
       {label: "📣 Call it", run: () => { setTab("calls"); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 60); }},
       {label: "🔔 Set an alert", run: () => { setTab("live"); setTradeMint(m); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }},
-      {label: "📌 Save to the desk's memory", run: () => send({action: "mem_add", text: m})}, {label: "✎ Post about it", run: () => openComposer(`CA: ${m}`)}];
+      {label: "📌 Save to the desk's memory", run: () => send({action: "mem_add", text: m})}, {label: "✎ Post about it", run: () => postCoin(m)}];
   } else {
     items = ckActions().map(x => ({...x, s: ckScore(x.label + " " + (x.hint || ""), q)})).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 40);
   }
@@ -4455,6 +4464,33 @@ function coinMenu(mint, x, y) {
   const m = $("ctx"); m.hidden = false;
   m.style.left = Math.min(x, innerWidth - 220) + "px"; m.style.top = Math.min(y, innerHeight - 330) + "px";
 }
+// a post about a coin: its name and the numbers people check first, filled in from what the bot sees
+// (and a lookup for coins it isn't tracking). You edit it before anything is posted.
+function coinPostDraft(mint, i) {
+  const pl = PL.data && ["stretch", "new", "graduated"].flatMap(c => PL.data[c] || []).find(r => r.mint === mint);
+  const w = snap?.watching?.find(x => x.mint === mint), p = snap?.positions?.find(x => x.mint === mint);
+  const sym = (pl || w || p || i || {}).symbol, name = (pl && pl.name) || (i && i.name) || "";
+  const mc = pl?.mcap_usd ?? i?.mcap_usd ?? (w && snap.sol_usd ? w.mcap_sol * snap.sol_usd : null);
+  const grad = i?.curve?.complete || (pl && pl.graduated_s != null);
+  const curve = grad ? null : w ? w.progress * 100 : pl?.progress != null ? pl.progress * 100 : i?.curve?.progress_pct;
+  const holders = i?.holder_count, buyers = pl?.buyers ?? w?.buyers;
+  const top10 = pl?.top10 ?? i?.holders?.top10_pct, dev = pl?.dev_pct ?? w?.dev_pct;
+  const line1 = [mc ? `MC $${fmtUsd(mc)}` : "", grad ? "graduated" : curve != null ? `curve ${Math.round(curve)}%` : "",
+                 holders ? `${holders} holders` : buyers ? `${buyers} buyers` : ""].filter(Boolean).join(" · ");
+  const line2 = [top10 != null ? `top 10 hold ${Math.round(top10)}%` : "", dev != null ? `dev ${(+dev).toFixed(1)}%` : ""].filter(Boolean).join(" · ");
+  const warn = [pl?.dev_sold ? "dev sold" : "", pl?.bundle_pct >= 20 ? `bundle ${Math.round(pl.bundle_pct)}%` : "",
+                ...((i?.flags || []).filter(f => f.level === "bad").map(f => f.text))].filter(Boolean).slice(0, 2);
+  return [sym ? `$${sym}${name && name.toLowerCase() !== sym.toLowerCase() ? ` (${name})` : ""}` : "", line1, line2,
+          warn.length ? `⚠ ${warn.join(" · ")}` : "", "", `CA: ${mint}`].filter((x, k, a) => x || (k > 0 && a[k - 1])).join("\n").trim();
+}
+function postCoin(mint) {
+  const i = TR.info && TR.info.mint === mint ? TR.info : null;
+  const draft = coinPostDraft(mint, i);
+  openComposer(draft);
+  SOC.postMint = (!i || !/\$/.test(draft.split("\n")[0])) || !/MC \$/.test(draft) ? mint : null;   // fill in the gaps when the lookup answers
+  SOC.postDraft = draft;
+  if (SOC.postMint) send({action: "lookup", mint});
+}
 function coinAction(k, mint) {
   $("ctx").hidden = true;
   if (k === "trade") { closeDrawer(); setTab("live"); setTradeMint(mint); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); }
@@ -4462,7 +4498,7 @@ function coinAction(k, mint) {
   else if (k === "call") { setTab("calls"); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 60); }
   else if (k === "alert") { setTab("live"); setTradeMint(mint); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }
   else if (k === "mem") send({action: "mem_add", text: mint});
-  else if (k === "post") openComposer(`$${tokenName(mint).replace(/<[^>]+>/g, "")}\nCA: ${mint}`);
+  else if (k === "post") postCoin(mint);
   else if (k === "copy") navigator.clipboard.writeText(mint).then(() => toast("Address copied", "ok"));
   else if (k === "pf") window.open(`https://pump.fun/coin/${encodeURIComponent(mint)}`, "_blank", "noopener");
   else if (k === "dex") window.open(`https://dexscreener.com/solana/${encodeURIComponent(mint)}`, "_blank", "noopener");
@@ -4474,6 +4510,29 @@ document.addEventListener("contextmenu", e => {
 });
 document.addEventListener("pointerdown", e => { if (!$("ctx").hidden && !e.target.closest("#ctx")) $("ctx").hidden = true; });
 
+const EDGE_LV = {good: ["ok", "looks real"], promising: ["ok", "promising"], fragile: ["warn", "fragile"], unclear: ["", "can't tell yet"],
+                 bad: ["bad", "losing"], early: ["", "too early"], none: ["", "no trades"]};
+function renderEdge() {
+  const e = S.analytics && S.analytics.edge; if (!e || !$("an-edge")) return;
+  if (!e.strategies.length) { setHTML($("an-edge"), `<div class="empty">No closed trades in the last 14 days yet.</div>`); return; }
+  const rows = e.strategies.map(s => {
+    const [k, l] = EDGE_LV[s.level] || ["", s.level];
+    if (!s.n || s.ret_pct == null) return `<tr><td>${esc(s.label)}</td><td class="r num">0</td><td colspan="4"></td><td><span class="tag">${l}</span></td></tr>`;
+    return `<tr><td>${esc(s.label)}</td><td class="r num">${s.n}</td><td class="r num ${cls(s.ret_pct)}">${pct(s.ret_pct, 1)}</td>
+      <td class="r num"><span class="${cls(s.mean_pct)}">${pct(s.mean_pct, 1)}</span> <span class="note">(${pct(s.lo_pct, 1)} to ${pct(s.hi_pct, 1)})</span></td>
+      <td class="r num ${cls(s.without_best3_sol)}">${signed(s.without_best3_sol)}</td><td class="r num">${s.days_up} of ${s.by_day.length}</td>
+      <td><span class="tag ${k}">${l}</span></td></tr>`;
+  }).join("");
+  const why = e.strategies.filter(s => s.n).map(s => `<details class="edge-why"><summary><b>${esc(s.label)}</b>: ${esc(s.verdict)}</summary>
+      ${s.caveats.length ? `<ul>${s.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}
+      ${s.by_day.length ? `<div class="tablewrap"><table><thead><tr><th>Day</th><th class="r">Trades</th><th class="r">P&amp;L SOL</th><th class="r">Per SOL</th><th class="r">Won</th></tr></thead><tbody>
+        ${s.by_day.map(d => `<tr><td>${esc(d.day)}</td><td class="r num">${d.n}</td><td class="r num ${cls(d.pnl)}">${signed(d.pnl)}</td><td class="r num ${cls(d.ret_pct)}">${pct(d.ret_pct, 1)}</td><td class="r num">${Math.round(d.win_rate * 100)}%</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${(s.best || []).length ? `<p class="note">Best trades: ${s.best.map(b => `${esc(b.symbol || "?")} ${signed(b.pnl)} SOL`).join(" · ")}</p>` : ""}</details>`).join("");
+  setHTML($("an-edge"), `<div class="tablewrap"><table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Per SOL staked</th><th class="r">Average trade (90% range)</th>
+    <th class="r">Without best 3</th><th class="r">Days up</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>${why}
+    <div class="form-row" style="margin-top:8px"><button class="small" data-edgecopy="1">Copy the bots' results as text for a group</button>
+    <span class="note">${esc(e.mode)} trades${e.mode.startsWith("paper") ? ": labelled paper in the text" : ""}</span></div>`);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
   const v = all[S.labKind || "late"];
@@ -4537,6 +4596,8 @@ function connect() {
       if (m.action === "post" && m.ok) $("composer").hidden = true;
       if (["call", "anchor"].includes(m.action)) { setTimeout(loadCalls, 400); if (m.ok && m.call) IO.events.push({kind: "call", sym: m.call.symbol, mc: m.call.mcap_usd}); }
       if (m.action === "lookup" && m.lookup && m.mint === TR.mint) { TR.info = m.lookup; if (snap) renderTradePanel(snap); }
+      if (m.action === "lookup" && m.lookup && m.mint === SOC.postMint && !$("composer").hidden && $("cp-text").value === SOC.postDraft) {
+        SOC.postMint = null; $("cp-text").value = coinPostDraft(m.mint, m.lookup); renderComposer(); }        // only if you haven't started editing
       return;
     }
     render(m);
@@ -4545,6 +4606,51 @@ function connect() {
   ws.onclose = () => { $("state").textContent = "disconnected, retrying"; $("dot").className = "dot dead"; setTimeout(connect, 2000); };
 }
 const send = o => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast("Not connected", "bad"); return false; };
+
+// ---------------------------------------------------------------- tips on your own trades: they inform, never block
+const TIP = {shown: {}, timer: 0, kinds: []};
+function tipSym(mint) {
+  const i = TR.info && TR.info.mint === mint ? TR.info : null;
+  return (snap?.positions?.find(p => p.mint === mint) || snap?.watching?.find(w => w.mint === mint) || i || {}).symbol || short(mint);
+}
+function showTips(list) {
+  if (store.get("tips") === "off") return;
+  list = list.filter(t => store.get("tip.never." + t.kind) !== "1" && Date.now() - (TIP.shown[t.kind] || 0) > 10 * 60e3);   // each kind at most every 10 min
+  if (!list.length) return;
+  for (const t of list) TIP.shown[t.kind] = Date.now();
+  TIP.kinds = list.map(t => t.kind);
+  $("tip-body").innerHTML = list.length === 1 ? `<p>${list[0].html}</p>` : `<ul>${list.map(t => `<li>${t.html}</li>`).join("")}</ul>`;
+  $("tipbox").hidden = false;
+  clearTimeout(TIP.timer); TIP.timer = setTimeout(() => { $("tipbox").hidden = true; }, 16000);
+}
+function buyTips(mint, sol) {
+  const s = snap || {}, out = [], sym = esc(tipSym(mint)), eq = +s.equity || 0, L = s.limits || {};
+  const held = (s.positions || []).find(p => p.mint === mint), share = eq > 0 ? (sol + (held ? held.value_sol : 0)) / eq : 0;
+  if (share >= 0.1) {
+    const two = Math.min(100, Math.round(share * 200));
+    out.push({kind: "size", html: `${held ? "With what you hold, " + sym : "This buy"} is <b>${Math.round(share * 100)}% of your account</b>. Most pump.fun coins go to zero: two misses this size would cost ${two}%${L.kill_dd_pct && two >= L.kill_dd_pct ? `, past the ${L.kill_dd_pct}% kill switch` : ""}.`});
+  }
+  const i = TR.info && TR.info.mint === mint ? TR.info : null, bad = ((i && i.flags) || []).filter(f => f.level === "bad").map(f => esc(f.text));
+  if (bad.length) out.push({kind: "flags", html: `Red flags on <b>${sym}</b>: ${bad.slice(0, 3).join(" · ")}.`});
+  const q = quietFor(mint);
+  if (q != null && q > 180) out.push({kind: "quiet", html: q === Infinity ? `Nobody has traded <b>${sym}</b> since the bot started watching it: buying is easy, selling may not be.` : `No trades on <b>${sym}</b> for ${dur(q)}. A quiet coin can be hard to sell.`});
+  let streak = 0;
+  for (const c of s.closed || []) { if (c.source !== "manual") continue; if (c.pnl < 0) streak++; else break; }
+  if (streak >= 3) {
+    const late = s.summary?.by_source?.late;
+    out.push({kind: "streak", html: `Your last ${streak} trades lost. A short break often beats the next trade.${late && late.closed >= 10 ? ` (The graduation bot is ${late.realized_pnl_sol >= 0 ? "+" : ""}${late.realized_pnl_sol.toFixed(2)} SOL over its ${late.closed} trades.)` : ""}`});
+  }
+  showTips(out);
+}
+function sellTips(mint, fraction) {
+  const p = (snap?.positions || []).find(x => x.mint === mint);
+  if (p && p.source === "manual" && fraction >= 1 && p.held_s < 120 && p.gain_pct > -15 && p.gain_pct < 8)
+    showTips([{kind: "flip", html: `Out after ${dur(p.held_s)}. A quick in-and-out costs about <b>6%</b> in fees and price impact even when the coin goes nowhere, so a flip needs a move bigger than that to pay.`}]);
+}
+function setTips(on) { store.set("tips", on ? "on" : "off"); if (!on) $("tipbox").hidden = true; toast(on ? "Trade tips on" : "Trade tips off (turn them back on with Ctrl+K → tips, or type tips on in the terminal)", "ok"); }
+$("tip-ok").onclick = () => { $("tipbox").hidden = true; };
+$("tip-never").onclick = () => { for (const k of TIP.kinds) store.set("tip.never." + k, "1"); $("tipbox").hidden = true; toast("Got it: that tip won't come back", "ok"); };
+$("tip-off").onclick = () => setTips(false);
 // ---------------------------------------------------------------- terminal: type commands to the bot
 // Bot commands only (the same actions as the buttons), never a system shell: the page shows coin names
 // strangers chose, and a shell one bad string away from them isn't worth it.
@@ -4652,6 +4758,7 @@ const TCMD = {
   ask: ["<question>", "ask Claude (answer prints here too)", (a, rest) => { if (!rest) throw new Error("ask what?"); TM.ask = true; termPrint("Asking Claude…", "dim"); chatSend(rest); }],
   go: ["<tab>", "open a tab: " + TABS.map(t => t[0]).join(", "), a => { const t = TABS.find(x => x[0].startsWith((a[0] || "").toLowerCase())); if (!t || !a[0]) throw new Error("Tabs: " + TABS.map(x => x[0]).join(", ")); setTab(t[0]); }],
   restart: ["", "restart the bot (asks first)", () => termAsk("Restart the bot? It saves first; positions and orders resume.", () => send({action: "restart"}))],
+  tips: ["on|off", "the tips that pop up after your trades", a => { if (!/^(on|off)$/i.test(a[0] || "")) return termPrint(`Trade tips are ${store.get("tips") === "off" ? "off" : "on"}.`); setTips(/^on$/i.test(a[0])); for (const k of ["size", "flags", "quiet", "streak", "flip"]) store.set("tip.never." + k, "0"); }],
   history: ["", "commands you typed", () => termPrint(TM.hist.slice(-30).join("\n") || "None yet.", "dim")],
   clear: ["", "clear this window", () => { $("term-out").innerHTML = ""; }],
 };
@@ -4779,7 +4886,7 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -4808,6 +4915,7 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.edgecopy) { const txt = S.analytics?.edge?.text || ""; navigator.clipboard.writeText(txt).then(() => toast("Copied: paste it into your group", "ok"), () => toast("Couldn't copy: select the text in Analytics instead", "bad")); return; }
   if (d.unhalt) { unhaltAsk((q, f) => { if (confirm(q)) f(); }); return; }
   if (d.addpaper) { setTab("controls"); setTimeout(() => { $("paper-panel").scrollIntoView({block: "center"}); $("dep-sol").focus(); $("dep-sol").select(); }, 80); return; }
   if (d.startover) { setTab("controls"); setTimeout(() => { $("paper-panel").scrollIntoView({block: "center"}); $("paper-reset-confirm").hidden = false; }, 80); return; }
@@ -4830,7 +4938,8 @@ document.addEventListener("click", e => {
   if (d.memdel) { send({action: "mem_del", id: d.memdel}); return; }
   if (d.tramt) { TR.amt = +d.tramt; $("tr-amt").value = ""; if (snap) renderTradePanel(snap); return; }
   if (d.trade) { closeDrawer(); setTab("live"); setTradeMint(d.trade); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); return; }
-  if (d.keytest) { t.disabled = true; t.textContent = "Testing…"; send({action: "key_test"}); setTimeout(() => { t.disabled = false; t.textContent = "Test the API key"; }, 4000); return; }
+  if (d.keytest) { const old = t.textContent; t.disabled = true; t.textContent = "Testing…"; send({action: "key_test", name: d.keytest === "1" ? "ANTHROPIC_API_KEY" : d.keytest});
+    setTimeout(() => { t.disabled = false; t.textContent = old; }, 10000); return; }
   if (d.keyset) { saveKey(d.keyset, t); return; }
   if (d.keyclr) { if (confirm("Remove this key from .env?")) { t.blur(); send({action: "key_clear", name: d.keyclr}); } return; }
   if (d.rec) { const c = {action: "rec", op: d.rec}; if (d.rec === "quiet") { c.start = $("rq-a").value; c.end = $("rq-b").value; } t.blur(); send(c); setTimeout(loadDesk, 400); return; }

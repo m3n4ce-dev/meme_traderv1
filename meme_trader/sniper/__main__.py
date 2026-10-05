@@ -558,6 +558,10 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    ed = sub.add_parser("edge", help="is each strategy's edge real? margin of error, big-winner dependence, day by day")
+    ed.add_argument("--days", type=int, default=14, help="the last N days of trade files (default 14)")
+    ed.add_argument("--mode", default="paper", help="paper | live | paper-synthetic (never mixed; default paper)")
+    ed.add_argument("--out", help="also write the text here (to paste into a group)")
     cl = sub.add_parser("calls", help="the call ledger: verify the hash chain, show the record")
     cl.add_argument("what", choices=["verify", "stats", "list"])
     cl.add_argument("--caller", default="", help="only calls by this caller (you, bot)")
@@ -571,6 +575,15 @@ def main() -> None:
     args = ap.parse_args()
     if args.cmd == "calls":                        # reads the ledger only: no config needed
         _calls(args)
+        return
+    if args.cmd == "edge":                         # reads recorded trades only
+        from .edge import as_text, report
+        from .report import load_trades
+
+        text = as_text(report(load_trades(DATA, args.days, args.mode), args.mode))
+        print(text)
+        if args.out:
+            Path(args.out).write_text(text + "\n")
         return
     if args.cmd == "research":                     # policies carry their own settings (not params.yaml)
         from .research import main as research

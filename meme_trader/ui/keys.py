@@ -24,12 +24,16 @@ KEYS: dict[str, tuple[str, str, str, str]] = {
                                "a workspace: the workspace to bill, wrkspc_… from console.anthropic.com → Settings → "
                                "Workspaces. A workspace key (sk-ant-api…) doesn't need it.", "plain", "now"),
     "SOLANA_RPC_URL": ("Solana RPC URL", "Balances, token lookups, the Portfolio tab, insider-cluster checks and live "
-                       "trading. A paid endpoint (Helius, QuickNode, ...) avoids the public one's rate limits.", "https",
-                       "now"),
-    "SOLANA_WS_URL": ("Solana websocket URL", "Where the bot reads pump.fun trades. A flat-rate paid endpoint is steadier "
-                      "than the free ones (comma-separate several; the free ones stay as fallbacks).", "wss", "restart"),
-    "HELIUS_API_KEY": ("Helius API key", "Wallet-funding lookups with exchange labels, for insider clusters.", "secret",
-                       "restart"),
+                       "trading. A paid endpoint avoids the public one's rate limits. Helius: "
+                       "https://mainnet.helius-rpc.com/?api-key=YOUR_KEY (filled in for you when you save a Helius key). "
+                       "QuickNode: your endpoint's HTTP Provider URL.", "https", "now"),
+    "SOLANA_WS_URL": ("Solana websocket URL", "Where the bot reads pump.fun trades (comma-separate several; the free ones "
+                      "stay as fallbacks). Helius: wss://mainnet.helius-rpc.com/?api-key=YOUR_KEY. QuickNode: your "
+                      "endpoint's WSS Provider URL. Heads-up: the trade stream is about 20 GB a day, so on a plan billed "
+                      "by data or credits a free allowance can run out in days: watch the usage page on day one.",
+                      "wss", "restart"),
+    "HELIUS_API_KEY": ("Helius API key", "Wallet-funding lookups with exchange labels, for insider clusters. Saving it "
+                       "also sets the Solana RPC URL to Helius if that's empty.", "secret", "restart"),
     "PUMPPORTAL_API_KEY": ("PumpPortal API key", "Live trading through PumpPortal (paper trading doesn't need it).",
                            "secret", "restart"),
     "TELEGRAM_BOT_TOKEN": ("Telegram bot token", "Phone alerts: create a bot with @BotFather.", "secret", "restart"),
@@ -100,7 +104,7 @@ def status(path: Path = ENV) -> list[dict]:
             warn = "This is a user key: it also needs the Anthropic workspace ID below."
         out.append({"name": name, "label": label, "help": help_, "kind": kind, "effect": effect, "set": bool(v),
                     "source": src, "hint": _hint(kind, v) if v else "", "warn": warn,
-                    "testable": name == "ANTHROPIC_API_KEY"})
+                    "testable": name in TESTABLE})
     return out
 
 
@@ -150,7 +154,83 @@ def set_key(name: str, value: str, path: Path = ENV) -> dict:
     v = _validate(name, value)
     _write(path, name, v)
     os.environ[name] = v
+    if name == "HELIUS_API_KEY" and not (_file_values(path).get("SOLANA_RPC_URL") or os.environ.get("SOLANA_RPC_URL")):
+        rpc = HELIUS_RPC + v                                # one paste gives lookups a real RPC too
+        _write(path, "SOLANA_RPC_URL", rpc)
+        os.environ["SOLANA_RPC_URL"] = rpc
     return next(s for s in status(path) if s["name"] == name)
+
+
+HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key="
+TESTABLE = ("ANTHROPIC_API_KEY", "SOLANA_RPC_URL", "SOLANA_WS_URL", "HELIUS_API_KEY")
+
+
+async def _rpc_ping(url: str) -> tuple[bool, str]:
+    import time
+
+    import aiohttp
+
+    t0 = time.monotonic()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+            async with s.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "getSlot"}) as r:
+                d = await r.json(content_type=None)
+    except Exception as e:                                      # the message never includes the URL (it can hold a key)
+        return False, f"no answer ({type(e).__name__})"
+    if not isinstance(d, dict) or "result" not in d:
+        err = (d.get("error") or {}).get("message", "") if isinstance(d, dict) else ""
+        return False, f"it answered with an error{': ' + err[:120] if err else ''}"
+    return True, f"answered in {(time.monotonic() - t0) * 1000:.0f} ms (slot {d['result']:,})"
+
+
+async def _ws_ping(url: str) -> tuple[bool, str]:
+    """Connect, take one slot update, unsubscribe: a couple of tiny messages, not the trade stream."""
+    import asyncio
+    import json
+    import time
+
+    import aiohttp
+
+    t0 = time.monotonic()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as s:
+            async with s.ws_connect(url, heartbeat=None) as ws:
+                await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "slotSubscribe"})
+                sub = None
+                async with asyncio.timeout(8):
+                    async for m in ws:
+                        d = json.loads(m.data)
+                        if d.get("id") == 1:
+                            if "error" in d:
+                                return False, f"it refused the subscription: {str(d['error'].get('message', ''))[:120]}"
+                            sub = d.get("result")
+                        elif d.get("method") == "slotNotification":
+                            break
+                if sub is not None:
+                    await ws.send_json({"jsonrpc": "2.0", "id": 2, "method": "slotUnsubscribe", "params": [sub]})
+    except TimeoutError:
+        return False, "connected, but no update within 8 s"
+    except Exception as e:
+        return False, f"couldn't connect ({type(e).__name__})"
+    return True, f"connected and streaming: first update after {(time.monotonic() - t0) * 1000:.0f} ms"
+
+
+async def test_key(name: str) -> tuple[bool, str]:
+    if name == "ANTHROPIC_API_KEY":
+        return await test_anthropic()
+    v = os.environ.get(name) or _file_values(ENV).get(name, "")
+    if not v:
+        return False, f"no {KEYS.get(name, (name,))[0]} saved"
+    if name == "SOLANA_RPC_URL":
+        ok, t = await _rpc_ping(v.split(",")[0].strip())
+        return ok, ("the RPC " if ok else "the RPC gave ") + t
+    if name == "HELIUS_API_KEY":
+        ok, t = await _rpc_ping(HELIUS_RPC + v)
+        return ok, ("the Helius key works: Helius " if ok else "Helius: ") + t
+    if name == "SOLANA_WS_URL":
+        ok, t = await _ws_ping(v.split(",")[0].strip())
+        return ok, "the first websocket endpoint: " + t
+    return False, "there's no test for that one"
 
 
 async def test_anthropic() -> tuple[bool, str]:
