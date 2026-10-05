@@ -31,7 +31,7 @@ scripts/start.sh demo
 The dashboard opens at **http://127.0.0.1:8787** with a simulated market and fake money. No keys are needed. Press **Ctrl + C** in the terminal to stop.
 
 ## 2. Read the dashboard
-Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls, Chat, Portfolio, Analytics, Controls, Guide. **Ctrl+K** finds anything; right-click any coin for quick actions; the **Guide** tab has a 1-minute tour.
+Eight views. Switch with the tabs or the keys **1–8**: Live, Pulse, Desk, Chat, Portfolio, Analytics, Controls, Guide. The 📣 calls track record is a section at the bottom of Analytics. **Ctrl+K** finds anything; right-click any coin for quick actions; the **Guide** tab has a 1-minute tour.
 
 - **Live**: money, open positions, the launch radar and every event.
   - Click any token, position, closed trade or log line to open its **detail panel**.

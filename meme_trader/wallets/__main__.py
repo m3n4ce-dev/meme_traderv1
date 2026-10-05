@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from pathlib import Path
 import logging
 import sys
 import time
@@ -54,7 +55,8 @@ def _status() -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="python -m meme_trader.wallets", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["record", "status", "register", "select", "freeze", "eval"])
+    ap.add_argument("cmd", choices=["record", "status", "register", "select", "freeze", "eval", "view"])
+    ap.add_argument("--out", help="view: write the JSON here instead of printing it")
     ap.add_argument("policy", nargs="?", default="wallets-v1")
     ap.add_argument("--quick", action="store_true", help="eval: fewer baseline draws")
     ap.add_argument("--json", action="store_true", help="select/eval: print JSON")
@@ -66,6 +68,17 @@ def main(argv=None) -> None:
         return
     if a.cmd == "status":
         _status()
+        return
+    if a.cmd == "view":                           # the dashboard's Analytics section (read-only)
+        from .report import build
+
+        out = json.dumps(build(a.policy), default=str)
+        if a.out:
+            tmp = Path(a.out).with_suffix(".tmp")
+            tmp.write_text(out)
+            tmp.replace(a.out)
+        else:
+            print(out)
         return
     try:
         pol = study.load_policy(a.policy)

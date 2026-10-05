@@ -150,6 +150,31 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
     edge_cache: list = [0.0, None]
 
+    wallet_view = {"proc": None}
+
+    async def wallets(_):
+        """The wallet study for Analytics: read from data/wallets/view.json, rebuilt in a separate process at
+        most every 30 minutes (its memory goes away when it finishes; the bot's doesn't grow)."""
+        import sys
+
+        from ..wallets.recorder import DATA as WDATA
+        path = WDATA / "view.json"
+        age = time.time() - path.stat().st_mtime if path.exists() else None
+        proc = wallet_view["proc"]
+        running = proc is not None and proc.returncode is None
+        if (age is None or age > 1800) and not running and WDATA.exists():
+            wallet_view["proc"] = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "meme_trader.wallets", "view", "wallets-v1", "--out", str(path),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, cwd=str(Path(__file__).resolve().parents[2]))
+            running = True
+        if not path.exists():
+            return _json({"pending": True, "refreshing": running})
+        try:
+            d = json.loads(path.read_text())
+        except ValueError:
+            return _json({"pending": True, "refreshing": running})
+        return _json({**d, "age_s": round(age or 0), "refreshing": running})
+
     async def analytics(_):
         d = await engine.analytics_async()
         if isinstance(d, dict):
@@ -163,7 +188,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     rep = report(load_trades(DATA, 14, engine.mode) if engine.persist else closed, engine.mode)
                     return {**rep, "text": as_text(rep)}
                 edge_cache[:] = [time.time(), await asyncio.to_thread(build)]
-            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper")}, "edge": edge_cache[1]}
+            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper"), "desk_pass": engine.lab.view("desk-pass")}, "edge": edge_cache[1]}
         return _json(d)
 
     async def token(request):
@@ -424,6 +449,18 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                                                   os.environ.get(spec["key"], "") if spec["key"] else "", deskmod.model_of(engine.p.desk))
                 engine.set_desk_prices(*(price or (0.0, 0.0)))
                 note = f" · ${price[0]:g} / ${price[1]:g} per million tokens" if price else " · no price listed: the estimate shows 0"
+                if engine.p.desk["provider"] == "huggingface" and os.environ.get("HF_TOKEN"):
+                    try:                                  # a free account can't pay past its small monthly credit
+                        import aiohttp
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as hs:
+                            async with hs.get("https://huggingface.co/api/whoami-v2",
+                                              headers={"Authorization": "Bearer " + os.environ["HF_TOKEN"]}) as r:
+                                who = await r.json(content_type=None)
+                        if not who.get("isPro") and not who.get("canPay"):
+                            note += (" · your Hugging Face account is free: a few cents of credit a month, then the desk's"
+                                     " calls fail until it resets (and a desk that can't vote blocks entries)")
+                    except Exception:
+                        pass
             return {"ok": not err, "text": err or "AI desk model saved" + note, "brain": engine.desk_brain()}
         if action == "desk_models":                       # what a local / compatible server has installed
             import aiohttp
@@ -636,7 +673,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             return {"ok": False, "text": err} if err else None
         return None
 
-    app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics),
+    app.add_routes([web.get("/", index), web.get("/ws", ws), web.get("/api/analytics", analytics), web.get("/api/wallets", wallets),
                     web.get("/api/token/{mint}", token), web.get("/api/controls", controls),
                     web.get("/api/chat", chat_state), web.get("/api/controls/advanced", advanced),
                     web.get("/api/desk", desk), web.get("/api/keys", keys), web.get("/api/portfolio", portfolio),

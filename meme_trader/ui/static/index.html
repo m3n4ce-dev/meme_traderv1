@@ -662,6 +662,11 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
   border: 1px solid rgba(0,0,0,.4); }
 .hmsg b.up { color: #0a8a3a; } .hmsg b.down { color: #c0392b; } .hmsg .logo { width: 14px; height: 14px; font-size: 7px; margin-right: 2px; }
 .hmsg.alert { background: #ffe1e1; border-color: #a52a2a; } .hmsg.act { background: #e3ffe9; border-color: #127a3a; }
+.house-tabs button { font-size: 12px; } .house-tabs b { margin-left: 2px; opacity: .75; }
+@media (max-width: 760px) { .house-tabs .lbl-room { display: none; } }
+.iso-door { fill: #5a3d2b; } .iso-doorframe { fill: #2d2018; } .iso-knob { fill: #e8c25a; } .iso-doorsign { font: 800 6.5px ui-monospace, monospace; fill: #e8e4da; letter-spacing: .04em; } .iso-doorsign.on { font-size: 6px; fill: #f3e2c4; }
+.iso-tvscr { fill: #071018; } .iso-led { fill: #3ef08a; animation: led 1.6s steps(2) infinite; } @keyframes led { 50% { fill: #1c5a36; } }
+@media (prefers-reduced-motion: reduce) { .iso-led { animation: none; } }
 .iso-tools { position: absolute; right: 10px; top: 10px; z-index: 6; display: flex; gap: 6px; }
 .iso-tools button { background: color-mix(in srgb, var(--surface) 80%, transparent); }
 .iso-tools button[aria-pressed="true"] { background: var(--series); color: #fff; border-color: transparent; }
@@ -791,6 +796,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
 .tr-chartbox { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--ring); border-radius: 10px; background: var(--surface-2); }
 .tr-chart-h { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; } #tr-chart { width: 100%; display: block; }
 .edge-why { margin-top: 8px; } .edge-why summary { cursor: pointer; } .edge-why ul { margin: 6px 0; padding-left: 20px; }
@@ -932,12 +938,11 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <button role="tab" data-tab="live" aria-selected="true"><span class="ic">◉</span>Live<kbd class="hide-sm">1</kbd></button>
     <button role="tab" data-tab="pulse" aria-selected="false"><span class="ic">⚡</span>Pulse<kbd class="hide-sm">2</kbd></button>
     <button role="tab" data-tab="desk" aria-selected="false"><span class="ic">◆</span>Desk<kbd class="hide-sm">3</kbd></button>
-    <button role="tab" data-tab="calls" aria-selected="false"><span class="ic">📣</span>Calls<kbd class="hide-sm">4</kbd></button>
-    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">5</kbd></button>
-    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">6</kbd></button>
-    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">7</kbd></button>
-    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">8</kbd></button>
-    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">9</kbd></button>
+    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">4</kbd></button>
+    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">5</kbd></button>
+    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">6</kbd></button>
+    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">7</kbd></button>
+    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">8</kbd></button>
   </nav>
   <div class="spacer"></div>
   <span class="note num hide-sm" id="clock"></span>
@@ -1081,30 +1086,6 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   </section>
 
   <!-- ============================================================ CALLS -->
-  <section class="view" data-view="calls" hidden>
-    <section class="panel calls-hero" id="cl-hero">
-      <div class="ch-top"><div style="flex:1;min-width:260px"><h1>📣 Track record</h1>
-        <p class="note">Every call is timestamped and hash-chained, then scored from market data. Fixed-hold returns after costs come first; peaks are sampled (nobody sells the top).</p></div>
-        <div class="ch-act"><button class="small" data-share="record:">↗ Share the record</button><a class="btn small" href="/api/calls/export" download>⬇ Export ledger</a><button class="small ghost" data-help="calls">How it works</button></div></div>
-      <div id="cl-proof" class="cl-proof"></div>
-      <div class="form-row" id="cl-anchor"><span class="note">Publish the proof (the newest hash) so the record can't be rewritten:</span>
-        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-x"><i></i></span>𝕏</label>
-        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-tg" checked><i></i></span>Telegram</label>
-        <button class="small primary" data-anchor="1">🔏 Publish</button></div>
-    </section>
-    <div class="kpis" id="cl-kpis"></div>
-    <section class="panel" id="cl-make"><h2>Make a call <small>on the record at the current market cap</small></h2><div id="clf"></div></section>
-    <section class="panel" id="cl-ledger"><h2>Ledger <small>newest first · right-click a row for actions</small></h2>
-      <div class="toolbar" style="margin-bottom:8px"><div class="seg" id="cl-callers" role="group" aria-label="Whose calls"></div></div>
-      <div class="tablewrap"><table class="cl-table"><thead><tr><th>#</th><th>When</th><th>Coin</th><th>Caller</th><th class="r">MC at call</th><th class="r">Now</th><th class="r">Peak</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th>Hash</th><th></th></tr></thead>
-        <tbody id="cl-rows"><tr><td colspan="12" class="empty">Loading…</td></tr></tbody></table></div></section>
-    <section class="panel" id="cl-edge"><h2>What counts as an edge</h2>
-      <ul><li><b>Sample size first.</b> A handful of calls proves nothing: judge the 1-hour median and win rate over 100+ calls, and compare yours with the bot's.</li>
-        <li><b>Fixed horizons, after costs.</b> "Held 1 hour" assumes you bought at the call's market cap and sold an hour later, minus ~5% for fees and slippage. Peaks flatter everyone.</li>
-        <li><b>Published before the outcome.</b> Post calls as you make them, and publish the ledger head regularly: anyone can then check that nothing was added, edited or deleted later (<code>python -m meme_trader.sniper calls verify</code>).</li>
-        <li><b>The bot's own edge</b> is judged by its frozen research test, on data it was never tuned on (Desk → Research).</li></ul></section>
-  </section>
-
   <!-- ============================================================ DESK -->
   <section class="view" data-view="desk" hidden>
     <div class="desk-hero">
@@ -1252,6 +1233,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <p class="note">The <b>90% range</b> is where each strategy's average trade most likely sits, found by resampling its trades many times. If it spans zero, the result could be luck.
         <b>Without its best 3</b> shows how much rests on a few runners. Measurement only: it never changes a setting.</p>
       <div id="an-edge"></div></section>
+    <section class="panel" id="wallet-study"><h2>Wallet study <small>wallets-v1: do wallets that were early on several runners, buying together, make money?</small></h2>
+      <div id="an-wallets"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
@@ -1262,6 +1245,28 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <div class="two">
       <section class="panel"><h2>Prediction model</h2><div id="an-model"></div></section>
       <section class="panel"><h2>Model calibration <small>predicted vs actual on unseen launches</small></h2><div id="an-cal"></div></section>
+    </div>
+    <div id="calls-sec" class="stack">
+    <section class="panel calls-hero" id="cl-hero">
+      <div class="ch-top"><div style="flex:1;min-width:260px"><h2 style="margin:0">📣 Calls &amp; track record</h2>
+        <p class="note">Every call is timestamped and hash-chained, then scored from market data. Fixed-hold returns after costs come first; peaks are sampled (nobody sells the top).</p></div>
+        <div class="ch-act"><button class="small" data-share="record:">↗ Share the record</button><a class="btn small" href="/api/calls/export" download>⬇ Export ledger</a><button class="small ghost" data-help="calls">How it works</button></div></div>
+      <div id="cl-proof" class="cl-proof"></div>
+      <details class="cl-edge-why"><summary class="note">? What counts as an edge</summary><ul><li><b>Sample size first.</b> A handful of calls proves nothing: judge the 1-hour median and win rate over 100+ calls, and compare yours with the bot's.</li>
+        <li><b>Fixed horizons, after costs.</b> "Held 1 hour" assumes you bought at the call's market cap and sold an hour later, minus ~5% for fees and slippage. Peaks flatter everyone.</li>
+        <li><b>Published before the outcome.</b> Post calls as you make them, and publish the ledger head regularly: anyone can then check that nothing was added, edited or deleted later (<code>python -m meme_trader.sniper calls verify</code>).</li>
+        <li><b>The bot's own edge</b> is judged by its frozen research test, on data it was never tuned on (Desk → Research).</li></ul></details>
+      <div class="form-row" id="cl-anchor"><span class="note">Publish the proof (the newest hash) so the record can't be rewritten:</span>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-x"><i></i></span>𝕏</label>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-tg" checked><i></i></span>Telegram</label>
+        <button class="small primary" data-anchor="1">🔏 Publish</button></div>
+    </section>
+    <div class="kpis" id="cl-kpis"></div>
+    <section class="panel" id="cl-make"><h2>Make a call <small>on the record at the current market cap</small></h2><div id="clf"></div></section>
+    <section class="panel" id="cl-ledger"><div class="cl-scroll"><h2>Ledger <small>newest first · right-click a row for actions</small></h2>
+      <div class="toolbar" style="margin-bottom:8px"><div class="seg" id="cl-callers" role="group" aria-label="Whose calls"></div></div>
+      <div class="tablewrap"><table class="cl-table"><thead><tr><th>#</th><th>When</th><th>Coin</th><th>Caller</th><th class="r">MC at call</th><th class="r">Now</th><th class="r">Peak</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th>Hash</th><th></th></tr></thead>
+        <tbody id="cl-rows"><tr><td colspan="12" class="empty">Loading…</td></tr></tbody></table></div></div></section>
     </div>
   </section>
 
@@ -1803,6 +1808,7 @@ async function loadAnalytics() {
     const r = await fetch("/api/analytics", {cache: "no-store"});
     S.analytics = await r.json();
     renderAnalytics(S.analytics);
+    if (!S.wTimer || Date.now() - S.wTimer > 60000) { S.wTimer = Date.now(); loadWallets(); }
   } catch (e) { $("an-status").textContent = "Couldn't load analytics (" + e + ")"; }
   if (S.tab === "analytics") S.aTimer = setTimeout(loadAnalytics, 10000);
 }
@@ -2161,7 +2167,7 @@ function renderDesk() {
   for (const p of ["veteran", "narrative", "skeptic", "quant"]) {
     const v = lastRev && lastRev.votes.find(x => x.persona === p);
     sc[p] = !awake ? ["sleep", d.anthropic_key ? "Zzz… wake us from our card." : "Zzz… we need an Anthropic API key."]
-      : k.error ? ["alert", `Can't reach Claude: ${esc(k.error)}`]
+      : k.error ? ["alert", `Can't reach the AI model: ${esc(k.error)}`]
       : !v ? ["idle", "Awake. Waiting for the rules to pick a trade."]
       : v.error ? ["alert", `On ${tname(lastRev.mint, lastRev.symbol)}: ${esc(voteError(v.error))}`]
       : v.vote === "buy" ? ["act", `${tname(lastRev.mint, lastRev.symbol)} <b>BUY ${v.conviction}</b>: ${esc((v.reasons || [])[0] || "")}`]
@@ -2481,7 +2487,7 @@ function deskCost(b, vote = false) {
   const v = vote ? b.per_vote_usd : b.per_review_usd;
   if (v == null) return "a few cents";
   if (v === 0) return "free";
-  return v < 0.01 ? `about ${(v * 100).toFixed(2)}¢` : `about $${v.toFixed(3)}`;
+  return v < 0.01 ? `$${v.toFixed(4)} (under 1¢)` : `about $${v.toFixed(3)}`;   // "0.92¢" read as 92 cents
 }
 const DB = {prov: null, models: null};
 function renderBrain(d) {
@@ -2620,6 +2626,10 @@ document.addEventListener("pointerup", () => {
 // ---- what the bots say when nothing's happening: big pools, never the same line twice (remembered in this
 // browser); when a pool runs dry they talk about live numbers instead
 const LINES = {
+  lounge: ["Ping-pong break.", "New high score on the arcade.", "Fridge raid.", "Five minutes on the beanbag.", "Watching the pulse on the big screen.",
+    "Back on the floor in a minute.", "Who left pizza in the fridge?", "Stretching my legs.", "Bunk beds are surprisingly comfy."],
+  lab: ["Checking the study boards.", "The data decides, not the vibes.", "Promising isn't proven.", "Logging this for the research.",
+    "Hindsight always looks smart.", "Reading the rack's logs.", "Writing it down before I forget."],
   coffee: ["Refill time.", "Third coffee today.", "Decaf? Never.", "The curve can wait 30 seconds.", "Who drank the last oat milk?",
     "This machine is older than Bitcoin.", "Espresso, double. It's a volatile day.", "Coffee's the only thing here that never dumps.",
     "If the machine beeps twice, it's a buy signal.", "Brewing. Don't buy anything without me.", "Black, like the night shift.",
@@ -2703,7 +2713,8 @@ function seatOf(id) {
 }
 function homeOf2(id, mood) {
   if (DESK_AT[id]) return seatOf(id);
-  return mood === "sleep" ? NAP[id] : SEAT[id];
+  if (mood === "sleep") return ((IO.phase || lightPhase()) === "night" ? LOUNGE_BED[id] : LOUNGE_SEAT[id]) || NAP[id];   // resting: the lounge
+  return SEAT[id];
 }
 function buildRoom() {
   const f = [];                                                  // [depth, svg]
@@ -2762,7 +2773,7 @@ function roomBackSVG() {
   return `<polygon class="iso-wall wl" points="${P([iso(0, 0), iso(0, GY), iso(0, GY, WH), iso(0, 0, WH)])}"/>
     <polygon class="iso-wall wr" points="${P([iso(0, 0), iso(GX, 0), iso(GX, 0, WH), iso(0, 0, WH)])}"/>
     <polygon class="iso-skirt" points="${P([iso(0, 0), iso(0, GY), iso(0, GY, 8), iso(0, 0, 8)])}"/><polygon class="iso-skirt r" points="${P([iso(0, 0), iso(GX, 0), iso(GX, 0, 8), iso(0, 0, 8)])}"/>
-    ${floor.join("")}${rug}${sky}${clock}${cork}${board}${poster}`;
+    ${floor.join("")}${rug}${sky}${clock}${cork}${board}${poster}${doorSVG("ROOMS", true)}`;
 }
 
 function officeBuild() {
@@ -2770,8 +2781,7 @@ function officeBuild() {
   applyRoomLayout(IO.ui.room);
   buildRoom();
   const night = `<g class="iso-night"><rect width="${VBW}" height="${VBH}" class="iso-dark"/>
-    ${Object.entries(DESK_AT).map(([id, [dx, dy]]) => { const [x, y] = iso(dx + 1, dy + .4, 40); return `<ellipse class="iso-glow" cx="${x}" cy="${y}" rx="70" ry="44"/>`; }).join("")}
-    ${(() => { const [x, y] = iso(TABLE_AT[0] + 1, TABLE_AT[1] + 1, 40); return `<ellipse class="iso-glow warm" cx="${x}" cy="${y}" rx="110" ry="60"/>`; })()}</g>`;
+    <g id="iso-nightglow">${nightGlows("floor")}</g></g>`;
   $("office").innerHTML = `<svg class="iso" id="iso" viewBox="0 0 ${VBW} ${VBH}" aria-hidden="false" role="img" aria-label="The trading room">
       <g id="iso-back">${roomBackSVG()}</g><g id="iso-ents"></g>${night}</svg>
     <div class="hchat" id="hchat" aria-live="polite"></div><div class="iso-tag" id="iso-tag"></div>
@@ -2795,6 +2805,7 @@ function officeBuild() {
     drawBot(IO.bots[id]);
   }
   IO.built = true;
+  houseInit();
   sortDepth();
   cancelAnimationFrame(IO.raf); IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame);
 }
@@ -2811,14 +2822,15 @@ function sortDepth() {
   kids.forEach(k => ents.appendChild(k));
 }
 // ---- pathfinding on the tile grid (BFS: small room, uniform cost)
-function walkable(i, j) { return i >= 0 && j >= 0 && i < GX && j < GY && !IO.block.has(`${i},${j}`); }
-function nearestFree(x, y) {
+function walkable(i, j, blk = IO.block) { return i >= 0 && j >= 0 && i < GX && j < GY && !blk.has(`${i},${j}`); }
+function nearestFree(x, y, blk = IO.block) {
   let best = null, bd = 1e9;
-  for (let i = 0; i < GX; i++) for (let j = 0; j < GY; j++) if (walkable(i, j)) { const d = (i + .5 - x) ** 2 + (j + .5 - y) ** 2; if (d < bd) { bd = d; best = [i, j]; } }
+  for (let i = 0; i < GX; i++) for (let j = 0; j < GY; j++) if (walkable(i, j, blk)) { const d = (i + .5 - x) ** 2 + (j + .5 - y) ** 2; if (d < bd) { bd = d; best = [i, j]; } }
   return best;
 }
-function findPath(from, to) {
-  const s = nearestFree(from[0], from[1]), t = nearestFree(to[0], to[1]);
+function findPath(from, to, room = "floor") {
+  const blk = (IO.rooms && IO.rooms[room] && IO.rooms[room].block) || IO.block;
+  const s = nearestFree(from[0], from[1], blk), t = nearestFree(to[0], to[1], blk);
   if (!s || !t) return [];
   const key = (i, j) => i * 100 + j, prev = new Map([[key(...s), null]]), q = [s];
   while (q.length) {
@@ -2826,7 +2838,7 @@ function findPath(from, to) {
     if (i === t[0] && j === t[1]) break;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = [i + di, j + dj];
-      if (walkable(...n) && !prev.has(key(...n))) { prev.set(key(...n), [i, j]); q.push(n); }
+      if (walkable(n[0], n[1], blk) && !prev.has(key(...n))) { prev.set(key(...n), [i, j]); q.push(n); }
     }
   }
   if (!prev.has(key(...t))) return [];
@@ -2834,16 +2846,18 @@ function findPath(from, to) {
   for (let c = t; c; c = prev.get(key(...c))) out.unshift([c[0] + .5, c[1] + .5]);
   return out;
 }
-function goTo(b, dest, then = null, speed = 2.2) {
+function goTo(b, dest, then = null, speed = 2.2, room = "floor") {
+  if ((b.room || "floor") !== room) return travel(b, room, () => goTo(b, dest, then, speed, room));   // through the door first
   b.sit = false;
-  b.path = findPath([b.x, b.y], dest).concat([dest]);
+  b.path = findPath([b.x, b.y], dest, room).concat([dest]);
   b.speed = speed; b.then = then;
 }
 function goHome(b, speed = 2.2) {
-  const h = homeOf2(b.id, b.mood);
-  b.busy = null; setProp(b, "");
-  if (Math.hypot(b.x - h[0], b.y - h[1]) < .05) { b.sit = true; b.view = "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; drawBot(b); return; }
-  goTo(b, h, () => { b.sit = true; b.view = "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; }, speed);
+  const room = homeRoom(b.id, b.mood), h = homeOf2(b.id, b.mood);
+  b.busy = null; b.spot = null; setProp(b, "");
+  const settle = () => { b.sit = true; b.view = room === "lounge" && (IO.phase || lightPhase()) !== "night" ? "back" : "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; };
+  if ((b.room || "floor") === room && Math.hypot(b.x - h[0], b.y - h[1]) < .05) { settle(); drawBot(b); return; }
+  goTo(b, h, settle, speed, room);
 }
 function setProp(b, emoji) { const t = b.g.querySelector(".av-prop"); if (t) t.textContent = emoji || ""; }
 function isoFrame(now) {
@@ -2873,6 +2887,11 @@ function hsay(id, html, opts = {}) {
   RL.last.set(plain, Date.now()); if (RL.last.size > 400) RL.last.delete(RL.last.keys().next().value);
   b.said = html; b.lastSaid = Date.now();
   const {color, name, look} = botLook(id);
+  if ((b.room || "floor") !== (IO.room || "floor")) {
+    (IO.history ||= []).push({id, name, look, html: html + ` <span class="note">(${HOUSE[b.room].name.toLowerCase()})</span>`, at: Date.now(), kind: opts.kind || ""});
+    if (IO.history.length > 300) IO.history.shift();
+    renderRoomLog(); return;
+  }
   const [sx] = iso(b.x, b.y);
   const el = document.createElement("div");
   el.className = `hmsg ${opts.kind || ""}`;
@@ -2920,7 +2939,11 @@ function lightPhase(d = new Date()) {
 }
 function applyPhase() {
   const ph = lightPhase();
-  if (IO.phase !== ph) { IO.phase = ph; $("office").dataset.phase = ph; }
+  if (IO.phase !== ph) {
+    const wasNight = IO.phase === "night"; IO.phase = ph; $("office").dataset.phase = ph;
+    if (wasNight !== (ph === "night"))                          // bedtime, or morning: resting personas swap sofa and bunks
+      for (const b of Object.values(IO.bots)) if (!DESK_AT[b.id] && b.mood === "sleep" && !b.busy && !b.path.length) goHome(b, 1.6);
+  }
   // the weather follows the day: sun when it's green, clouds, then rain, then a storm as it gets red
   const s = snap || {}, dayPct = (s.day_pnl || 0) / Math.max(1e-9, (s.summary && s.summary.start_sol) || 1) * 100;
   const wx = (s.defense && s.defense.on) || dayPct <= -6 ? "storm" : dayPct <= -2 ? "rain" : dayPct < 0 ? "cloudy" : "clear";
@@ -2964,7 +2987,8 @@ function officeUpdate(sc) {
   const now = Date.now();
   for (const [id, [mood, html]] of Object.entries(sc)) {
     const b = IO.bots[id]; if (!b) continue;
-    if (!b.inited) { b.inited = true; b.mood = mood; const h = homeOf2(id, mood); b.x = h[0]; b.y = h[1]; b.sit = true; drawBot(b); }
+    if (!b.inited) { b.inited = true; b.mood = mood; b.room = homeRoom(id, mood); const h = homeOf2(id, mood); b.x = h[0]; b.y = h[1]; b.sit = true;
+      if (b.room === "lounge" && (IO.phase || lightPhase()) !== "night") b.view = "back"; drawBot(b); syncRoomVis(); houseTabs(); }
     const was = b.mood; b.mood = mood; b.g.dataset.mood = mood;
     b.g.querySelector(".av-ic").textContent = b.busy ? "" : MOOD_IC2[mood] || "";
     b.g.classList.toggle("sel", (S.dkSel || "") === id);
@@ -2980,6 +3004,9 @@ function kickIso() { if (!IO.raf && IO.built) { IO.last = performance.now(); IO.
 function busyCount() { return Object.values(IO.bots).filter(b => b.busy).length; }
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function errand2(b) {
+  const t = Math.random();
+  if (t < (b.id === "recorder" ? .35 : .08) && houseTrip(b, "lab")) return;
+  if (t > .8 && houseTrip(b, "lounge")) return;
   const night = IO.phase === "night", r = Math.random();
   const deskBots = Object.values(IO.bots).filter(o => o !== b && DESK_AT[o.id] && !o.busy && !o.path.length && ["idle", "work"].includes(o.mood));
   if (r < .14 && deskBots.length) return meet(b, pick(deskBots));
@@ -3030,7 +3057,7 @@ function chatLines(a, b) {
 }
 setInterval(() => {
   if (!IO.built || S.tab !== "desk" || document.hidden) return;
-  applyPhase(); layoutChat(); renderBoards();
+  applyPhase(); layoutChat(); renderBoards(); houseTabs(); renderHouseBoards();
   while (IO.events.length) { if (relay(IO.events[0]) === false) break; IO.events.shift(); }
   if (busyCount() >= 3 || IO.zoom) return;
   for (const b of Object.values(IO.bots)) {
@@ -3048,7 +3075,7 @@ function relay(ev) {
     sc.busy = "relay"; setProp(sc, "📁");
     goTo(sc, STOPS.table, () => {
       hsay("scanner", `Desk, ${esc(r.symbol)} passes my checks. Thoughts?`, {force: true});
-      r.votes.forEach((v, i) => setTimeout(() => hsay(v.persona, v.error ? `Can't reach Claude: ${esc(voteError(v.error))}` :
+      r.votes.forEach((v, i) => setTimeout(() => hsay(v.persona, v.error ? `Can't reach the AI model: ${esc(voteError(v.error))}` :
         `<b class="${v.vote === "buy" ? "up" : "down"}">${v.vote.toUpperCase()} ${v.conviction}</b>: ${esc((v.vote === "buy" ? v.reasons : (v.red_flags || []).concat(v.reasons || []))[0] || "")}`,
         {force: true, kind: v.vote === "buy" && !v.error ? "act" : ""}), 1400 * (i + 1)));
       setTimeout(() => { hsay("scanner", r.approve ? `Approved. Sending the buy.` : `Passed. Back to the radar.`, {force: true}); goHome(sc); },
@@ -3193,6 +3220,210 @@ function saveWardrobe() {
   for (const id of Object.keys(LOOK)) bots[id] = {name: (WD.names[id] || "").trim().slice(0, 18), look: WD.looks[id]};
   IO.ui.bots = bots; send({action: "ui_set", key: "bots", value: bots});
   $("wardrobe").hidden = true; rebuildOffice();
+}
+
+// ---- the house: the trading floor, a lounge and a research lab. Every room has its door in the same spot on the
+// left wall, so a bot that walks out of one room steps in through the next room's door.
+const DOOR = [.6, 6.8], DOOR_U = [6.3, 7.3];
+const HOUSE = {floor: {name: "Trading floor", icon: "🏢"}, lounge: {name: "Lounge", icon: "🛋"}, lab: {name: "Lab", icon: "🔬"}};
+const LBEDS = [.3, 2.2, 4.1, 8.4];                               // bunk beds along the lounge's left wall (y of each)
+const LOUNGE_SEAT = {veteran: [4.6, 4.45], narrative: [5.6, 4.45], skeptic: [6.6, 4.45], quant: [7.6, 4.45]};
+const LOUNGE_BED = {veteran: [.8, LBEDS[0] + .85], narrative: [.8, LBEDS[1] + .85], skeptic: [.8, LBEDS[2] + .85], quant: [.8, LBEDS[3] + .85]};
+const HSTOPS = {
+  lounge: {arcade: [14.2, 1.5, "back", "🕹"], fridge: [14.5, 2.9, "front", "🧃"], pongL: [8.5, 7.8, "front", "🏓"], pongR: [12.5, 7.8, "front", "🏓"],
+           bag1: [12.5, 4.7, "back", ""], bag2: [13.4, 5.6, "back", ""], sofa: [8.6, 4.45, "back", "🍿"]},
+  lab: {wallets: [3.8, 1.3, "back", ""], edge: [9.9, 1.3, "back", ""], rack: [14.1, 1.9, "back", "🛠"], bench: [4.2, 3.4, "back", "⌨️"],
+        bench2: [9.7, 3.4, "back", "⌨️"], table: [7.7, 9.6, "back", "📄"]},
+};
+function doorSVG(label, onDoor = false) {
+  const sign = LW(DOOR_U[1] - .06, onDoor ? 72 : 104);         // text on this wall runs toward the back corner
+  return `<polygon class="iso-doorframe" points="${wallRect("L", DOOR_U[0] - .08, DOOR_U[1] + .08, 0, 94)}"/><polygon class="iso-door" points="${wallRect("L", DOOR_U[0], DOOR_U[1], 0, 88)}"/>
+    <circle class="iso-knob" cx="${LW(DOOR_U[1] - .18, 44)[0]}" cy="${LW(DOOR_U[1] - .18, 44)[1]}" r="2.2"/>
+    <text class="iso-doorsign${onDoor ? " on" : ""}" transform="translate(${sign[0]} ${sign[1]}) ${wallMatrix("L")}" x="0" y="0">${esc(label)}</text>`;
+}
+function houseWalls(windowAt) {
+  const floor = [];
+  for (let x = 0; x < GX; x++) for (let y = 0; y < GY; y++)
+    floor.push(`<polygon class="iso-tile ${(x + y) % 2 ? "t2" : ""}" points="${P([iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)])}"/>`);
+  const win = windowAt ? `<g class="iso-sky"><polygon class="sky-day" points="${wallRect("R", windowAt[0], windowAt[1], 36, 108)}"/><polygon class="sky-night" points="${wallRect("R", windowAt[0], windowAt[1], 36, 108)}"/>
+      ${Array.from({length: 10}, (_, i) => { const [x, y] = RW(windowAt[0] + .2 + (i * .41) % (windowAt[1] - windowAt[0] - .4), 70 + (i * 11) % 34); return `<circle class="iso-star" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i % 3 ? .8 : 1.2}"/>`; }).join("")}</g>
+    <polygon class="iso-winframe" points="${wallRect("R", windowAt[0], windowAt[1], 36, 108)}"/>` : "";
+  return `<polygon class="iso-wall wl" points="${P([iso(0, 0), iso(0, GY), iso(0, GY, WH), iso(0, 0, WH)])}"/>
+    <polygon class="iso-wall wr" points="${P([iso(0, 0), iso(GX, 0), iso(GX, 0, WH), iso(0, 0, WH)])}"/>
+    <polygon class="iso-skirt" points="${P([iso(0, 0), iso(0, GY), iso(0, GY, 8), iso(0, 0, 8)])}"/><polygon class="iso-skirt r" points="${P([iso(0, 0), iso(GX, 0), iso(GX, 0, 8), iso(0, 0, 8)])}"/>
+    ${floor.join("")}${win}`;
+}
+function makeRoom(build) {
+  const f = [], block = new Set();
+  const add = (depth, svg) => f.push([depth, svg]);
+  const blk = (x, y, w, d) => { for (let i = Math.floor(x); i < Math.ceil(x + w); i++) for (let j = Math.floor(y); j < Math.ceil(y + d); j++) block.add(`${i},${j}`); };
+  const back = build(add, blk);
+  return {furni: f, block, back};
+}
+function makeLounge() {
+  return makeRoom((add, blk) => {
+    LBEDS.forEach((y0, i) => {                                   // bunk beds, a blanket in each persona's colour
+      const c = botLook(["veteran", "narrative", "skeptic", "quant"][i]).color || "#7d6cc4";
+      add(y0 + .4, isoBox(.1, y0, 1.3, 1.7, 14, "#5b6b8c") + isoBox(.15, y0 + .05, 1.2, 1.6, 5, "#ece6da", 14) +
+        isoBox(.2, y0 + .12, .45, .5, 5, "#ffffff", 19) + isoBox(.65, y0 + .08, .7, 1.55, 3, c, 19));
+      blk(.1, y0, 1.3, 1.7);
+    });
+    add(5, isoBox(4.6, .1, 3.8, .6, 20, "#3a2f2a"));             // the TV stand; the TV hangs on the wall
+    blk(4.6, .1, 3.8, .6);
+    add(4.5 + 4.6, isoBox(4, 4.1, 5, .8, 13, "#3f7d6b"));          // the sofa: seat, then its back in pieces so
+    for (let k = 0; k < 5; k++) add(4 + k + .5 + 5.35, isoBox(4 + k, 4.9, 1, .42, 34, "#356b5c"));   // depth sorts per seat
+    add(3.6 + 5.2, isoBox(3.6, 4.1, .4, 1.22, 24, "#356b5c")); add(9.4 + 5.2, isoBox(9, 4.1, .4, 1.22, 24, "#356b5c"));
+    blk(3.6, 4.9, 5.8, .42);
+    add(15.3, isoBox(14.3, .2, 1, .8, 62, "#2b2d6e") + isoBox(14.38, .98, .84, .04, 22, "#43f0ff", 32) + isoBox(14.45, .99, .7, .03, 6, "#ff5ea8", 20));   // arcade
+    blk(14.3, .2, 1, .8);
+    add(17.9, isoBox(15.1, 2.4, .85, .85, 64, "#dfe6ee") + isoBox(15.1, 3.3, .85, 1.6, 30, "#8a6a4a") + isoBox(15.2, 3.5, .6, .5, 14, "#2a2f3a", 30));   // fridge, counter, microwave
+    blk(15.1, 2.4, .9, 2.5);
+    add(9 + 7 + 2.3, isoBox(9, 7, 3, 1.6, 20, "#1f7a4a") + isoBox(10.46, 7, .08, 1.6, 7, "#f2f2f2", 20) + isoBox(9.05, 7.78, 2.9, .04, 1, "#ffffff", 20));   // ping-pong
+    blk(9, 7, 3, 1.6);
+    for (const [x, y, c] of [[12.5, 4.7, "#c25b8a"], [13.4, 5.6, "#e0a33b"]]) {                    // bean bags
+      const [sx, sy] = iso(x, y); add(x + y - .3, `<ellipse cx="${sx}" cy="${sy - 6}" rx="24" ry="14" fill="${c}"/><ellipse cx="${sx - 4}" cy="${sy - 11}" rx="12" ry="6" fill="${shade(c, 1.25)}" opacity=".7"/>`);
+    }
+    for (const [x, y] of [[3, 10.4], [15.4, 10.4]]) {
+      const [sx, sy] = iso(x, y, 18); add(x + y + .5, isoBox(x - .25, y - .25, .5, .5, 18, "#b5653d") + [[-10, -38, 11], [9, -42, 12], [0, -54, 10]].map(([ox, oy, r]) => `<ellipse cx="${sx + ox}" cy="${sy + oy + 14}" rx="${r * .8}" ry="${r}" class="iso-leaf"/>`).join(""));
+      blk(x - .5, y - .5, 1, 1);
+    }
+    return () => {
+      const rug = `<polygon class="iso-rug" points="${P([iso(3.4, 1.4), iso(9.6, 1.4), iso(9.6, 6.2), iso(3.4, 6.2)])}"/>`;
+      return houseWalls([10.2, 13.2]) + rug + doorSVG("FLOOR·LAB") +
+        `<polygon class="iso-frame" points="${wallRect("R", 4.2, 8.8, 40, 106)}"/><polygon class="iso-tvscr" points="${wallRect("R", 4.35, 8.65, 46, 100)}"/>
+         <g id="iso-tv" transform="translate(${RW(4.35, 100)[0]} ${RW(4.35, 100)[1]}) ${wallMatrix("R")}"></g>`;
+    };
+  });
+}
+function makeLab() {
+  return makeRoom((add, blk) => {
+    add(14.5 + 1.1 + 1, isoBox(14.5, .2, 1.2, .9, 92, "#20252f") +              // the recorder's server rack, lights blinking
+      Array.from({length: 12}, (_, i) => { const [x, y] = iso(14.62 + (i % 4) * .26, 1.1, 18 + Math.floor(i / 4) * 22); return `<rect class="iso-led" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="4" height="3" style="animation-delay:-${(i * .37) % 2}s"/>`; }).join("") +
+      `<text class="iso-plate" x="${iso(15.1, 1.15, 6)[0]}" y="${iso(15.1, 1.15, 6)[1]}" text-anchor="middle">RECORDER</text>`);
+    blk(14.5, .2, 1.2, .9);
+    for (const [x, y] of [[2.6, 4], [8.1, 4]]) {                              // workbenches with charts on their screens
+      add(x + y + 1.6, isoBox(x, y, 3, 1, 26, "#9aa7b8") + isoBox(x + .5, y + .2, 1, .12, 30, "#1b2230", 26) + isoBox(x + 1.7, y + .2, 1, .12, 30, "#1b2230", 26) +
+        `<polyline class="iso-chart" points="${[[.6, 40], [.8, 46], [1, 43], [1.3, 52], [1.45, 50]].map(([u, v]) => iso(x + u, y + .19, v).map(n => n.toFixed(1)).join(",")).join(" ")}"/>`);
+      add(x + y - .3, isoBox(x + 1, y - .8, .9, .6, 16, "#3a4458") + isoBox(x + 1.05, y - .77, .8, .14, 40, "#495570", 16));
+      blk(x, y, 3, 1);
+    }
+    add(6 + 7.6 + 2.4, isoBox(6, 7.6, 3.6, 1.6, 26, "#c99a5e") + isoBox(6.4, 7.9, .6, .45, 2, "#ffffff", 26) + isoBox(7.3, 8.3, .7, .5, 2, "#fff6a8", 26) + isoBox(8.4, 7.95, .6, .4, 2, "#bfe8ff", 26) +
+      `<text class="iso-plate" x="${iso(7.8, 9.2, 8)[0]}" y="${iso(7.8, 9.2, 8)[1]}" text-anchor="middle">RESEARCH</text>`);
+    blk(6, 7.6, 3.6, 1.6);
+    add(.4 + 3, isoBox(.1, 1, .5, 4.2, 74, "#6b4f3a") + [0, 1, 2].map(k => isoBox(.12, 1.1, .45, 4, 2, "#4d3727", 20 + k * 24)).join("") +
+      Array.from({length: 14}, (_, i) => isoBox(.15, 1.15 + (i % 7) * .55, .38, .35, 14, ["#c0392b", "#2980b9", "#27ae60", "#f39c12", "#8e44ad"][i % 5], 22 + Math.floor(i / 7) * 24)).join(""));
+    blk(.1, 1, .5, 4.2);
+    for (const [x, y] of [[3, 10.4], [15.4, 10.4]]) {
+      const [sx, sy] = iso(x, y, 18); add(x + y + .5, isoBox(x - .25, y - .25, .5, .5, 18, "#b5653d") + [[-10, -38, 11], [9, -42, 12], [0, -54, 10]].map(([ox, oy, r]) => `<ellipse cx="${sx + ox}" cy="${sy + oy + 14}" rx="${r * .8}" ry="${r}" class="iso-leaf"/>`).join(""));
+      blk(x - .5, y - .5, 1, 1);
+    }
+    return () => houseWalls(null) + doorSVG("FLOOR·LOUNGE") +
+      `<polygon class="iso-board" points="${wallRect("R", 1, 6.6, 38, 114)}"/><g id="iso-wb1" transform="translate(${RW(1, 114)[0]} ${RW(1, 114)[1]}) ${wallMatrix("R")}"></g>
+       <polygon class="iso-board" points="${wallRect("R", 7.3, 12.9, 38, 114)}"/><g id="iso-wb2" transform="translate(${RW(7.3, 114)[0]} ${RW(7.3, 114)[1]}) ${wallMatrix("R")}"></g>`;
+  });
+}
+function nightGlows(room) {
+  const g = (x, y, z, rx, ry, warm) => { const [sx, sy] = iso(x, y, z); return `<ellipse class="iso-glow${warm ? " warm" : ""}" cx="${sx}" cy="${sy}" rx="${rx}" ry="${ry}"/>`; };
+  if (room === "lounge") return g(6.5, 1, 70, 150, 70) + g(14.8, .6, 40, 50, 36) + g(1, 5, 30, 70, 120, true);
+  if (room === "lab") return g(15, .6, 60, 60, 60) + g(4, 4.4, 40, 80, 44) + g(9.5, 4.4, 40, 80, 44) + g(7.8, 8.4, 30, 110, 50, true);
+  return Object.entries(DESK_AT).map(([id, [dx, dy]]) => g(dx + 1, dy + .4, 40, 70, 44)).join("") + g(TABLE_AT[0] + 1, TABLE_AT[1] + 1, 40, 110, 60, true);
+}
+function houseInit() {
+  IO.rooms = {floor: {furni: IO.furni, block: IO.block, back: roomBackSVG}, lounge: makeLounge(), lab: makeLab()};
+  const tools = document.querySelector("#office .iso-tools");
+  if (tools && !tools.querySelector(".house-tabs"))
+    tools.insertAdjacentHTML("afterbegin", `<div class="seg house-tabs" role="group" aria-label="Rooms">${Object.entries(HOUSE).map(([k, h]) =>
+      `<button class="small" data-room="${k}" title="${h.name}">${h.icon} <span class="lbl-room">${h.name}</span> <b class="num" data-roomn="${k}">0</b></button>`).join("")}</div>`);
+  const want = store.get("house.room") || "floor";
+  if (want !== "floor") showRoom(want); else { IO.room = "floor"; houseTabs(); syncRoomVis(); }
+}
+function showRoom(r) {
+  if (!IO.rooms || !IO.rooms[r]) r = "floor";
+  if (RE.on && r !== "floor") setRoomEdit(false);
+  IO.room = r; store.set("house.room", r);
+  $("office").dataset.room = r;
+  $("iso-back").innerHTML = IO.rooms[r].back();
+  const ents = $("iso-ents");
+  [...ents.children].forEach(g => { if (!g.classList.contains("av")) g.remove(); });
+  for (const [depth, svg, item] of IO.rooms[r].furni) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.innerHTML = svg; g.dataset.depth = depth; if (item && r === "floor") g.dataset.item = item; ents.appendChild(g);
+  }
+  const night = $("iso-nightglow"); if (night) night.innerHTML = nightGlows(r);
+  IO.chat.forEach(m => m.el.remove()); IO.chat = [];
+  $$("[data-roomedit]").forEach(x => x.hidden = r !== "floor");
+  syncRoomVis(); sortDepth(); houseTabs(); renderBoards(); renderHouseBoards();
+}
+function syncRoomVis() {
+  for (const b of Object.values(IO.bots)) b.g.style.display = (b.room || "floor") === (IO.room || "floor") ? "" : "none";
+}
+function houseTabs() {
+  const n = {floor: 0, lounge: 0, lab: 0};
+  for (const b of Object.values(IO.bots)) n[b.room || "floor"]++;
+  for (const k of Object.keys(HOUSE)) {
+    const c = document.querySelector(`[data-roomn="${k}"]`); if (c) c.textContent = n[k];
+    const btn = document.querySelector(`[data-room="${k}"]`); if (btn) btn.setAttribute("aria-pressed", String((IO.room || "floor") === k));
+  }
+}
+// where a bot lives: the AI personas rest in the lounge (in bed at night, on the sofa by day); everyone else on the floor
+function homeRoom(id, mood) { return !DESK_AT[id] && mood === "sleep" ? "lounge" : "floor"; }
+function travel(b, room, then) {
+  if ((b.room || "floor") === room) return then();
+  b.sit = false; b.busy = b.busy || "walking";
+  b.path = findPath([b.x, b.y], DOOR, b.room || "floor").concat([DOOR]); b.speed = 2.6;
+  b.then = () => {
+    b.room = room; b.x = DOOR[0] + .4; b.y = DOOR[1]; if (b.busy === "walking") b.busy = null;
+    syncRoomVis(); houseTabs(); drawBot(b); then();
+  };
+}
+function houseTrip(b, room) {                         // a break in the lounge, or a look at the lab's boards
+  const taken = new Set(Object.values(IO.bots).filter(o => o !== b && o.spot).map(o => o.spot));
+  const options = Object.entries(HSTOPS[room]).filter(([k]) => !taken.has(room + ":" + k));
+  if (!options.length) return false;
+  const [k, [x, y, view, prop]] = pick(options);
+  b.busy = "trip"; b.spot = room + ":" + k;
+  goTo(b, [x, y], () => {
+    b.view = view; b.sit = ["sofa", "bag1", "bag2", "bench", "bench2"].includes(k); if (k === "pongR") b.face = -1; if (k === "pongL") b.face = 1;
+    drawBot(b); setProp(b, prop);
+    const line = room === "lab" ? labLine(b, k) : nextLine(b.id, "lounge");
+    if (line) hsay(b.id, esc(line), {force: true});
+    setTimeout(() => { if (b.spot === room + ":" + k) { b.spot = null; goHome(b); } }, 9000 + Math.random() * 9000);
+  }, 2.2, room);
+  return true;
+}
+function labLine(b, k) {
+  const w = S.wallets, e = S.analytics && S.analytics.edge, late = e && (e.strategies || []).find(s => s.source === "late");
+  const lines = [
+    k === "wallets" && w && !w.pending ? `Wallet study: day ${fx(w.days, 1)} of ${w.period_days}, ${w.qualified} wallets qualify, about ${(w.wallets || []).filter(x => !x.cluster).length + (w.clusters || []).length} real traders.` : "",
+    k === "edge" && late && late.n ? `Graduation plays: ${pct(late.ret_pct, 1)} per SOL over ${late.n} trades. ${late.level === "promising" ? "Promising, not proven." : ""}` : "",
+    k === "rack" ? "The recorder rack is humming. Every PumpSwap trade, on disk." : "",
+  ].filter(Boolean);
+  return lines[0] || nextLine(b.id, "lab");
+}
+let houseDataAt = 0;
+function renderHouseBoards() {
+  if (IO.room === "lounge") {
+    const tv = $("iso-tv"); if (!tv || !snap) return;
+    const rows = (snap.pulse || []).slice(-30), w = 4.3 * UNIT, h = 54, top = Math.max(1, ...rows.map(r => r[1]));
+    setHTML(tv, `<rect x="0" y="0" width="${w.toFixed(0)}" height="${h}" fill="#071018"/>
+      <text x="6" y="10" class="pb-t">MARKET PULSE</text><text x="6" y="19" class="pb-s">${rows.length ? rows[rows.length - 1][1] : 0} launches this minute</text>
+      ${rows.map((r, i) => { const bh = r[1] / top * 34, bw = (w - 12) / 30; return `<rect x="${(6 + i * bw).toFixed(1)}" y="${(h - 4 - bh).toFixed(1)}" width="${Math.max(bw - 1.5, 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#3e8bd8"/>${r[5] ? `<circle cx="${(6 + i * bw + bw / 2).toFixed(1)}" cy="${(h - 8 - bh).toFixed(1)}" r="2" fill="#f5b83c"/>` : ""}`; }).join("")}`);
+  } else if (IO.room === "lab") {
+    if (Date.now() - houseDataAt > 60000) { houseDataAt = Date.now(); loadWallets(); if (!S.analytics) fetch("/api/analytics", {cache: "no-store"}).then(r => r.json()).then(a => { S.analytics = a; }).catch(() => {}); }
+    const w = S.wallets, e = S.analytics && S.analytics.edge, W = 5.4 * UNIT;
+    const b1 = $("iso-wb1"), b2 = $("iso-wb2"); if (!b1 || !b2) return;
+    const groups = w && !w.pending ? (w.clusters || []).length : 0, indep = w && !w.pending ? (w.wallets || []).filter(x => !x.cluster).length + groups : 0;
+    setHTML(b1, `<text x="8" y="14" class="pb-t">WALLET STUDY</text>${w && !w.pending ? `
+      <text x="8" y="32" class="pb-big">day ${fx(w.days, 1)} / ${w.period_days}</text>
+      <text x="8" y="46" class="pb-s">${w.moves} coins ran 3x+ · ${w.qualified} wallets qualify (${w.need})</text>
+      <text x="8" y="58" class="pb-s">≈ ${indep} real traders · ${groups} group${groups === 1 ? "" : "s"} buy together</text>
+      <text x="8" y="70" class="pb-s">freeze ${new Date(w.freeze_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})} · verdict ~${new Date(w.verdict_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})}</text>`
+      : `<text x="8" y="34" class="pb-s">loading the recorder's data…</text>`}`);
+    const strat = e ? (e.strategies || []).filter(s => s.n && s.source !== "manual").slice(0, 3) : [];
+    setHTML(b2, `<text x="8" y="14" class="pb-t">EDGE CHECK</text>${strat.length ? strat.map((s, i) => `
+      <text x="8" y="${30 + i * 22}" class="pb-s">${esc(s.label.slice(0, 18))} · ${s.n} trades</text>
+      <text x="8" y="${40 + i * 22}" class="pb-s ${cls(s.ret_pct)}">${pct(s.ret_pct, 1)} per SOL · ${esc(s.level)}</text>`).join("") : `<text x="8" y="34" class="pb-s">no strategy results yet</text>`}`);
+  }
 }
 
 function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat = []; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
@@ -4143,7 +4374,7 @@ const CL = {data: null, caller: "", timer: 0};
 async function loadCalls() {
   clearTimeout(CL.timer);
   try { CL.data = await (await fetch("/api/calls?caller=" + encodeURIComponent(CL.caller), {cache: "no-store"})).json(); renderCalls(); } catch { /* next poll */ }
-  if (S.tab === "calls") CL.timer = setTimeout(loadCalls, 10000);
+  if (S.tab === "analytics") CL.timer = setTimeout(loadCalls, 10000);
 }
 const xx = v => v == null ? "–" : `${v.toFixed(v >= 10 ? 0 : 2)}x`;
 const agoBot = ts => ago(ts - (((snap && snap.now) || Date.now() / 1000) - Date.now() / 1000));   // the bot's clock (a simulated market runs ahead)
@@ -4437,7 +4668,7 @@ const TOUR = [
   {tab: "pulse", sel: ".pulse-cols", title: "Pulse", text: "New launches, the final stretch to graduation, and fresh graduates. Filter each column, ⚡ quick-buy, and lists freeze under your mouse."},
   {tab: "desk", sel: "#office", title: "The trading room", text: "Each bot is a real part of the system. Click one to zoom into its screen. Hand-offs between them are real events."},
   {tab: "desk", sel: ".teach", title: "Teach the desk", text: "Save a post, article, contract address or note. All four personas read it and reply; answer them, or @mention one."},
-  {tab: "calls", sel: "#cl-hero", title: "Your track record", text: "Every call is timestamped and hash-chained, then scored from market data. Publish the proof so the record can't be rewritten."},
+  {tab: "analytics", sel: "#cl-hero", title: "Your track record", text: "Every call is timestamped and hash-chained, then scored from market data. Publish the proof so the record can't be rewritten."},
   {tab: "controls", sel: "#conn-panel", title: "Connect X and Telegram", text: "Post calls, trade cards and proofs. Every post is your click; the composer shows what X will charge."},
   {tab: "live", sel: "#arrange", title: "Make it yours", text: "Arrange any page: drag, resize, collapse, hide. Ctrl+K opens the command palette; right-click any coin for quick actions."},
 ];
@@ -4464,7 +4695,7 @@ function tourShow() {
 
 // ---------------------------------------------------------------- command palette (Ctrl+K) and the coin menu (right-click)
 const CK = {items: [], i: 0};
-const TABS = [["live", "◉ Live"], ["pulse", "⚡ Pulse"], ["desk", "◆ Desk"], ["calls", "📣 Calls"], ["chat", "✦ Chat"], ["portfolio", "◈ Portfolio"],
+const TABS = [["live", "◉ Live"], ["pulse", "⚡ Pulse"], ["desk", "◆ Desk"], ["chat", "✦ Chat"], ["portfolio", "◈ Portfolio"],
               ["analytics", "▤ Analytics"], ["controls", "⚙ Controls"], ["guide", "? Guide"]];
 function ckActions() {
   const s = snap || {};
@@ -4473,8 +4704,8 @@ function ckActions() {
     ...((s.risk && s.risk.levels) || []).map(l => ({label: `Risk dial: ${l.name}`, hint: `level ${l.level}`, run: () => setRisk(l.level)})),
     {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)},
     {label: s.away ? "🚶 I'm back: take my positions back" : "🚶 Away: the bots take over my positions", run: () => $("away-btn").click()}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
-    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { setTab("calls"); setTimeout(() => $("clf-ca").focus(), 50); }},
-    {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
+    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Calls & track record", hint: "analytics", run: () => openCalls()}, {label: "📣 Make a call", run: () => { openCalls(); setTimeout(() => $("clf-ca").focus(), 50); }},
+    {label: "🔏 Publish the ledger proof", run: () => { openCalls("cl-anchor"); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
     {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
     {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: `💡 Turn trade tips ${store.get("tips") === "off" ? "on" : "off"}`, hint: "tips", run: () => setTips(store.get("tips") === "off")}, {label: ">_ Open the terminal", hint: "`", run: () => termOpen(true)},
@@ -4502,7 +4733,7 @@ function renderPalette() {
   if (isMint(raw)) {
     const m = raw;
     items = [{label: "Trade it (Manual trade)", run: () => { setTab("live"); setTradeMint(m); }}, {label: "Open its details", run: () => openDrawer(m)},
-      {label: "📣 Call it", run: () => { setTab("calls"); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 60); }},
+      {label: "📣 Call it", run: () => { openCalls(); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 120); }},
       {label: "🔔 Set an alert", run: () => { setTab("live"); setTradeMint(m); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }},
       {label: "📌 Save to the desk's memory", run: () => send({action: "mem_add", text: m})}, {label: "✎ Post about it", run: () => postCoin(m)}];
   } else {
@@ -4558,7 +4789,7 @@ function coinAction(k, mint) {
   $("ctx").hidden = true;
   if (k === "trade") { closeDrawer(); setTab("live"); setTradeMint(mint); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); }
   else if (k === "qb") trBuy(mint, PL.qb ?? 0.1);
-  else if (k === "call") { setTab("calls"); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 60); }
+  else if (k === "call") { openCalls(); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 120); }
   else if (k === "alert") { setTab("live"); setTradeMint(mint); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }
   else if (k === "mem") send({action: "mem_add", text: mint});
   else if (k === "post") postCoin(mint);
@@ -4596,17 +4827,49 @@ function renderEdge() {
     <div class="form-row" style="margin-top:8px"><button class="small" data-edgecopy="1">Copy the bots' results as text for a group</button>
     <span class="note">${esc(e.mode)} trades${e.mode.startsWith("paper") ? ": labelled paper in the text" : ""}</span></div>`);
 }
+async function loadWallets() {
+  try { const d = await (await fetch("/api/wallets", {cache: "no-store"})).json(); S.wallets = d; renderWallets(); } catch { /* next round */ }
+}
+function renderWallets() {
+  const d = S.wallets, box = $("an-wallets"); if (!d || !box) return;
+  if (d.pending) { setHTML(box, `<div class="empty">${d.refreshing ? "Reading the recorder's data…" : "No wallet data yet: the recorder (meme-wallets service) collects it."}</div>`); return; }
+  const day = t => new Date(t * 1000).toLocaleDateString([], {month: "short", day: "numeric"});
+  const short = w => w.slice(0, 4) + "…" + w.slice(-4);
+  const groups = d.clusters || [], indep = d.wallets.filter(w => !w.cluster).length + groups.length;
+  const rec = d.recorder || {};
+  const clusterNote = groups.length ? `<div class="banner warn" style="margin:8px 0">These ${d.wallets.length} wallets are really about <b>${indep} traders</b>:
+      ${groups.map((g, i) => `group ${i + 1} (${g.map(short).join(", ")})`).join(" and ")} keep buying the same coins within ${d.together_s} s of each other:
+      one operator, or bots copying the same leader. The frozen rules count them separately, so "two listed wallets agree" can be one trader.</div>` : "";
+  setHTML(box, `<p class="note">Day <b>${fx(d.days, 1)}</b> of ${d.period_days} picking wallets · <b>${d.moves}</b> coins ran 3x+ · <b>${d.qualified}</b> wallets qualify (${d.need} needed) ·
+      ${d.near_misses} one coin short · ${d.bots_excluded} bots left out · list freezes from ${day(d.freeze_after)}, verdict around ${day(d.verdict_after)} ·
+      recorder: ${rec.active === false ? `<b class="down">paused</b>` : "recording"}${d.refreshing ? " · refreshing" : ` · updated ${dur(d.age_s)} ago`}</p>
+    ${clusterNote}
+    <div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Group</th><th class="r">Early on</th><th class="r">Sold 2x+</th><th class="r">Early size</th><th>Coins</th></tr></thead><tbody>
+      ${d.wallets.map(w => `<tr><td><a href="https://solscan.io/account/${esc(w.wallet)}" target="_blank" rel="noopener noreferrer" class="num">${esc(short(w.wallet))}</a></td>
+        <td>${w.cluster ? `<span class="tag warn">group ${w.cluster}</span>` : `<span class="note">on its own</span>`}</td><td class="r num">${w.hits} coins</td><td class="r num">${w.good_exits}×</td>
+        <td class="r num">${sol(w.early_sol, 2)}${U()}</td><td class="note">${w.coins.map(esc).join(", ")}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">None yet.</td></tr>`}</tbody></table></div>
+    ${(d.recent_moves || []).length ? `<p class="note" style="margin-top:8px">Recent runs: ${d.recent_moves.slice(0, 8).map(m => `${esc(m.sym || "?")} ${m.x}x`).join(" · ")}</p>` : ""}
+    <p class="note">Picked with hindsight from coins that already ran, which always looks good: it proves nothing yet. The test is how listed wallets do after the freeze, against random coins and random wallets (docs/WALLETS.md).</p>`);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
-  const v = all[S.labKind || "late"];
-  if (!v || !v.variants.length) { setHTML($("an-lab"), `<div class="empty">No results yet: the lab starts with the bot's next entry${v && v.open ? ` (${v.open} shadow exits running now)` : ""}.</div>`); return; }
+  const v = all[S.labKind || "late"], dp = all.desk_pass;
+  const base0 = ((all.late && all.late.variants) || []).find(r => r.variant === "as now"), r0 = dp && dp.variants && dp.variants[0];
+  const passes = r0 ? `<p class="note" style="margin-top:10px"><b>AI desk passes:</b> ${dp.entries} graduation coin${dp.entries === 1 ? "" : "s"} it turned down would have averaged
+      <b class="${cls(r0.mean_pct)}">${pct(r0.mean_pct, 1)}</b> on the bot's own exits (${Math.round(r0.win_rate * 100)}% won)${base0 ? `, against ${pct(base0.mean_pct, 1)} on the coins it bought` : ""}.
+      ${r0.mean_pct > 0 ? "So far its passes would have made money: the desk is costing you trades." : "So far its passes would have lost money: passing helped."}${dp.entries < 20 ? " Small sample." : ""}</p>`
+    : (dp && dp.open ? `<p class="note" style="margin-top:10px">AI desk passes: ${dp.open} coin(s) it turned down are being followed now.</p>` : "");
+  if (!v || !v.variants.length) { setHTML($("an-lab"), `<div class="empty">No results yet: the lab starts with the bot's next entry${v && v.open ? ` (${v.open} shadow exits running now)` : ""}.</div>${passes}`); return; }
   const base = v.variants.find(r => r.variant === "as now");
   const best = base && v.variants[0] !== base && v.variants[0].mean_pct > base.mean_pct + .05 ? v.variants[0] : null;   // only a real lead
   setHTML($("an-lab"), `<p class="note">${v.entries} entries${v.open ? ` · ${v.open} shadow exits still running` : ""} · P&amp;L per entry after fees, as if each one put in the same amount.${v.entries < 50 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}</p>
     <div class="tablewrap"><table><thead><tr><th>Exit rule</th><th class="r">Entries</th><th class="r">Mean</th><th class="r">Median</th><th class="r">Won</th><th class="r">vs as now</th></tr></thead><tbody>
     ${v.variants.map(r => `<tr class="${r.variant === "as now" ? "lab-base" : r === best ? "lab-best" : ""}"><td>${esc(r.variant)}${r === best ? " <span class='tag ok'>best so far</span>" : ""}</td>
       <td class="r num">${r.n}</td><td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td>
-      <td class="r num">${Math.round(r.win_rate * 100)}%</td><td class="r num ${base ? cls(r.mean_pct - base.mean_pct) : ""}">${base && r !== base ? pct(r.mean_pct - base.mean_pct, 1) : "–"}</td></tr>`).join("")}</tbody></table></div>`);
+      <td class="r num">${Math.round(r.win_rate * 100)}%</td><td class="r num ${base ? cls(r.mean_pct - base.mean_pct) : ""}">${base && r !== base ? pct(r.mean_pct - base.mean_pct, 1) : "–"}</td></tr>`).join("")}</tbody></table></div>${passes}`);
+}
+function openCalls(at = "calls-sec") {        // the calls live in Analytics now
+  setTab("analytics"); setTimeout(() => { const e = $(at); if (e) e.scrollIntoView({block: at === "calls-sec" ? "start" : "center"}); }, 120);
 }
 function setTab(t) {
   if (!TABS.some(([x]) => x === t)) t = "live";
@@ -4627,7 +4890,7 @@ function setTab(t) {
   if (t === "desk") { loadDesk(); loadX(); loadMemory(); kickIso(); }
   if (t === "portfolio") { loadPortfolio(); if (snap) renderPortfolio(); }
   if (t === "pulse") loadPulse();
-  if (t === "calls") { if (!$("clf").innerHTML) $("clf").innerHTML = callForm("clf"); loadCalls(); }
+  if (t === "analytics") { if (!$("clf").innerHTML) $("clf").innerHTML = callForm("clf"); loadCalls(); }
   if (t === "controls") loadSocial();
   if (t === "guide") renderGuide();
 }
@@ -4963,7 +5226,7 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -4992,6 +5255,7 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.room) { showRoom(d.room); return; }
   if (d.edgecopy) { const txt = S.analytics?.edge?.text || ""; navigator.clipboard.writeText(txt).then(() => toast("Copied: paste it into your group", "ok"), () => toast("Couldn't copy: select the text in Analytics instead", "bad")); return; }
   if (d.unhalt) { unhaltAsk((q, f) => { if (confirm(q)) f(); }); return; }
   if (d.addpaper) { setTab("controls"); setTimeout(() => { $("paper-panel").scrollIntoView({block: "center"}); $("dep-sol").focus(); $("dep-sol").select(); }, 80); return; }
