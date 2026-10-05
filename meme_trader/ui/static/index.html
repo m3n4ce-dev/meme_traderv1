@@ -791,6 +791,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
 .tr-chartbox { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--ring); border-radius: 10px; background: var(--surface-2); }
 .tr-chart-h { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; } #tr-chart { width: 100%; display: block; }
 .edge-why { margin-top: 8px; } .edge-why summary { cursor: pointer; } .edge-why ul { margin: 6px 0; padding-left: 20px; }
@@ -932,12 +933,11 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <button role="tab" data-tab="live" aria-selected="true"><span class="ic">◉</span>Live<kbd class="hide-sm">1</kbd></button>
     <button role="tab" data-tab="pulse" aria-selected="false"><span class="ic">⚡</span>Pulse<kbd class="hide-sm">2</kbd></button>
     <button role="tab" data-tab="desk" aria-selected="false"><span class="ic">◆</span>Desk<kbd class="hide-sm">3</kbd></button>
-    <button role="tab" data-tab="calls" aria-selected="false"><span class="ic">📣</span>Calls<kbd class="hide-sm">4</kbd></button>
-    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">5</kbd></button>
-    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">6</kbd></button>
-    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">7</kbd></button>
-    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">8</kbd></button>
-    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">9</kbd></button>
+    <button role="tab" data-tab="chat" aria-selected="false">✦ Chat<kbd class="hide-sm">4</kbd></button>
+    <button role="tab" data-tab="portfolio" aria-selected="false"><span class="ic">◈</span>Portfolio<kbd class="hide-sm">5</kbd></button>
+    <button role="tab" data-tab="analytics" aria-selected="false"><span class="ic">▤</span>Analytics<kbd class="hide-sm">6</kbd></button>
+    <button role="tab" data-tab="controls" aria-selected="false"><span class="ic">⚙</span>Controls<kbd class="hide-sm">7</kbd></button>
+    <button role="tab" data-tab="guide" aria-selected="false">Guide<kbd class="hide-sm">8</kbd></button>
   </nav>
   <div class="spacer"></div>
   <span class="note num hide-sm" id="clock"></span>
@@ -1081,30 +1081,6 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   </section>
 
   <!-- ============================================================ CALLS -->
-  <section class="view" data-view="calls" hidden>
-    <section class="panel calls-hero" id="cl-hero">
-      <div class="ch-top"><div style="flex:1;min-width:260px"><h1>📣 Track record</h1>
-        <p class="note">Every call is timestamped and hash-chained, then scored from market data. Fixed-hold returns after costs come first; peaks are sampled (nobody sells the top).</p></div>
-        <div class="ch-act"><button class="small" data-share="record:">↗ Share the record</button><a class="btn small" href="/api/calls/export" download>⬇ Export ledger</a><button class="small ghost" data-help="calls">How it works</button></div></div>
-      <div id="cl-proof" class="cl-proof"></div>
-      <div class="form-row" id="cl-anchor"><span class="note">Publish the proof (the newest hash) so the record can't be rewritten:</span>
-        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-x"><i></i></span>𝕏</label>
-        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-tg" checked><i></i></span>Telegram</label>
-        <button class="small primary" data-anchor="1">🔏 Publish</button></div>
-    </section>
-    <div class="kpis" id="cl-kpis"></div>
-    <section class="panel" id="cl-make"><h2>Make a call <small>on the record at the current market cap</small></h2><div id="clf"></div></section>
-    <section class="panel" id="cl-ledger"><h2>Ledger <small>newest first · right-click a row for actions</small></h2>
-      <div class="toolbar" style="margin-bottom:8px"><div class="seg" id="cl-callers" role="group" aria-label="Whose calls"></div></div>
-      <div class="tablewrap"><table class="cl-table"><thead><tr><th>#</th><th>When</th><th>Coin</th><th>Caller</th><th class="r">MC at call</th><th class="r">Now</th><th class="r">Peak</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th>Hash</th><th></th></tr></thead>
-        <tbody id="cl-rows"><tr><td colspan="12" class="empty">Loading…</td></tr></tbody></table></div></section>
-    <section class="panel" id="cl-edge"><h2>What counts as an edge</h2>
-      <ul><li><b>Sample size first.</b> A handful of calls proves nothing: judge the 1-hour median and win rate over 100+ calls, and compare yours with the bot's.</li>
-        <li><b>Fixed horizons, after costs.</b> "Held 1 hour" assumes you bought at the call's market cap and sold an hour later, minus ~5% for fees and slippage. Peaks flatter everyone.</li>
-        <li><b>Published before the outcome.</b> Post calls as you make them, and publish the ledger head regularly: anyone can then check that nothing was added, edited or deleted later (<code>python -m meme_trader.sniper calls verify</code>).</li>
-        <li><b>The bot's own edge</b> is judged by its frozen research test, on data it was never tuned on (Desk → Research).</li></ul></section>
-  </section>
-
   <!-- ============================================================ DESK -->
   <section class="view" data-view="desk" hidden>
     <div class="desk-hero">
@@ -1252,6 +1228,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <p class="note">The <b>90% range</b> is where each strategy's average trade most likely sits, found by resampling its trades many times. If it spans zero, the result could be luck.
         <b>Without its best 3</b> shows how much rests on a few runners. Measurement only: it never changes a setting.</p>
       <div id="an-edge"></div></section>
+    <section class="panel" id="wallet-study"><h2>Wallet study <small>wallets-v1: do wallets that were early on several runners, buying together, make money?</small></h2>
+      <div id="an-wallets"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
@@ -1262,6 +1240,28 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <div class="two">
       <section class="panel"><h2>Prediction model</h2><div id="an-model"></div></section>
       <section class="panel"><h2>Model calibration <small>predicted vs actual on unseen launches</small></h2><div id="an-cal"></div></section>
+    </div>
+    <div id="calls-sec" class="stack">
+    <section class="panel calls-hero" id="cl-hero">
+      <div class="ch-top"><div style="flex:1;min-width:260px"><h2 style="margin:0">📣 Calls &amp; track record</h2>
+        <p class="note">Every call is timestamped and hash-chained, then scored from market data. Fixed-hold returns after costs come first; peaks are sampled (nobody sells the top).</p></div>
+        <div class="ch-act"><button class="small" data-share="record:">↗ Share the record</button><a class="btn small" href="/api/calls/export" download>⬇ Export ledger</a><button class="small ghost" data-help="calls">How it works</button></div></div>
+      <div id="cl-proof" class="cl-proof"></div>
+      <details class="cl-edge-why"><summary class="note">? What counts as an edge</summary><ul><li><b>Sample size first.</b> A handful of calls proves nothing: judge the 1-hour median and win rate over 100+ calls, and compare yours with the bot's.</li>
+        <li><b>Fixed horizons, after costs.</b> "Held 1 hour" assumes you bought at the call's market cap and sold an hour later, minus ~5% for fees and slippage. Peaks flatter everyone.</li>
+        <li><b>Published before the outcome.</b> Post calls as you make them, and publish the ledger head regularly: anyone can then check that nothing was added, edited or deleted later (<code>python -m meme_trader.sniper calls verify</code>).</li>
+        <li><b>The bot's own edge</b> is judged by its frozen research test, on data it was never tuned on (Desk → Research).</li></ul></details>
+      <div class="form-row" id="cl-anchor"><span class="note">Publish the proof (the newest hash) so the record can't be rewritten:</span>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-x"><i></i></span>𝕏</label>
+        <label class="minisw"><span class="switch"><input type="checkbox" id="cla-tg" checked><i></i></span>Telegram</label>
+        <button class="small primary" data-anchor="1">🔏 Publish</button></div>
+    </section>
+    <div class="kpis" id="cl-kpis"></div>
+    <section class="panel" id="cl-make"><h2>Make a call <small>on the record at the current market cap</small></h2><div id="clf"></div></section>
+    <section class="panel" id="cl-ledger"><div class="cl-scroll"><h2>Ledger <small>newest first · right-click a row for actions</small></h2>
+      <div class="toolbar" style="margin-bottom:8px"><div class="seg" id="cl-callers" role="group" aria-label="Whose calls"></div></div>
+      <div class="tablewrap"><table class="cl-table"><thead><tr><th>#</th><th>When</th><th>Coin</th><th>Caller</th><th class="r">MC at call</th><th class="r">Now</th><th class="r">Peak</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th>Hash</th><th></th></tr></thead>
+        <tbody id="cl-rows"><tr><td colspan="12" class="empty">Loading…</td></tr></tbody></table></div></div></section>
     </div>
   </section>
 
@@ -1803,6 +1803,7 @@ async function loadAnalytics() {
     const r = await fetch("/api/analytics", {cache: "no-store"});
     S.analytics = await r.json();
     renderAnalytics(S.analytics);
+    if (!S.wTimer || Date.now() - S.wTimer > 60000) { S.wTimer = Date.now(); loadWallets(); }
   } catch (e) { $("an-status").textContent = "Couldn't load analytics (" + e + ")"; }
   if (S.tab === "analytics") S.aTimer = setTimeout(loadAnalytics, 10000);
 }
@@ -2481,7 +2482,7 @@ function deskCost(b, vote = false) {
   const v = vote ? b.per_vote_usd : b.per_review_usd;
   if (v == null) return "a few cents";
   if (v === 0) return "free";
-  return v < 0.01 ? `about ${(v * 100).toFixed(2)}¢` : `about $${v.toFixed(3)}`;
+  return v < 0.01 ? `$${v.toFixed(4)} (under 1¢)` : `about $${v.toFixed(3)}`;   // "0.92¢" read as 92 cents
 }
 const DB = {prov: null, models: null};
 function renderBrain(d) {
@@ -4143,7 +4144,7 @@ const CL = {data: null, caller: "", timer: 0};
 async function loadCalls() {
   clearTimeout(CL.timer);
   try { CL.data = await (await fetch("/api/calls?caller=" + encodeURIComponent(CL.caller), {cache: "no-store"})).json(); renderCalls(); } catch { /* next poll */ }
-  if (S.tab === "calls") CL.timer = setTimeout(loadCalls, 10000);
+  if (S.tab === "analytics") CL.timer = setTimeout(loadCalls, 10000);
 }
 const xx = v => v == null ? "–" : `${v.toFixed(v >= 10 ? 0 : 2)}x`;
 const agoBot = ts => ago(ts - (((snap && snap.now) || Date.now() / 1000) - Date.now() / 1000));   // the bot's clock (a simulated market runs ahead)
@@ -4437,7 +4438,7 @@ const TOUR = [
   {tab: "pulse", sel: ".pulse-cols", title: "Pulse", text: "New launches, the final stretch to graduation, and fresh graduates. Filter each column, ⚡ quick-buy, and lists freeze under your mouse."},
   {tab: "desk", sel: "#office", title: "The trading room", text: "Each bot is a real part of the system. Click one to zoom into its screen. Hand-offs between them are real events."},
   {tab: "desk", sel: ".teach", title: "Teach the desk", text: "Save a post, article, contract address or note. All four personas read it and reply; answer them, or @mention one."},
-  {tab: "calls", sel: "#cl-hero", title: "Your track record", text: "Every call is timestamped and hash-chained, then scored from market data. Publish the proof so the record can't be rewritten."},
+  {tab: "analytics", sel: "#cl-hero", title: "Your track record", text: "Every call is timestamped and hash-chained, then scored from market data. Publish the proof so the record can't be rewritten."},
   {tab: "controls", sel: "#conn-panel", title: "Connect X and Telegram", text: "Post calls, trade cards and proofs. Every post is your click; the composer shows what X will charge."},
   {tab: "live", sel: "#arrange", title: "Make it yours", text: "Arrange any page: drag, resize, collapse, hide. Ctrl+K opens the command palette; right-click any coin for quick actions."},
 ];
@@ -4464,7 +4465,7 @@ function tourShow() {
 
 // ---------------------------------------------------------------- command palette (Ctrl+K) and the coin menu (right-click)
 const CK = {items: [], i: 0};
-const TABS = [["live", "◉ Live"], ["pulse", "⚡ Pulse"], ["desk", "◆ Desk"], ["calls", "📣 Calls"], ["chat", "✦ Chat"], ["portfolio", "◈ Portfolio"],
+const TABS = [["live", "◉ Live"], ["pulse", "⚡ Pulse"], ["desk", "◆ Desk"], ["chat", "✦ Chat"], ["portfolio", "◈ Portfolio"],
               ["analytics", "▤ Analytics"], ["controls", "⚙ Controls"], ["guide", "? Guide"]];
 function ckActions() {
   const s = snap || {};
@@ -4473,8 +4474,8 @@ function ckActions() {
     ...((s.risk && s.risk.levels) || []).map(l => ({label: `Risk dial: ${l.name}`, hint: `level ${l.level}`, run: () => setRisk(l.level)})),
     {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)},
     {label: s.away ? "🚶 I'm back: take my positions back" : "🚶 Away: the bots take over my positions", run: () => $("away-btn").click()}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
-    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { setTab("calls"); setTimeout(() => $("clf-ca").focus(), 50); }},
-    {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
+    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { openCalls(); setTimeout(() => $("clf-ca").focus(), 50); }},
+    {label: "🔏 Publish the ledger proof", run: () => { openCalls("cl-anchor"); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
     {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
     {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: `💡 Turn trade tips ${store.get("tips") === "off" ? "on" : "off"}`, hint: "tips", run: () => setTips(store.get("tips") === "off")}, {label: ">_ Open the terminal", hint: "`", run: () => termOpen(true)},
@@ -4502,7 +4503,7 @@ function renderPalette() {
   if (isMint(raw)) {
     const m = raw;
     items = [{label: "Trade it (Manual trade)", run: () => { setTab("live"); setTradeMint(m); }}, {label: "Open its details", run: () => openDrawer(m)},
-      {label: "📣 Call it", run: () => { setTab("calls"); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 60); }},
+      {label: "📣 Call it", run: () => { openCalls(); setTimeout(() => { $("clf-ca").value = m; $("clf-th").focus(); }, 120); }},
       {label: "🔔 Set an alert", run: () => { setTab("live"); setTradeMint(m); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }},
       {label: "📌 Save to the desk's memory", run: () => send({action: "mem_add", text: m})}, {label: "✎ Post about it", run: () => postCoin(m)}];
   } else {
@@ -4558,7 +4559,7 @@ function coinAction(k, mint) {
   $("ctx").hidden = true;
   if (k === "trade") { closeDrawer(); setTab("live"); setTradeMint(mint); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); }
   else if (k === "qb") trBuy(mint, PL.qb ?? 0.1);
-  else if (k === "call") { setTab("calls"); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 60); }
+  else if (k === "call") { openCalls(); setTimeout(() => { $("clf-ca").value = mint; $("clf-th").focus(); }, 120); }
   else if (k === "alert") { setTab("live"); setTradeMint(mint); setTimeout(() => { $("tr-ord-side").value = "alert"; $("tr-ord-mc").focus(); }, 80); }
   else if (k === "mem") send({action: "mem_add", text: mint});
   else if (k === "post") postCoin(mint);
@@ -4596,17 +4597,49 @@ function renderEdge() {
     <div class="form-row" style="margin-top:8px"><button class="small" data-edgecopy="1">Copy the bots' results as text for a group</button>
     <span class="note">${esc(e.mode)} trades${e.mode.startsWith("paper") ? ": labelled paper in the text" : ""}</span></div>`);
 }
+async function loadWallets() {
+  try { const d = await (await fetch("/api/wallets", {cache: "no-store"})).json(); S.wallets = d; renderWallets(); } catch { /* next round */ }
+}
+function renderWallets() {
+  const d = S.wallets, box = $("an-wallets"); if (!d || !box) return;
+  if (d.pending) { setHTML(box, `<div class="empty">${d.refreshing ? "Reading the recorder's data…" : "No wallet data yet: the recorder (meme-wallets service) collects it."}</div>`); return; }
+  const day = t => new Date(t * 1000).toLocaleDateString([], {month: "short", day: "numeric"});
+  const short = w => w.slice(0, 4) + "…" + w.slice(-4);
+  const groups = d.clusters || [], indep = d.wallets.filter(w => !w.cluster).length + groups.length;
+  const rec = d.recorder || {};
+  const clusterNote = groups.length ? `<div class="banner warn" style="margin:8px 0">These ${d.wallets.length} wallets are really about <b>${indep} traders</b>:
+      ${groups.map((g, i) => `group ${i + 1} (${g.map(short).join(", ")})`).join(" and ")} keep buying the same coins within ${d.together_s} s of each other:
+      one operator, or bots copying the same leader. The frozen rules count them separately, so "two listed wallets agree" can be one trader.</div>` : "";
+  setHTML(box, `<p class="note">Day <b>${fx(d.days, 1)}</b> of ${d.period_days} picking wallets · <b>${d.moves}</b> coins ran 3x+ · <b>${d.qualified}</b> wallets qualify (${d.need} needed) ·
+      ${d.near_misses} one coin short · ${d.bots_excluded} bots left out · list freezes from ${day(d.freeze_after)}, verdict around ${day(d.verdict_after)} ·
+      recorder: ${rec.active === false ? `<b class="down">paused</b>` : "recording"}${d.refreshing ? " · refreshing" : ` · updated ${dur(d.age_s)} ago`}</p>
+    ${clusterNote}
+    <div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Group</th><th class="r">Early on</th><th class="r">Sold 2x+</th><th class="r">Early size</th><th>Coins</th></tr></thead><tbody>
+      ${d.wallets.map(w => `<tr><td><a href="https://solscan.io/account/${esc(w.wallet)}" target="_blank" rel="noopener noreferrer" class="num">${esc(short(w.wallet))}</a></td>
+        <td>${w.cluster ? `<span class="tag warn">group ${w.cluster}</span>` : `<span class="note">on its own</span>`}</td><td class="r num">${w.hits} coins</td><td class="r num">${w.good_exits}×</td>
+        <td class="r num">${sol(w.early_sol, 2)}${U()}</td><td class="note">${w.coins.map(esc).join(", ")}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">None yet.</td></tr>`}</tbody></table></div>
+    ${(d.recent_moves || []).length ? `<p class="note" style="margin-top:8px">Recent runs: ${d.recent_moves.slice(0, 8).map(m => `${esc(m.sym || "?")} ${m.x}x`).join(" · ")}</p>` : ""}
+    <p class="note">Picked with hindsight from coins that already ran, which always looks good: it proves nothing yet. The test is how listed wallets do after the freeze, against random coins and random wallets (docs/WALLETS.md).</p>`);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
-  const v = all[S.labKind || "late"];
-  if (!v || !v.variants.length) { setHTML($("an-lab"), `<div class="empty">No results yet: the lab starts with the bot's next entry${v && v.open ? ` (${v.open} shadow exits running now)` : ""}.</div>`); return; }
+  const v = all[S.labKind || "late"], dp = all.desk_pass;
+  const base0 = ((all.late && all.late.variants) || []).find(r => r.variant === "as now"), r0 = dp && dp.variants && dp.variants[0];
+  const passes = r0 ? `<p class="note" style="margin-top:10px"><b>AI desk passes:</b> ${dp.entries} graduation coin${dp.entries === 1 ? "" : "s"} it turned down would have averaged
+      <b class="${cls(r0.mean_pct)}">${pct(r0.mean_pct, 1)}</b> on the bot's own exits (${Math.round(r0.win_rate * 100)}% won)${base0 ? `, against ${pct(base0.mean_pct, 1)} on the coins it bought` : ""}.
+      ${r0.mean_pct > 0 ? "So far its passes would have made money: the desk is costing you trades." : "So far its passes would have lost money: passing helped."}${dp.entries < 20 ? " Small sample." : ""}</p>`
+    : (dp && dp.open ? `<p class="note" style="margin-top:10px">AI desk passes: ${dp.open} coin(s) it turned down are being followed now.</p>` : "");
+  if (!v || !v.variants.length) { setHTML($("an-lab"), `<div class="empty">No results yet: the lab starts with the bot's next entry${v && v.open ? ` (${v.open} shadow exits running now)` : ""}.</div>${passes}`); return; }
   const base = v.variants.find(r => r.variant === "as now");
   const best = base && v.variants[0] !== base && v.variants[0].mean_pct > base.mean_pct + .05 ? v.variants[0] : null;   // only a real lead
   setHTML($("an-lab"), `<p class="note">${v.entries} entries${v.open ? ` · ${v.open} shadow exits still running` : ""} · P&amp;L per entry after fees, as if each one put in the same amount.${v.entries < 50 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}</p>
     <div class="tablewrap"><table><thead><tr><th>Exit rule</th><th class="r">Entries</th><th class="r">Mean</th><th class="r">Median</th><th class="r">Won</th><th class="r">vs as now</th></tr></thead><tbody>
     ${v.variants.map(r => `<tr class="${r.variant === "as now" ? "lab-base" : r === best ? "lab-best" : ""}"><td>${esc(r.variant)}${r === best ? " <span class='tag ok'>best so far</span>" : ""}</td>
       <td class="r num">${r.n}</td><td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td>
-      <td class="r num">${Math.round(r.win_rate * 100)}%</td><td class="r num ${base ? cls(r.mean_pct - base.mean_pct) : ""}">${base && r !== base ? pct(r.mean_pct - base.mean_pct, 1) : "–"}</td></tr>`).join("")}</tbody></table></div>`);
+      <td class="r num">${Math.round(r.win_rate * 100)}%</td><td class="r num ${base ? cls(r.mean_pct - base.mean_pct) : ""}">${base && r !== base ? pct(r.mean_pct - base.mean_pct, 1) : "–"}</td></tr>`).join("")}</tbody></table></div>${passes}`);
+}
+function openCalls(at = "calls-sec") {        // the calls live in Analytics now
+  setTab("analytics"); setTimeout(() => { const e = $(at); if (e) e.scrollIntoView({block: at === "calls-sec" ? "start" : "center"}); }, 120);
 }
 function setTab(t) {
   if (!TABS.some(([x]) => x === t)) t = "live";
@@ -4627,7 +4660,7 @@ function setTab(t) {
   if (t === "desk") { loadDesk(); loadX(); loadMemory(); kickIso(); }
   if (t === "portfolio") { loadPortfolio(); if (snap) renderPortfolio(); }
   if (t === "pulse") loadPulse();
-  if (t === "calls") { if (!$("clf").innerHTML) $("clf").innerHTML = callForm("clf"); loadCalls(); }
+  if (t === "analytics") { if (!$("clf").innerHTML) $("clf").innerHTML = callForm("clf"); loadCalls(); }
   if (t === "controls") loadSocial();
   if (t === "guide") renderGuide();
 }

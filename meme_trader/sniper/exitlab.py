@@ -31,6 +31,9 @@ def _late_variants(L) -> dict[str, dict]:
         "hold to 98% of the curve": {"exit_curve_pct": 98},
         "take profit at 2x": {"_tp": 100},
         "trail 20% once up 30%": {"_trail": (30, 20)},
+        # bank gains early, many small wins (Cupsy's style: "take your profit, stop hunting home runs")
+        "bank half at +30%": {"_half": 30},
+        "all out at +50%": {"_tp": 50},
     }
 
 
@@ -64,12 +67,16 @@ class ExitLab:
     def mints(self) -> set[str]:
         return set(self.open)
 
-    def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p) -> None:
-        """A bot entry at `price` (p: params.sniper). kind 'late' runs the graduation-play exits, else the sniper's."""
+    def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p, only: tuple | None = None) -> None:
+        """A bot entry at `price` (p: params.sniper). kind 'late' runs the graduation-play exits, else the sniper's.
+        kind 'desk-pass': a graduation coin the AI desk turned down, followed with the bot's own exits ("as now")
+        so Analytics can show what the desk's passes would have made."""
         if not price or mint in self.open:
             return
-        late = kind == "late"
+        late = kind in ("late", "desk-pass")
         variants = _late_variants(p.late) if late else _sniper_variants(p.exit)
+        if only:
+            variants = {k: v for k, v in variants.items() if k in only}
         base = SniperPosition(mint=mint, symbol=symbol, opened_at=now, entry_price=price, tokens=1 / price,
                               initial_tokens=1 / price, cost_sol=1.0, initial_cost_sol=1.0, score=0.0,
                               peak_price=price, exits=[], source=kind)
@@ -83,6 +90,9 @@ class ExitLab:
         pos.peak_price = max(pos.peak_price, s.curve.price)
         if "_tp" in over and gain >= over["_tp"]:
             return 1.0, f"take profit +{gain:.0f}%"
+        if "_half" in over and not sh.get("half_done") and gain >= over["_half"]:
+            sh["half_done"] = True                       # once; the rest runs on the normal exits
+            return 0.5, f"half out at +{gain:.0f}%"
         if "_trail" in over:
             up, trail = over["_trail"]
             peak = pos.gain_pct(pos.peak_price)
@@ -135,7 +145,7 @@ class ExitLab:
 
     def view(self, kind: str = "late") -> dict:
         """Per variant: entries, mean and median P&L % per entry, win rate; sorted by mean, best first."""
-        rows = [r for r in self.done if r["kind"] == kind or (kind != "late" and r["kind"] != "late")]
+        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in ("late", "desk-pass"))]
         by: dict[str, list[float]] = {}
         for r in rows:
             by.setdefault(r["variant"], []).append(r["pnl_pct"])
