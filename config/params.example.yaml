@@ -228,7 +228,7 @@ sniper:
     auto_post: none              # none = dashboard Copy/Open buttons | telegram = also post to TELEGRAM_CHANNEL_ID
 
   notify:                        # phone alerts (TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID in .env)
-    levels: [buy, close, error]  # any of: buy, sell, close, callout, error, signal, desk, info
+    levels: [buy, close, error, digest]   # any of: buy, sell, close, callout, error, signal, desk, info, digest (the day's summary)
 
   feed:
     trades: solana               # solana = read trades from pump.fun's on-chain logs (no per-trade fee)

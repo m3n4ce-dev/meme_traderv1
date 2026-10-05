@@ -184,6 +184,7 @@ class Engine:
         self._last_think = 0.0
         self.desk_reviews: deque = deque(maxlen=20)
         self.desk_vote_s: deque = deque(maxlen=200)     # how long each desk review took (wall clock), for the Desk and HQ
+        self._day_stop_said = False                      # the daily loss limit was announced today
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
@@ -1528,7 +1529,16 @@ class Engine:
             asyncio.create_task(self.sol_price.refresh())
         day = time.strftime("%Y-%m-%d", time.gmtime(self.now))
         if day != self.book.day:
+            if self.book.day and self.feed.realtime:      # the day that just closed, in one message (phone + log)
+                self.say("digest", self.daily_digest(self.book.day))
             self.book.day, self.book.day_pnl = day, 0.0
+            if self._day_stop_said:
+                self._day_stop_said = False
+                self.say("info", "New day: the daily loss limit reset, entries are open again")
+        if not self._day_stop_said and -self.book.day_pnl >= self.p.capital.daily_loss_limit_sol and self.feed.realtime:
+            self._day_stop_said = True                     # once, when it happens (it used to be silent)
+            self.say("error", f"DAILY LOSS LIMIT: {self.book.day_pnl:+.3f} SOL today (limit {self.p.capital.daily_loss_limit_sol:g}): "
+                              f"no new entries until 00:00 UTC; open positions are still managed")
         eq = self.equity()
         self.book.mark(eq)
         if self.record_file and self.feed.realtime and self.now - self._last_health >= 60:
@@ -2734,6 +2744,38 @@ class Engine:
     async def sell_now(self, mint: str) -> None:
         if mint in self.positions and mint in self.tokens:
             await self._sell(self.tokens[mint], self.positions[mint], 1.0, "manual sell")
+
+    def daily_digest(self, day: str) -> str:
+        """One day in a few lines: each bot's P&L, the account, the lab, the other-chain checklist."""
+        rows = [c for c in self.book.closed if time.strftime("%Y-%m-%d", time.gmtime(c["closed"])) == day]
+        lines = [f"📊 {day} (UTC) closed"]
+        by: dict[str, list] = {}
+        for c in rows:
+            by.setdefault("other chains" if c.get("source") == "chains" else c["source"], []).append(c)
+        for src, cs in sorted(by.items(), key=lambda kv: sum(c["pnl"] for c in kv[1])):
+            pnl = sum(c["pnl"] for c in cs)
+            extra = ""
+            reals = [c["real"]["pnl_usd"] for c in cs if (c.get("real") or {}).get("complete")]
+            if src == "other chains" and reals:
+                extra = f" (real router prices ${sum(reals):+.2f} on {len(reals)})"
+            lines.append(f"• {src}: {len(cs)} trades, {pnl:+.3f} SOL, {sum(c['pnl'] > 0 for c in cs)} won{extra}")
+        if not rows:
+            lines.append("• no trades closed")
+        eq = self.equity()
+        lines.append(f"Balance {eq:.3f} SOL (start {self.book.start_sol:g}) · kill switch at {self.kill_at():.3f} · "
+                     f"day {self.book.day_pnl:+.3f} SOL of a {self.p.capital.daily_loss_limit_sol:g} limit · risk {self.risk_info().get('name')}")
+        done = [x for x in self.xlab.items if x.get("finished") and time.strftime("%Y-%m-%d", time.gmtime(x["finished"])) == day]
+        for x in done[:3]:
+            r = x.get("result") or {}
+            lines.append(f"Lab: {x['key']} {x['now']} → {x['value']}: {r.get('verdict') or r.get('error') or '?'}")
+        try:
+            rd = self.xchain.readiness()
+            lines.append(f"Other chains real-money checklist: {rd['passed']} of {len(rd['checks'])}")
+        except Exception:
+            pass
+        if self.book.halted:
+            lines.append(f"HALTED: {self.book.halted}")
+        return "\n".join(lines)
 
     def kill_at(self) -> float:
         """Equity (SOL) at which the drawdown kill switch trips."""
