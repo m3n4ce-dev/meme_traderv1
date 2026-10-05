@@ -20,6 +20,7 @@ Guardrails live HERE, in code, so no prompt can talk past them:
 from __future__ import annotations
 
 import inspect
+import re
 import time
 from collections import deque
 
@@ -32,7 +33,14 @@ FLOOR_KEYS = ("entry.min_score", "predict.min_p")
 STRATEGY_KEYS = ("entry.enabled", "copy.enabled", "callouts.enabled", "late.enabled")
 SAFETY_KEYS = ("risk_adapt.enabled",)              # protective: may be turned on, off only if config had it off
 
-READ_TOOLS = ("status", "positions", "radar", "token", "lookup", "analytics", "trades", "log", "settings", "memory")
+READ_TOOLS = ("status", "positions", "radar", "token", "lookup", "analytics", "trades", "log", "settings", "memory",
+              "console_help", "ui")
+# screen actions the chat may do on the owner's open dashboard: how it looks, never trades or settings
+UI_ACTIONS = {"theme": ("light", "dark", "auto"), "tab": ("live", "charts", "pulse", "desk", "chat", "portfolio", "analytics",
+              "controls", "guide"), "unit": ("sol", "usd"), "speech": ("on", "off"), "mute": ("on", "off"),
+              "open_coin": None, "pin_chart": None, "unpin_chart": None, "character": None}
+UI_WORDS = {"white": "light", "bright": "light", "day": "light", "black": "dark", "night": "dark", "system": "auto",
+            "dollars": "usd", "$": "usd", "dollar": "usd"}
 ACT_TOOLS = ("set_setting", "pause", "resume", "sell", "buy", "watch", "note", "deposit", "risk", "hand_over")
 
 
@@ -41,6 +49,9 @@ def _get(p, key: str):
     for k in key.split("."):
         node = node[k]
     return node
+
+
+MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 class AgentError(ValueError):
@@ -162,6 +173,38 @@ class AgentAPI:
                 "exit", "score")
         rows = self.e.book.closed[-max(1, min(int(n), 100)):]
         return {"trades": [{k: c.get(k) for k in keep} for c in rows][::-1]}
+
+    def read_console_help(self, question: str = "") -> dict:
+        """The console manual's sections that best match a how-to question (docs/CONSOLE.md + the Guide tab)."""
+        from ..ui import manual
+        return manual.search(str(question or ""))
+
+    def read_ui(self, action: str = "", value: str = "", bot: str = "") -> dict:
+        """Change how the owner's open dashboard looks (theme, tab, $/SOL, a coin's details, pinned charts, the
+        characters' speech and behavior). Nothing here trades or changes a bot setting."""
+        action, value = str(action or "").strip().lower(), str(value or "").strip()
+        if action not in UI_ACTIONS:
+            raise AgentError(f"unknown screen action {action!r}: one of {', '.join(UI_ACTIONS)}")
+        allowed = UI_ACTIONS[action]
+        if allowed is not None:
+            value = UI_WORDS.get(value.lower(), value.lower())
+            if value not in allowed:
+                raise AgentError(f"{action} takes one of {', '.join(allowed)}")
+        elif action in ("open_coin", "pin_chart", "unpin_chart"):
+            if not MINT_RE.match(value):
+                raise AgentError("that needs a coin's contract address")
+        else:                                     # character: bot + talk=/move=/speed=<value> or spot=home
+            k, _, v = value.partition("=")
+            ok = {"talk": ("silent", "quiet", "normal", "chatty"), "move": ("still", "calm", "normal", "restless"),
+                  "speed": ("slow", "normal", "fast"), "spot": ("home",)}
+            if not bot or k not in ok or v not in ok[k]:
+                raise AgentError("character takes bot=<name> and value talk=silent|quiet|normal|chatty, "
+                                 "move=still|calm|normal|restless, speed=slow|normal|fast, or spot=home")
+        sink = getattr(self, "ui_sink", None)
+        n = sink({"type": "ui", "do": action, "value": value, "bot": str(bot or "")[:30]}) if sink else 0
+        if not n:
+            raise AgentError("no dashboard is open to change: ask the owner to open it")
+        return {"ok": True, "done": f"{action} {value}".strip(), "dashboards": n}
 
     def read_log(self, n: int = 30) -> dict:
         return {"log": list(self.e.log)[-max(1, min(int(n), 200)):][::-1]}

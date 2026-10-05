@@ -31,7 +31,8 @@ from ..sniper.lookup import brief, is_mint, lookup
 
 TOOL_PREFIX = "mcp__meme-trader__"
 READ_TOOLS = ["get_status", "get_positions", "get_radar", "get_token", "lookup_token", "get_analytics",
-              "get_recent_trades", "get_log", "get_settings", "get_memory"]
+              "get_recent_trades", "get_log", "get_settings", "get_memory",
+              "console_help", "ui_action"]        # (ui_action only changes how the page looks: no approval needed)
 MODELS = ("", "opus", "sonnet", "haiku")
 MAX_MESSAGES = 300
 ENV_KEEP = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LANGUAGE", "TERM", "SHELL", "TMPDIR", "TZ",
@@ -49,7 +50,12 @@ don't ask "should I?" first; if they decline, accept it. "More/less risk" means 
 lookup (a contract address they pasted), they already see a metrics card: give your read instead of
 repeating the numbers - what stands out, the main risks, and whether it suits what the bot trades
 (pump.fun bonding-curve tokens; graduation plays). Never promise price moves. Mode is in get_status
-(paper = pretend money)."""
+(paper = pretend money).
+The console: for any "how do I / where is / can I" question about the dashboard, call console_help first and
+answer with the exact clicks or keys it gives (never invent a button). If they ask you to change what the screen
+shows - the theme ("make it white" = light), a tab, $ or SOL, open a coin, pin or unpin a chart, the room's speech
+bubbles, notifications, or how a character acts or where it stands - just do it with ui_action (no approval
+needed), then say in one line what you did and the shortcut for next time (e.g. the t key for the theme)."""
 
 
 def _now() -> float:
