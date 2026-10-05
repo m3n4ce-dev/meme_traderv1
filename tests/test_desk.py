@@ -290,6 +290,19 @@ def test_logo_thumbnails_only_real_images():
     assert not _allowed_url("http://127.0.0.1/x.png") and not _allowed_url("file:///etc/passwd")
 
 
+def test_logo_bombs_are_refused_before_decoding():
+    import io
+    import time
+
+    from PIL import Image
+
+    from meme_trader.ui.logos import thumbnail
+    buf = io.BytesIO()
+    Image.new("1", (6000, 6000)).save(buf, "PNG")          # 36 M pixels in a few KB
+    t = time.time()
+    assert thumbnail(buf.getvalue()) is None and time.time() - t < 0.2   # header only: no decode, no stall
+
+
 def test_logo_cache_and_misses(tmp_path):
     from meme_trader.ui.logos import Logos
 

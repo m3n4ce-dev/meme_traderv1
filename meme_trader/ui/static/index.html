@@ -5523,7 +5523,7 @@ document.addEventListener("click", e => {
   if (d.copy) { const c = (snap.callouts || []).find(x => x.mint === d.copy);
     if (c) navigator.clipboard.writeText(c.text).then(() => { t.textContent = "Copied ✓"; }); return; }
   if (d.copymint) { navigator.clipboard.writeText(d.copymint).then(() => toast("Mint copied", "ok")); return; }
-  if (d.toggle) { send({action: "set", key: d.toggle, value: d.val !== "1"}); return; }
+  if (d.toggle) { send({action: "set", key: d.toggle, value: d.val !== "1", save: true}); return; }   // kept across restarts
   if (d.apply) { const v = $("in-" + d.apply).value; send({action: "set", key: d.apply, value: v}); return; }
   if (d.enum) { send({action: "set", key: d.key, value: d.enum}); return; }
   if (d.tabLink) { setTab(d.tabLink); return; }
