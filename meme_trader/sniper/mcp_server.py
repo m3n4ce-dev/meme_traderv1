@@ -216,6 +216,32 @@ async def add_paper_funds(sol: float, reason: str, keep_after_restart: bool = Fa
     return await _call("deposit", sol=sol, reason=reason, keep=keep_after_restart)
 
 
+@tool(TRADE)
+async def set_position_exits(mint: str, reason: str, stop_loss_pct: float | None = None, take_profit_pct: float | None = None,
+                             take_profit_fraction: float | None = None, trail_pct: float | None = None) -> str:
+    """Set exit rules on one of the owner's own (manual) positions: stop_loss_pct (sell all if it falls this far
+    below the entry), take_profit_pct (sell take_profit_fraction, 0-1, when it's up this much), trail_pct (sell if it
+    falls this far off its peak). Give only the ones to change. The bot's own positions keep their strategy's exits."""
+    return await _call("set_exits", mint=mint, reason=reason, stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                       take_profit_fraction=take_profit_fraction, trail_pct=trail_pct)
+
+
+@tool(TRADE)
+async def place_order(mint: str, side: str, mcap_usd: float, reason: str, when: str = "", sol: float | None = None,
+                      fraction: float | None = None, hours: float = 24) -> str:
+    """A limit order or alert by market cap (USD), in the owner's order book: side buy (sol = amount), sell
+    (fraction 0-1 of an open position) or alert. when: below or above (default: buy below, sell/alert above).
+    hours: how long it stays open (max 168). Buys are capped like buy_token."""
+    return await _call("order", mint=mint, side=side, mcap_usd=mcap_usd, reason=reason, when=when, sol=sol,
+                       fraction=fraction, hours=hours)
+
+
+@tool(CHANGE)
+async def cancel_order(order_id: str, reason: str) -> str:
+    """Cancel an open limit order or alert (ids are in get_positions -> orders, or in the order's confirmation)."""
+    return await _call("cancel_order", order_id=order_id, reason=reason)
+
+
 @tool(READ)
 async def console_help(question: str) -> str:
     """How to do something in the dashboard (the console): every tab, button, key, setting and the terminal's

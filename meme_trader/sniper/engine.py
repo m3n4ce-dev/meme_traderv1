@@ -181,6 +181,7 @@ class Engine:
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
         self.kol_tape: deque = deque(maxlen=600)     # trades by KOLs and the wallet study's wallets, any coin (Charts tab)
+
         self._kol_first: dict[tuple[str, str], float] = {}   # (wallet, mint) -> its first buy: how long they held
         from .memory import Memory
 
@@ -240,6 +241,10 @@ class Engine:
         self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
         self._last_huddle, self._huddling, self.huddle_error = 0.0, False, ""
         self.plan: dict = {}                                 # the team's growth plan, updated at every huddle
+        from .lab import Lab
+        self.xlab = Lab(DATA / "lab" if self.persist else None)   # the team's experiments on the recorded market
+        self._lab_task: asyncio.Task | None = None
+        self._lab_check, self._lab_auto_at = 0.0, time.time() + 600
         from . import kols as kolmod
         self.kols: dict = kolmod.load(DATA / "kols.json") if self.persist else {"kols": {}}   # named on the charts
         if self.persist and (DATA / "desk_plan.json").exists():
@@ -1473,6 +1478,9 @@ class Engine:
     async def _tick(self) -> None:
         if self.deferred:
             await self._settle_deferred()
+        if self.now - self._lab_check >= 15:
+            self._lab_check = self.now
+            self._lab_step()
         for m, t in list(self.hand_after.items()):       # a "Buy & give to bots" whose buy has filled
             pos = self.positions.get(m)
             if pos is not None and pos.source == "manual":
@@ -2505,6 +2513,12 @@ class Engine:
             actions = [{**a, "applied": False} for a in r.get("actions", []) if a["key"] in known]   # real settings only
             if r.get("plan") and r["plan"].get("goal"):
                 self.plan = {**r["plan"], "updated": time.time()}
+                n = 0
+                for ex in r["plan"].get("experiments") or []:          # the team's tests go to the lab
+                    t = ex.get("test")
+                    if t and ex.get("status") in ("proposed", "running") and n < 2:
+                        if self.lab_add(t.get("key", ""), t.get("value"), ex.get("name", ""), "team")[0]:
+                            n += 1
                 if self.persist:
                     try:
                         (DATA / "desk_plan.json").write_text(json.dumps(self.plan))
@@ -2608,7 +2622,8 @@ class Engine:
             "feed": {"host": getattr(self.feed, "host", ""), "lag_s": getattr(self.feed, "lag_s", None),
                      "degraded": getattr(self.feed, "degraded_reason", "") or None},
             "ai_desk_voting": bool(self.desk and self.desk.enabled), "recent_notes": notes,
-            "graduation_exit_whatifs": whatifs, "owner_manual_trading": owner,
+            "graduation_exit_whatifs": whatifs, "owner_manual_trading": owner, "lab": self.lab_brief(),
+            "trending_on_other_chains": self.chains.names() if getattr(self, "chains", None) else {},   # (watched, not traded)
         }
 
     # ------------------------------------------------------------------ hand your positions to the bots
@@ -2925,6 +2940,149 @@ class Engine:
             pass
         self._study_cache = (time.time(), out)
         return out
+
+    # ------------------------------------------------------------------ the lab: the team tests one change at a time
+    def lab_baseline(self) -> dict:
+        """The settings the lab compares against: what the graduation play runs now."""
+        from .lab import TESTABLE
+        out = {}
+        for k in TESTABLE:
+            sec, key = k.split(".", 1)
+            v = (self.p.get(sec) or {}).get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = v
+        return out
+
+    def lab_add(self, key: str, value, why: str, by: str) -> tuple[dict | None, str]:
+        x, err = self.xlab.add(key, value, why, by, time.time(), self.lab_baseline())
+        if x:
+            self.say("info", f"lab: queued {key} {x['now']} -> {x['value']} ({by}: {why[:80]})")
+        return x, err
+
+    def _lab_step(self) -> None:
+        from .lab import free_mb
+        cfg = self.p.get("lab") or {}
+        if self.xlab.dir is None or not cfg.get("enabled", True) or (self._lab_task and not self._lab_task.done()):
+            return
+        if self.xlab.started_today(time.time()) >= int(cfg.get("max_per_day", 4)):
+            return
+        mb = free_mb()
+        if mb is not None and mb < float(cfg.get("min_free_mb", 8000)):   # a replay holds ~5 GB: never squeeze the bot
+            return
+        if not self.xlab.queued() and time.time() >= self._lab_auto_at:
+            self._lab_auto_at = time.time() + float(cfg.get("auto_every_min", 360)) * 60
+            c = self.xlab.auto_candidate(self.lab_baseline(), time.time())
+            if c:
+                self.lab_add(c[0], c[1], "routine check: one step either side of the current setting", "quant")
+        r = self.xlab.running()                       # a run in its own service, from before a restart: pick it up
+        if r is not None:
+            self._lab_task = asyncio.create_task(self._lab_finish(r, self._lab_poll(r)))
+            return
+        q = self.xlab.queued()
+        if q:
+            self._lab_task = asyncio.create_task(self._lab_run(q[0]))
+
+    async def _lab_poll(self, x: dict) -> dict:
+        """Wait for a run in its own service: its result file, or the service stopping without one."""
+        out = DATA / "lab" / f"{x['id']}.result.json"
+        gone = 0
+        while time.time() - (x.get("started") or time.time()) < 3600:
+            if out.exists():
+                try:
+                    return json.loads(out.read_text())
+                except ValueError:
+                    pass                                 # (still being written)
+            p = await asyncio.create_subprocess_exec("systemctl", "--user", "is-active", "--quiet", x["unit"])
+            gone = gone + 1 if await p.wait() != 0 else 0
+            if gone >= 2 and not out.exists():           # stopped twice in a row and nothing written
+                return {"error": "the run stopped without a result (out of memory, or killed)"}
+            await asyncio.sleep(10)
+        stop = await asyncio.create_subprocess_exec("systemctl", "--user", "stop", x["unit"])
+        await stop.wait()
+        return {"error": "took over an hour: stopped"}
+
+    async def _lab_finish(self, x: dict, work) -> None:
+        try:
+            res = await work
+        except Exception as e:                          # never leave it "running"
+            res = {"error": f"{type(e).__name__}: {e}"}
+        x["finished"] = time.time()
+        if res.get("error"):
+            x["status"], x["result"] = "failed", {"error": str(res["error"])[:300]}
+            self.say("error", f"lab: the {x['key']} test failed: {x['result']['error'][:120]}")
+        else:
+            x["status"], x["result"] = "done", res
+            n, c = res["now"], res["change"]
+            self.say("info", f"lab: {x['key']} {x['now']} -> {x['value']}: {res['verdict']} "
+                             f"({c['pnl_sol']:+.3f} vs {n['pnl_sol']:+.3f} SOL, {c['trades']} vs {n['trades']} trades, "
+                             f"{res['better_blocks']} of {res['blocks']} blocks better)")
+        self.xlab.save()
+
+    async def _lab_run(self, x: dict) -> None:
+        import shutil
+        import sys
+
+        cfg = self.p.get("lab") or {}
+        x["status"], x["started"] = "running", time.time()
+        out = DATA / "lab" / f"{x['id']}.result.json"
+        out.unlink(missing_ok=True)
+        cmd = [sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"]]
+        if cfg.get("detach", True) and shutil.which("systemd-run"):
+            # its own short-lived service: survives the bot restarting, and can't take more than memory_max_mb
+            x["unit"] = f"meme-lab-{x['id']}"
+            self.xlab.save()
+            self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
+                       f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
+            try:
+                p = await asyncio.create_subprocess_exec(
+                    "systemd-run", "--user", "--quiet", "--collect", f"--unit={x['unit']}",
+                    "-p", f"MemoryMax={int(cfg.get('memory_max_mb', 6000))}M", "-p", "Nice=19",
+                    f"--working-directory={ROOT}", *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+                _, err = await p.communicate()
+                if p.returncode:
+                    raise RuntimeError((err or b"").decode(errors="replace")[-200:] or f"systemd-run exit {p.returncode}")
+            except Exception as e:
+                await self._lab_finish(x, asyncio.sleep(0, {"error": f"couldn't start the run: {e}"}))
+                return
+            await self._lab_finish(x, self._lab_poll(x))
+            return
+        self.xlab.save()
+        self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
+                   f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
+        out = DATA / "lab" / f"{x['id']}.result.json"
+        out.unlink(missing_ok=True)
+        try:
+            proc = await asyncio.create_subprocess_exec("nice", "-n", "19", sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"],
+                                                        cwd=str(ROOT), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=3600)
+            res = json.loads(out.read_text()) if out.exists() else {"error": (err or b"").decode(errors="replace")[-300:] or f"exit {proc.returncode}"}
+        except Exception as e:                          # never leave it "running"
+            res = {"error": f"{type(e).__name__}: {e}"}
+        x["finished"] = time.time()
+        if res.get("error"):
+            x["status"], x["result"] = "failed", {"error": str(res["error"])[:300]}
+            self.say("error", f"lab: the {x['key']} test failed: {x['result']['error'][:120]}")
+        else:
+            x["status"], x["result"] = "done", res
+            n, c = res["now"], res["change"]
+            self.say("info", f"lab: {x['key']} {x['now']} -> {x['value']}: {res['verdict']} "
+                             f"({c['pnl_sol']:+.3f} vs {n['pnl_sol']:+.3f} SOL, {c['trades']} vs {n['trades']} trades, "
+                             f"{res['better_blocks']} of {res['blocks']} blocks better)")
+        self.xlab.save()
+
+    def lab_brief(self) -> dict:
+        """What the team reads about its lab at a meeting."""
+        from .lab import TESTABLE
+        def row(x):
+            r = x.get("result") or {}
+            return {"test": f"{x['key']}: {x['now']} -> {x['value']}", "by": x["by"], "why": x.get("why", "")[:120], "status": x["status"],
+                    "verdict": r.get("verdict"), "now": r.get("now"), "change": r.get("change"),
+                    "blocks_better_of": f"{r.get('better_blocks')} of {r.get('blocks')}" if r.get("blocks") else None,
+                    "error": r.get("error")}
+        v = self.xlab.view()
+        return {"testable": {k: f"{lo:g}-{hi:g}" for k, (lo, hi) in TESTABLE.items()}, "current": self.lab_baseline(),
+                "tries": v["tries"], "running": row(v["running"]) if v["running"] else None,
+                "queued": [row(x) for x in v["queued"]], "results": [row(x) for x in v["done"][:8]]}
 
     def _known_wallets(self) -> dict[str, tuple[str, str]]:
         """wallet -> (kind, name) for the KOL list and the wallet study's qualified wallets, rebuilt every 5 min."""
@@ -3264,6 +3422,12 @@ class Engine:
         return {
             "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
             "kols": {"n": len(self.kols.get("kols") or {}), "fetched": self.kols.get("fetched")},
+            "lab": {"running": (lambda x: x and {"id": x["id"], "key": x["key"], "now": x["now"], "value": x["value"], "by": x["by"],
+                                                 "started": x["started"]})(self.xlab.running()),
+                    "last": (lambda d: d and {"id": d[0]["id"], "key": d[0]["key"], "now": d[0]["now"], "value": d[0]["value"], "by": d[0]["by"],
+                                              "status": d[0]["status"], "verdict": (d[0].get("result") or {}).get("verdict"),
+                                              "finished": d[0]["finished"]})(self.xlab.view()["done"]),
+                    "tries": self.xlab.tries(), "queued": len(self.xlab.queued())},
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},

@@ -240,8 +240,10 @@ sniper:
     fallback_ws_urls: ["wss://pumpdev.io/ws"]   # backup launch feed if PumpPortal drops (entries pause while on it)
     backup_ws_url: ""            # a metered trade-log websocket used only while the free ones are down or behind;
                                  # empty = SOLANA_WS_BACKUP_URL, else your HELIUS_API_KEY's websocket
-    backup_mb_per_day: 1200      # its daily allowance (~3 h of the ~400 MB/h stream; Helius bills 2 credits / 0.1 MB,
-                                 # so 1200 MB/day ≈ 720k of the free plan's 1M credits a month). 0 = never use it
+    backup_mb_per_day: 1200      # its allowance fills at this rate (Helius bills 2 credits / 0.1 MB, so 1200 MB/day
+                                 # ≈ 720k of the free plan's 1M credits a month). 0 = never use it
+    backup_bank_mb: 4800         # ... and saves up to this much, so a bad night (the stream runs 400-800 MB/h) can
+                                 # use what quiet days didn't
 
   risk:                          # the risk dial: scales trade size, open positions and the daily loss limit
     level: 2                     # 1 Cautious x0.5 | 2 Normal = the settings above | 3 Bold x1.5 | 4 Aggressive x2 | 5 Max x3
@@ -303,6 +305,14 @@ sniper:
     min_p: 0.0                   # entry gate on P(2x first) (needs display_only: false)
     kelly_fraction: 0.25         # quarter-Kelly into the sizing agent's strength (needs display_only: false)
     require_positive_ev: false   # skip entries the model says lose money after costs (needs display_only: false)
+
+  lab:                           # the team's lab: one setting at a time replayed on the last 24 h of recordings
+    enabled: true                #   (a separate low-priority process; results go to the next huddle)
+    auto_every_min: 360          # with nothing queued, the team tests a routine one-step change this often
+    max_per_day: 4               # tests started in any 24 h (each replays the last 24 h twice, at low priority)
+    min_free_mb: 8000            # start a test only with this much memory free
+    detach: true                 # run each test as its own short-lived user service (survives bot restarts)
+    memory_max_mb: 6000          # ... capped at this much memory
 
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true
