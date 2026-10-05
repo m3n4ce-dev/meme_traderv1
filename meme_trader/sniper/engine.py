@@ -232,6 +232,8 @@ class Engine:
         self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
         self._last_huddle, self._huddling, self.huddle_error = 0.0, False, ""
         self.plan: dict = {}                                 # the team's growth plan, updated at every huddle
+        from . import kols as kolmod
+        self.kols: dict = kolmod.load(DATA / "kols.json") if self.persist else {"kols": {}}   # named on the charts
         if self.persist and (DATA / "desk_plan.json").exists():
             try:
                 self.plan = json.loads((DATA / "desk_plan.json").read_text())
@@ -2849,6 +2851,8 @@ class Engine:
         for x in s.socials:
             if x.source == "wallet":
                 named[x.author] = ("smart", "smart-money wallet")
+        for w, name in (self.kols.get("kols") or {}).items():
+            named[w] = ("kol", f"KOL {name}")
         for w, lead in self.leaders.leaders.items():
             named[w] = ("smart", f"copy leader {getattr(lead, 'label', '') or ''}".strip())
         if s.creator:
@@ -2861,7 +2865,8 @@ class Engine:
             if kind:
                 marks.append({"t": round(t, 2), "p": p, "side": side, "who": kind,
                               "label": f"{lab} {'bought' if side == 'buy' else 'sold'} {sol:.2f} SOL", "wallet": who})
-        marks = marks[-60:]                         # the latest market markers; yours and the bots' always show
+        keep = [m for m in marks if m["who"] != "whale"]   # dev, KOLs and smart wallets always; whales, the latest
+        marks = sorted(keep[-80:] + [m for m in marks if m["who"] == "whale"][-30:], key=lambda m: m["t"])
 
         def at(t: float) -> float:                  # the coin's price at a moment (nearest trade before it)
             best = tr[0][1] if tr else 0.0
@@ -2898,6 +2903,12 @@ class Engine:
                 "position": None if pos is None else {"source": pos.source, "bot": pos.bot or "",
                                                        "gain_pct": round(pos.gain_pct(s.curve.price), 1),
                                                        "cost_sol": pos.initial_cost_sol}}
+
+    async def refresh_kols(self) -> str:
+        """The owner asked for the KOL list: fetch kolscan.io's leaderboard once. '' or why not."""
+        from . import kols as kolmod
+        self.kols, err = await kolmod.refresh(DATA / "kols.json")
+        return err
 
     def _audit_view(self, mint: str) -> dict | None:
         a = self.audit.get(mint)
@@ -3081,6 +3092,7 @@ class Engine:
             })
         return {
             "type": "snapshot", "now": self.now, "mode": self.mode, "paused": self.paused, "halted": self.book.halted,
+            "kols": {"n": len(self.kols.get("kols") or {}), "fetched": self.kols.get("fetched")},
             "sol": self.book.sol, "equity": self.equity(), "day_pnl": self.book.day_pnl,
             "summary": self.summary(), "positions": positions, "watching": watching[:40],
             "manual": {**{k: v for k, v in self._manual_cfg().items()}, "queue": sorted(self.manual_queue)},
