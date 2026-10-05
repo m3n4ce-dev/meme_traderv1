@@ -4,6 +4,49 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #37: The bots get a house; the desk back on Claude
+
+- **A house** (owner: "give the bots another room or a whole house if they want"): the trading floor plus a **lounge** and a **research lab**, with a switcher in the room showing how many bots are in each.
+  - **Getting around:** every room has its door in the same spot, so a bot walks out of one room and in through the next room's door, using pathfinding per room.
+  - **The lounge:**
+    - a TV with the live Market Pulse, a sofa facing it, four bunk beds (blankets in the personas' colours), an arcade machine, a ping-pong table, bean bags, and a fridge and kitchen;
+    - the AI personas rest there while the desk sleeps: in bed at night, on the sofa by day, swapping at bedtime and morning;
+    - bots take breaks there.
+  - **The lab:**
+    - whiteboards with the live wallet study and edge check, the recorder's server rack with blinking lights, two workbenches, a research table and a bookshelf;
+    - the recorder visits often and the others now and then, and they read the boards' real numbers aloud.
+  - **Chat:** talk from another room goes to the room log, tagged with the room, not over the room you're looking at.
+- **The desk was awake again** on Hugging Face Qwen with no credit left, so every vote failed and entries were blocked. It's now on **Claude Sonnet 5.5** (tested: 2.7 s, about 1.2¢ a review).
+  - The bots said "Can't reach Claude" even when the model wasn't Claude; it's now "Can't reach the AI model".
+  - Errors now say what failed: a provider out of credits (402), a rejected token, rate limits, or a local server that isn't running.
+
+---
+
+## 2026-10-05 — Entry #36: Why the bot stopped trading, the desk's goal, the wallet study in Analytics, Calls moved
+
+- **No graduation entries since 16:03 on Oct 4** (owner: "they should be making more trades"). Before that it averaged 3–9 an hour, 14–23 around midday.
+  - **The cause was the AI desk:** since 14:00 it approved 2 of 56 reviews, and none of the 33 after 16:00.
+    - The skeptic vetoed most of them.
+    - Many reviews were "desk unavailable", which fails closed: Claude 400/401 errors earlier, then HTTP 402 once the free Hugging Face credit ran out ("You have depleted your monthly included credits").
+  - **Fix:** the desk was put to rest (one click to wake it), and the rules trade on their own again. The 162 paper trades behind the +6.5% were all made by the rules without the desk.
+- **The desk's goal** is now in its instructions:
+  - grow the account; both buying a loser and passing on a runner cost money;
+  - vote on whether the setup beats the ~6% round trip;
+  - pass only for concrete reasons in the data.
+  - The skeptic's brief says "vetoing everything costs the desk as much as buying everything".
+- **The desk's passes are scored:** every graduation coin it turns down is followed in the exit lab with the bot's own exits ("desk-pass"). Analytics shows what its passes would have averaged against the coins it bought.
+- **Exit lab:** two take-profit-early variants, "bank half at +30%" and "all out at +50%" (Cupsy's "take your profit, stop hunting home runs" from a Bez Trades video), so the data can say whether banking gains early beats the current exits.
+- **Wallet study in Analytics** (`python -m meme_trader.wallets view`; `/api/wallets`, rebuilt in its own process at most every 30 min):
+  - It shows period A's progress, the coins that ran, and the qualifying wallets.
+  - **Groups:** wallets that bought the same coins within 5 s, three or more times, are grouped as one trader.
+  - **First result:** the 7 listed wallets are about 3 traders. One group of four and one pair keep buying together: one operator, or bots copying one leader. The frozen rules count them separately.
+- **Calls:** no longer a whole tab. It's a section at the bottom of Analytics (owner: "we don't need the whole page"); number keys now run 1–8.
+- **Cost display:** "0.92¢ a review" read as 92 cents; it's now "$0.0092 (under 1¢)".
+  - Hugging Face's note says what a free account gets: a few cents of credit a month, then nothing until it resets.
+  - Saving a Hugging Face model on a free account warns that a desk that can't vote blocks entries.
+
+---
+
 ## 2026-10-05 — Entry #35: SOL or dollars, and does the wallet recorder slow the bot?
 
 - **◎ SOL / $ USD switch** (owner: "toggle between SOL format and current $ format"): a header button, or the `u` key, remembered per browser.

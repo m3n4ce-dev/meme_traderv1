@@ -995,6 +995,8 @@ class Engine:
                 nb = sum(1 for x in v.votes if x.vote == "buy" and not x.error)
                 label = {"late": "graduation"}.get(kind, kind)
                 self._audit_start(s, f"AI desk passed ({label}): {nb} of {len(v.votes)} said buy")
+                if kind == "late" and self.feed.realtime:   # what the pass would have made, on the bot's exits
+                    self.lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, self.now, self.p, only=("as now",))
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]

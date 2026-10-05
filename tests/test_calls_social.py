@@ -314,7 +314,7 @@ def test_exit_lab_runs_other_exits_on_the_same_entries(tmp_path):
     lab = ExitLab(tmp_path / "exit_lab.jsonl", e.fee)
     t0 = e.now
     lab.start(s.mint, s.symbol, "late", s.curve.price, t0, e.p)
-    assert s.mint in lab.mints() and len(lab.open[s.mint]) == 7
+    assert s.mint in lab.mints() and len(lab.open[s.mint]) == 9
     s.curve.v_sol *= 1.5                                      # +50%: "take profit at 2x" waits, nothing stops out
     lab.tick(e.tokens, t0 + 5, e.p)
     s.curve.v_sol *= 1.5                                      # ~+125%: the 2x take profit sells
@@ -324,11 +324,12 @@ def test_exit_lab_runs_other_exits_on_the_same_entries(tmp_path):
     s.curve.v_sol *= 0.3                                      # crash: the stops close the rest
     lab.tick(e.tokens, t0 + 15, e.p)
     lab.tick(e.tokens, t0 + 2000, e.p)                        # anything left closes at the 30-minute limit
-    assert not lab.open and len(lab.done) == 7
+    assert not lab.open and len(lab.done) == 9
+    assert any(r["variant"] == "bank half at +30%" for r in lab.done)
     v = lab.view("late")
     assert v["entries"] == 1 and v["variants"][0]["variant"] == "take profit at 2x"
-    assert len((tmp_path / "exit_lab.jsonl").read_text().splitlines()) == 7
-    assert len(ExitLab(tmp_path / "exit_lab.jsonl", e.fee).done) == 7     # reloads its history
+    assert len((tmp_path / "exit_lab.jsonl").read_text().splitlines()) == 9
+    assert len(ExitLab(tmp_path / "exit_lab.jsonl", e.fee).done) == 9     # reloads its history
 
 
 def test_bot_entries_feed_the_exit_lab():
@@ -339,3 +340,37 @@ def test_bot_entries_feed_the_exit_lab():
     assert s.mint in e.lab.open and s.mint in e._pinned()
     asyncio.run(e.manual_buy(live_coin(e, {s.mint}).mint, 0.1))
     assert len(e.lab.open) == 1                                # your own buys aren't shadowed
+
+
+def test_the_ai_desks_passes_are_scored_on_the_bots_own_exits(tmp_path):
+    """Owner: 'the bots should know their goal is to raise the account'. A pass costs money too when the coin runs."""
+    from meme_trader.sniper import desk as deskmod
+    from meme_trader.sniper.exitlab import ExitLab
+
+    assert "grow the account" in deskmod.RUBRIC and "vetoing everything costs" in deskmod.PERSONAS["skeptic"]
+    e = market()
+    s = live_coin(e)
+    t = live_coin(e, {s.mint})
+    lab = ExitLab(tmp_path / "exit_lab.jsonl", e.fee)
+    lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, e.now, e.p, only=("as now",))
+    lab.start(t.mint, t.symbol, "sniper", t.curve.price, e.now, e.p)
+    assert len(lab.open[s.mint]) == 1                          # just the bot's own exits
+    lab.tick(e.tokens, e.now + 2000, e.p)                       # both close at the time limit
+    passed, sniper = lab.view("desk-pass"), lab.view("sniper")
+    assert passed["entries"] == 1 and passed["variants"][0]["variant"] == "as now"
+    assert all(r["kind"] != "desk-pass" for r in lab.done if r["mint"] == t.mint)
+    assert sniper["entries"] == 1                              # the sniper view doesn't count desk passes
+
+
+def test_the_wallet_study_view_groups_wallets_that_buy_together():
+    """Two listed wallets that buy the same coins in the same seconds are one trader (or copy bots), not two."""
+    from meme_trader.wallets import report
+    from meme_trader.wallets.study import Data
+
+    d = Data()
+    for k in range(4):                                       # a and b buy 4 coins within 2 s of each other
+        for w, dt in (("a" * 32, 0), ("b" * 32, 2), ("c" * 32, 900)):   # c buys the same coins 15 min later
+            d.by_pool[f"pool{k}"].append((1000.0 + k * 3600 + dt, w, True, 0.3, 1e-6))
+    groups, pairs = report.clusters(d, ["a" * 32, "b" * 32, "c" * 32], 0.05)
+    assert groups == [["a" * 32, "b" * 32]]                  # c shares the coins but never in the same moment
+    assert {(p["a"][0], p["b"][0], p["together"]) for p in pairs} >= {("a", "b", 4), ("a", "c", 0)}

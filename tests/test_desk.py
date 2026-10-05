@@ -696,3 +696,11 @@ def test_thinking_models_get_room_and_prices_come_from_the_provider_list():
     d, tin, tout, price, missing = asyncio.run(go())
     assert d["vote"] == "pass" and calls == [700, 2100] and (tin, tout) == (20, 1600)   # a retry with room, both counted
     assert price == (2.0, 7.0) and missing is None                                       # the highest live price: never low
+
+
+def test_model_errors_say_which_side_failed():
+    from meme_trader.sniper.desk import friendly_error
+
+    assert "credits are used up" in friendly_error("RuntimeError: HTTP 402: You have depleted your monthly included credits.")
+    assert "provider rejected the token" in friendly_error("RuntimeError: HTTP 401: invalid token")
+    assert friendly_error("AuthenticationError: Error code: 401 - invalid x-api-key") == "Anthropic rejected the API key"

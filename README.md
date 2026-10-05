@@ -150,7 +150,7 @@ Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 
 ## The dashboard
 
-- **Tabs:** Live, Pulse, Desk, Calls, Chat, Portfolio, Analytics, Controls, Guide.
+- **Tabs:** Live, Pulse, Desk, Chat, Portfolio, Analytics (with the 📣 calls track record), Controls, Guide.
   - **Ctrl+K** finds anything: tabs, coins, settings, guide pages.
   - **✎ Arrange** lets you drag, resize and hide any panel.
 - **>_ Terminal** (the `` ` `` key): every command, typed.
@@ -159,7 +159,7 @@ Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
   - It runs bot commands only, the same as the buttons, never shell commands.
 - **↻ Restart** (next to KILL) saves everything, reloads the code and settings, and picks up where it left off.
 - **Controls:** every setting, live, with Save. API keys set and tested from the page, with Test buttons for the Anthropic key, the RPC, the websocket and Helius.
-- **Desk:** the bots as Habbo-style pixel people in an isometric trading room.
+- **Desk:** the bots as Habbo-style pixel people in an isometric house: the trading floor, a lounge (they sleep in bunks there while the AI desk rests) and a research lab with live study boards.
   - The scanner carries coins to the AI table, and the personas vote out loud.
   - The P&L board and the weather in the window follow the day.
   - Edit the room, dress the bots, or click one to see its screen.
