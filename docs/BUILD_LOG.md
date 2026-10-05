@@ -21,6 +21,10 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **The mistake:** entries #32 and #33 said live orders reach the bonding curve only. They don't: the live executor sends `pool=auto`, which routes to PumpSwap after graduation.
   - **The reason that holds:** live still refuses graduated coins, because their price only updates every 10 s from DexScreener, too stale for real money. The messages, the guide and the log now say so.
 - **Terminal:** it no longer prints the trade panel's background coin lookups.
+- **Three bugs the new screenshots showed:**
+  - **Wrong exit description:** the exit manager described a manual position by the bots' time limit ("closest exit is time held, 12.7 of 30 min"). Your positions have no time exit. It now shows your own stop, take profit and trail, or the ride rules once handed over (regression test).
+  - **"Paused: paused."** The recorder said this; it now says "Paused from the dashboard: the wallet study misses trades until I resume."
+  - **Chart note:** the position card's "no trades since you bought" note sat on top of the chart; it's now under it.
 - **CLAUDE.md:** the operator's facts are updated: the edge-check numbers, manual trading is the owner's, hand-over riding, and lifting a halt is the owner's call only.
 
 ---

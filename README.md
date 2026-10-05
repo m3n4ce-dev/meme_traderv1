@@ -7,7 +7,7 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Tests: 286 passing](https://img.shields.io/badge/tests-286%20passing-brightgreen.svg)
+![Tests: 287 passing](https://img.shields.io/badge/tests-287%20passing-brightgreen.svg)
 ![Mode: paper by default](https://img.shields.io/badge/mode-paper%20by%20default-orange.svg)
 
 ![Live dashboard during a real-market paper run](docs/dashboard.png)
@@ -258,7 +258,7 @@ research/policies/    frozen research policies (one file per idea)
 config/               params.example.yaml (all settings, commented)
 scripts/              setup and start scripts for Mac / Ubuntu
 deploy/               systemd services
-tests/                pytest suite (286 tests)
+tests/                pytest suite (287 tests)
 ```
 
 ### DexScreener momentum bot

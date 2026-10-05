@@ -800,7 +800,7 @@ tr.lab-base td { background: var(--series-soft); } tr.lab-best td:first-child { 
 .pos-more { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 6px; } .pos-more .spacer { flex: 1; }
 .tb-add { border-color: var(--good-mark); color: var(--good); font-weight: 700; }
 .pos.handed .mexits { opacity: .45; } .tag.bot { color: var(--series); border-color: var(--series); }
-.nochart { margin: -84px 8px 62px; text-align: center; font-size: 11.5px; position: relative; }
+.nochart { margin: 4px 8px 0; text-align: center; font-size: 11px; }   /* under the line, never on top of it */
 .nochart-box { padding: 18px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; }
 .banner.away { border-color: var(--series); background: var(--series-soft); color: var(--ink); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 #away-btn[aria-pressed="true"] { background: var(--series); color: #fff; border-color: transparent; }
@@ -2081,7 +2081,7 @@ function renderDesk() {
   let hot = null;
   for (const h of hold) for (const g of h.watch) if (g.frac != null && (!hot || g.frac > hot.g.frac)) hot = {h, g};
   cards.exits = agentCard("exits", hold.length ? "working" : "resting",
-    hold.length ? (hot ? `${tname(hot.h.mint, hot.h.symbol)} <span class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</span>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : `Managing ${hold.length} position(s).`)
+    hold.length ? (hot ? `${tname(hot.h.mint, hot.h.symbol)} <span class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</span>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : hold.every(h => h.manual && !h.bot) ? `Watching your ${hold.length} position(s): they exit only on rules you set.` : `Managing ${hold.length} position(s).`)
       : "Nothing open. I take over the moment the scanner buys.",
     {stats: hold.length ? hold.map(h => `<span>${esc(h.symbol)} <b class="${cls(h.gain_pct)}">${pct(h.gain_pct)}</b></span>`).join("") : ""});
   // risk
@@ -2120,7 +2120,7 @@ function renderDesk() {
   cards.recorder = agentCard("recorder", !rc.running ? "trouble" : rc.active ? "working" : "resting",
     !rc.running ? "The meme-wallets service isn't running (systemctl --user start meme-wallets)."
       : rc.active ? `Recording every trade on <b>${rc.pools ?? "?"}</b> pump.fun coins at least 2 days old.`
-      : `Paused: ${esc(rc.pause_reason)}. Trades in a pause are missing from the study.`,
+      : `Paused${rc.pause_reason === "paused" ? " from the dashboard" : ": " + esc(rc.pause_reason)}. Trades in a pause are missing from the study.`,
     {stats: `<span>${rc.gb_today != null ? fx(rc.gb_today, 1) + " GB today" : ""}</span><span>${rc.mb_on_disk} MB on disk</span><span>${esc(rc.mode || "")}</span>`,
      btns: (rc.active ? `<button class="small" data-rec="pause">Pause</button><button class="small" data-rech="1">1 h</button><button class="small" data-rech="4">4 h</button><button class="small" data-rech="12">12 h</button>`
        : `<button class="small primary" data-rec="resume">Resume</button>`),
@@ -2138,14 +2138,14 @@ function renderDesk() {
       : d.blocked ? ["alert", `Entries are stopped: ${esc(d.blocked)}`]
       : top ? [top.verdict === "buy" ? "act" : top.verdict === "wait" ? "think" : "work", `${tname(top.mint, top.symbol)} ${esc(top.why)}`]
       : ["work", `Watching ${L.tracked} coins fill. Nothing near the ${L.window[0]}–${L.window[1]}% window yet.`],
-    exits: hold.length ? ["work", hot ? `${tname(hot.h.mint, hot.h.symbol)} <b class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</b>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : `Managing ${hold.length} position(s).`]
+    exits: hold.length ? ["work", hot ? `${tname(hot.h.mint, hot.h.symbol)} <b class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</b>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : hold.every(h => h.manual && !h.bot) ? `Watching your ${hold.length} position(s): they exit on your rules.` : `Managing ${hold.length} position(s).`]
       : ["idle", "Nothing open. I take over the moment the scanner buys."],
     risk: d.defense.on ? ["alert", `Defense mode: ${esc(d.defense.reason)}`]
       : ["idle", `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)} SOL of a ${lim.daily_loss_sol} SOL loss limit. ${d.open}/${lim.max_open} open.`],
     feed: !f.host ? ["idle", "Simulated market: no real feed to watch."] : f.degraded ? ["alert", `Problem: ${esc(f.degraded_reason)}`]
       : ["work", `${esc(f.host)}: ${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing.${f.non_sol_skipped ? ` Skipped ${f.non_sol_skipped} non-SOL trades.` : ""}`],
     operator: d.chat.available ? ["idle", ag ? `Last action: ${esc(ag.text)}` : "Ask me anything in Chat, or paste a contract address."] : ["sleep", "Claude Code isn't set up here."],
-    recorder: !rc.running ? ["alert", "My service isn't running."] : !rc.active ? ["sleep", `Paused: ${esc(rc.pause_reason)}.`]
+    recorder: !rc.running ? ["alert", "My service isn't running."] : !rc.active ? ["sleep", rc.pause_reason === "paused" ? "Paused from the dashboard: the wallet study misses trades until I resume." : `Paused: ${esc(rc.pause_reason)}.`]
       : ["work", `Recording every trade on ${rc.pools ?? "?"} old coins${rc.gb_today != null ? ` · ${fx(rc.gb_today, 1)} GB today` : ""}.`],
   };
   for (const p of ["veteran", "narrative", "skeptic", "quant"]) {
