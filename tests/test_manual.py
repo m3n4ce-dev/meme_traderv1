@@ -389,3 +389,23 @@ def test_live_chart_marks_your_trades_and_wallets_worth_seeing(tmp_path):
                     return m
     m = asyncio.run(go())
     assert list(m["charts"]) == [s.mint] and m["charts"][s.mint]["full"] and m["charts"][s.mint]["pts"]
+
+
+def test_kol_list_parses_and_names_kols_on_the_chart(tmp_path):
+    import json as _json
+
+    from meme_trader.sniper import kols
+
+    k1, k2 = "K" * 43 + "a", "J" * 44
+    rsc = ('[{"wallet_address":"%s","name":"Cook\\u00e9r","telegram":null,"twitter":"https://x.com/c","profit":146.9,'
+           '"wins":45,"losses":8,"timeframe":1},{"wallet_address":"%s","name":"Zef","telegram":null,"twitter":null,"pfp":"x"}]' % (k1, k2))
+    html = '<script>self.__next_f.push([1,%s])</script>' % _json.dumps(rsc)
+    d = kols.parse(html)
+    assert d["kols"] == {k1: "Cookér", k2: "Zef"} and d["board"][0]["wins"] == 45 and d["board"][0]["days"] == 1
+    assert kols.load(tmp_path / "missing.json") == {"kols": {}}
+    e = market()
+    s = live_coin(e)
+    e.kols = {"kols": {k1: "Cooker"}}
+    s.trades.append((s.trades[-1][0] + 1, s.trades[-1][1], "buy", 0.5, k1))
+    m = [x for x in e.chart_data(s.mint)["marks"] if x["who"] == "kol"]
+    assert m and m[-1]["label"] == "KOL Cooker bought 0.50 SOL"

@@ -1090,6 +1090,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <!-- ============================================================ PULSE -->
   <section class="view" data-view="charts" hidden>
     <div class="toolbar"><b class="vh">📈 Charts</b><span class="note hide-sm" id="lc-count"></span><div class="spacer"></div>
+      <span class="note" id="lc-kols" title="KOLs hold a median 34 s; copying them 1-2.5 s late lost ~13% a trade in our recordings"></span>
+      <button class="small ghost" data-kolref="1" title="Fetch kolscan.io's KOL wallet list once, so the charts name them">👑 Refresh KOL list</button>
       <div class="seg" id="lc-win" role="group" aria-label="Time window"><button data-lcwin="60" aria-pressed="false">1m</button><button data-lcwin="300" aria-pressed="false">5m</button><button data-lcwin="900" aria-pressed="false">15m</button><button data-lcwin="0" aria-pressed="false">All</button></div></div>
     <div id="lc-grid" class="lc-grid"><div class="empty">Loading…</div></div>
   </section>
@@ -1831,7 +1833,7 @@ function renderDrawer(d) {
 // The page names the coins it's charting (chart_sub); the server streams each trade on them within ~0.25 s,
 // with markers: your and the bots' entries and exits, and trades by the dev, smart wallets and whales.
 const LC = {data: {}, want: "", raf: 0, win: +(store.get("lc-win") || 600)};
-const LCWHO = {you: ["#22d3ee", "You"], bot: ["#a78bfa", "Bots"], dev: ["#ef4444", "Dev"], smart: ["#f59e0b", "Smart wallets"], whale: ["#ec4899", "Whales (2+ SOL)"]};
+const LCWHO = {you: ["#22d3ee", "You"], bot: ["#a78bfa", "Bots"], dev: ["#ef4444", "Dev"], kol: ["#f472b6", "KOLs"], smart: ["#f59e0b", "Smart wallets"], whale: ["#94a3b8", "Whales (2+ SOL)"]};
 function lcWanted() {
   const m = new Set();
   if (isMint(TR.mint) && S.tab === "live") m.add(TR.mint);
@@ -1957,7 +1959,8 @@ function renderCharts(s) {
     card.querySelector(".lc-legend").innerHTML = lcLegend(LC.data[p.mint]);
   }
   lcCardNums();
-  $$("#lc-win button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.win === LC.win)));
+  $$("#lc-win button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.lcwin === LC.win)));
+  $("lc-kols").textContent = s.kols && s.kols.n ? `${s.kols.n} KOLs named${s.kols.fetched ? " · list " + ago(s.kols.fetched) + " old" : ""}` : "no KOL list yet";
   if (!LC.raf) LC.raf = requestAnimationFrame(lcDraw);
 }
 
@@ -5170,6 +5173,8 @@ function buyTips(mint, sol) {
   }
   const i = TR.info && TR.info.mint === mint ? TR.info : null, bad = ((i && i.flags) || []).filter(f => f.level === "bad").map(f => esc(f.text));
   if (bad.length) out.push({kind: "flags", html: `Red flags on <b>${sym}</b>: ${bad.slice(0, 3).join(" · ")}.`});
+  const kb = ((LC.data[mint] || {}).marks || []).filter(m => m.who === "kol" && m.side === "buy" && (s.now || 0) - m.t < 120);
+  if (kb.length) out.push({kind: "kol", html: `<b>${esc(kb[kb.length - 1].label)}</b> ${dur(Math.max(0, (s.now || 0) - kb[kb.length - 1].t))} ago. In our recordings KOLs sold a median 34 s after buying, and copying them 1-2.5 s late lost ~13% a trade: if you're in for the KOL, be ready to get out fast.`});
   const q = quietFor(mint);
   if (q != null && q > 180) out.push({kind: "quiet", html: q === Infinity ? `Nobody has traded <b>${sym}</b> since the bot started watching it: buying is easy, selling may not be.` : `No trades on <b>${sym}</b> for ${dur(q)}. A quiet coin can be hard to sell.`});
   let streak = 0;
@@ -5437,12 +5442,13 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.kolref) { t.disabled = true; send({action: "kols_refresh"}); setTimeout(() => t.disabled = false, 8000); return; }
   if (d.lcwin != null) { LC.win = +d.lcwin; store.set("lc-win", LC.win); if (snap) renderCharts(snap); return; }
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
   if (d.zoom) { zoomIn(d.zoom); return; }

@@ -523,6 +523,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 return {"ok": False, "text": why}
             asyncio.ensure_future(engine.huddle("the owner called a meeting"))
             return {"ok": True, "text": "The team is gathering at the AI table…"}
+        if action == "kols_refresh":                      # the owner's click: one fetch of kolscan.io's list
+            err = await engine.refresh_kols()
+            n = len(engine.kols.get("kols") or {})
+            return {"ok": not err, "text": err or f"{n} KOL wallets loaded: the live charts name them when they trade"}
         if action == "huddle_apply":                      # the owner approves one of the team's setting changes
             try:
                 err = engine.apply_huddle_action(str(cmd.get("id") or ""), int(cmd.get("i")))
