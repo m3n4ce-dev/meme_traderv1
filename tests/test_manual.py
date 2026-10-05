@@ -337,3 +337,15 @@ def test_the_bots_ride_a_handed_position_for_a_runner_instead_of_selling_at_once
     tok.migrated, tok.curve.price = True, 0.9
     assert evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS) is None                 # graduated: paper keeps riding
     assert "graduated" in evaluate_ride_exit(pos2, tok, RIDE_DEFAULTS, live=True)[1]
+
+
+def test_the_exit_manager_describes_your_positions_by_your_rules_not_the_bots():
+    """The Desk said a manual position's 'closest exit is time held (12 min of 30 min)': yours have no time exit."""
+    e = market()
+    a = live_coin(e)
+    assert asyncio.run(e.manual_buy(a.mint, 0.1)) == ""
+    hold = {h["mint"]: h for h in e.desk_view()["holding"]}
+    assert hold[a.mint]["manual"] and not any("time" in g["label"] for g in hold[a.mint]["watch"])
+    e.hand_over(a.mint, True)
+    labels = [g["label"] for g in {h["mint"]: h for h in e.desk_view()["holding"]}[a.mint]["watch"]]
+    assert labels[0] == "stop" and any("2x" in x for x in labels) and "trailing stop" in labels

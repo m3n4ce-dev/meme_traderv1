@@ -1808,9 +1808,15 @@ class Engine:
             if not s or pos.source == "callout":
                 continue
             price = self._mark(m, pos)
+            own = None
+            if pos.source == "manual":                    # yours: no time limit, only your rules (or the ride's)
+                mc = self._manual_cfg()
+                own = {"ride": self._ride_cfg()} if pos.bot else {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
+                                                                   "trail": mc.trail_pct, **(pos.manual or {})}
             holding.append({"mint": m, "symbol": pos.symbol, "source": pos.source, "gain_pct": pos.gain_pct(price),
                             "peak_gain_pct": pos.gain_pct(pos.peak_price), "held_s": round(self.now - pos.opened_at),
-                            "value_sol": pos.tokens * price, "watch": exit_watch(pos, s, self.now, L, x)})
+                            "value_sol": pos.tokens * price, "watch": exit_watch(pos, s, self.now, L, x, own),
+                            "manual": pos.source == "manual", "bot": pos.bot})
         agent_log = [l for l in self.log if l["level"] in ("buy", "sell", "close", "desk", "agent", "error")][-60:]
         d = self.desk
         return {"now": self.now, "blocked": self.entries_blocked(), "paused": self.paused,
