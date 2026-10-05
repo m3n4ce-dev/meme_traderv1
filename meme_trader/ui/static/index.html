@@ -944,6 +944,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <button id="palette" class="ghost small" title="Command palette (Ctrl+K)">⌘K</button>
   <button id="arrange" class="ghost small" title="Arrange this page: drag panels, hide some (a)" aria-pressed="false">✎<span class="lbl"> Arrange</span></button>
   <button id="theme" class="ghost small" title="Theme (t)" aria-label="Switch theme">◐</button>
+  <button id="unit-btn" class="ghost small" title="Show amounts in SOL or US dollars (u). Orders are always sized in SOL." aria-pressed="false">◎ SOL</button>
   <button id="pause" title="Stop/start opening new positions (p). Open positions keep being managed.">⏸ Pause<span class="lbl"> entries</span></button>
   <button id="term-btn" title="Terminal: type commands to the bot (the ` key)" aria-label="Terminal">&gt;_</button>
   <button id="restart" title="Restart the bot: saves everything, reloads its code and settings, and picks up where it left off">↻<span class="lbl"> Restart</span></button>
@@ -1371,8 +1372,17 @@ const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = x => x === "Infinity" ? Infinity : x === "-Infinity" ? -Infinity : x;      // server sends non-finite as strings
 const fx = (x, d = 2) => { x = num(x); return x == null || Number.isNaN(x) ? "–" : !isFinite(x) ? (x > 0 ? "∞" : "−∞") : x.toFixed(d); };
-const sol = (x, d = 3) => (x >= 0 ? "" : "−") + Math.abs(x).toFixed(d);
-const signed = (x, d = 3) => (x > 0 ? "▲ +" : x < 0 ? "▼ −" : "") + Math.abs(x).toFixed(d);
+// amounts show in SOL or in dollars (the ◎/$ switch in the header); orders are always sized in SOL
+const solRaw = (x, d = 3) => (x >= 0 ? "" : "−") + Math.abs(x).toFixed(d);
+const usdMode = () => S.unit === "usd" && snap && snap.sol_usd > 0;
+const usdAbs = v => { v = Math.abs(v); return "$" + (v >= 1000 ? fmtUsd(v) : v >= 0.995 ? v.toFixed(2) : v.toFixed(v >= 0.01 ? 2 : 4)); };
+const sol = (x, d = 3) => usdMode() ? (x >= 0 ? "" : "−") + usdAbs(x * snap.sol_usd) : solRaw(x, d);
+const signed = (x, d = 3) => (x > 0 ? "▲ +" : x < 0 ? "▼ −" : "") + (usdMode() ? usdAbs(x * snap.sol_usd) : Math.abs(x).toFixed(d));
+const U = () => usdMode() ? "" : " SOL";                       // the unit after an amount (none in dollars: "$" says it)
+const mcap = x => usdMode() ? "$" + fmtUsd(x * snap.sol_usd) : (+x).toFixed(0) + " SOL";
+const flowAmt = (x, d = 2) => usdMode() ? (x > 0 ? "+" : x < 0 ? "−" : "") + usdAbs(x * snap.sol_usd) : fx(x, d) + " SOL";
+const px = (v, d = 3) => usdMode() ? "$" + (v * snap.sol_usd).toExponential(d) : v.toExponential(d) + " SOL";
+const pxAxis = v => usdMode() ? "$" + (v * snap.sol_usd).toExponential(1) : v.toExponential(1);
 const pct = (x, d = 0) => x == null ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(d) + "%";
 const prob = x => x == null ? "–" : Math.round(x * 100) + "%";
 const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
@@ -1520,8 +1530,8 @@ function render(s) {
   renderTradePanel(s);
   const sm = s.summary;
   const eqd = s.equity - sm.start_sol;
-  $("k-eq").textContent = sol(s.equity) + " SOL";
-  $("k-eq-sub").innerHTML = `<span class="${cls(eqd)}">${signed(eqd)} SOL (${pct(eqd / sm.start_sol * 100, 1)})</span> vs start`;
+  $("k-eq").textContent = sol(s.equity) + U();
+  $("k-eq-sub").innerHTML = `<span class="${cls(eqd)}">${signed(eqd)}${U()} (${pct(eqd / sm.start_sol * 100, 1)})</span> vs start`;
   $("k-pnl").innerHTML = `<span class="${cls(sm.realized_pnl_sol)}">${signed(sm.realized_pnl_sol)}</span>`;
   $("k-day").innerHTML = `<span class="${cls(s.day_pnl)}">${signed(s.day_pnl)}</span>`;
   $("k-win").textContent = sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–";
@@ -1570,7 +1580,7 @@ function render(s) {
   }
 
   // positions
-  $("pos-sub").textContent = `${s.positions.length} open · ${sol(s.sol)} SOL free`;
+  $("pos-sub").textContent = `${s.positions.length} open · ${sol(s.sol)}${U()} free`;
   const pe = $("positions");
   const nowPos = new Set(s.positions.map(p => p.mint));
   if (!s.positions.length) { pe.innerHTML = `<div class="empty">No open positions. Watching the radar.</div>`; pe.dataset.keys = ""; }
@@ -1591,7 +1601,7 @@ function render(s) {
       const el = $("p-" + p.mint); if (!el) continue;
       const tagCls = p.source.startsWith("copy") ? "copy" : p.source === "late" ? "late" : "";
       el.querySelector(".gain").innerHTML = `<span class="${cls(p.gain_pct)}">${pct(p.gain_pct)}</span>`;
-      el.querySelector(".meta").innerHTML = `<span>${dur(p.held_s)}</span><span>value ${sol(p.value_sol)} SOL</span>
+      el.querySelector(".meta").innerHTML = `<span>${dur(p.held_s)}</span><span>value ${sol(p.value_sol)}${U()}</span>
         <span>peak ${pct(p.peak_gain_pct)}</span><span>score ${p.score.toFixed(0)}</span>${p.p != null ? `<span>P(2x) ${prob(p.p)}</span>` : ""}
         ${p.initials ? '<span class="tag ok">✓ initials out</span>' : '<span class="tag">initials pending</span>'}
         <span class="tag ${tagCls}" title="${esc(p.desk)}">${esc(p.source)}${p.desk ? " · AI ✓" : ""}</span>`;
@@ -1613,9 +1623,9 @@ function render(s) {
 
   // equity
   const eh = s.equity_hist;
-  if (eh.length) lineChart($("equity"), eh.map(e => e[1]), {axis: true, fill: true, fmt: v => v.toFixed(3),
+  if (eh.length) lineChart($("equity"), eh.map(e => e[1]), {axis: true, fill: true, fmt: v => usdMode() ? usdAbs(v * s.sol_usd) : v.toFixed(3),
     refs: [{y: sm.start_sol, label: "start", dash: true}],
-    hover: i => `${hhmmss(eh[i][0])}<br><b>${eh[i][1].toFixed(4)} SOL</b>`});
+    hover: i => `${hhmmss(eh[i][0])}<br><b>${sol(eh[i][1], 4)}${U()}</b>`});
 
   // closed
   $("closed-sub").textContent = `${sm.closed} total · click a row for details`;
@@ -1666,7 +1676,7 @@ function renderRadar(s) {
     return `<tr class="click ${w.status === "watching" ? "" : "dim"}" data-open="${esc(w.mint)}" tabindex="0">
     <td title="${esc(w.mint)}">${logo(w.mint, w.symbol)}<b>${esc(w.symbol)}</b><span class="lk" title="social links: X · Telegram · website"><b class="${lk[0] ? "on" : ""}">T</b><b class="${lk[1] ? "on" : ""}">G</b><b class="${lk[2] ? "on" : ""}">W</b></span>${w.socials ? ' <span class="tag" title="calls / smart wallets">📣 ' + w.socials + "</span>" : ""}</td>
     <td class="r">${dur(w.age)}</td>
-    <td title="${(w.progress * 100).toFixed(1)}% · MC ${w.mcap_sol.toFixed(0)} SOL"><div class="bar"><i style="width:${(w.progress * 100).toFixed(1)}%"></i></div></td>
+    <td title="${(w.progress * 100).toFixed(1)}% · MC ${mcap(w.mcap_sol)}"><div class="bar"><i style="width:${(w.progress * 100).toFixed(1)}%"></i></div></td>
     <td class="r">${w.buyers}</td>
     <td title="${w.score.toFixed(0)}"><div class="bar score"><i style="width:${Math.min(w.score, 100)}%"></i></div></td>
     <td>${w.p == null ? '<span class="note">–</span>' : `<span class="pbar"><span class="bar"><i style="width:${Math.min(w.p * 100, 100)}%"></i></span><span class="num">${prob(w.p)}</span></span>`}</td>
@@ -1743,10 +1753,10 @@ function renderDrawer(d) {
   const pos = d.position;
   const posBlock = pos ? `<div class="dr-sec"><h4>Our position</h4><div class="facts">
       <div class="fact"><div class="l">P&amp;L now</div><div class="v num ${cls(pos.gain_pct)}">${pct(pos.gain_pct, 1)}</div></div>
-      <div class="fact"><div class="l">Cost</div><div class="v num">${pos.cost_sol.toFixed(4)} SOL</div></div>
-      <div class="fact"><div class="l">Taken out</div><div class="v num">${pos.proceeds_sol.toFixed(4)} SOL</div></div>
+      <div class="fact"><div class="l">Cost</div><div class="v num">${sol(pos.cost_sol, 4)}${U()}</div></div>
+      <div class="fact"><div class="l">Taken out</div><div class="v num">${sol(pos.proceeds_sol, 4)}${U()}</div></div>
       <div class="fact"><div class="l">Source</div><div class="v">${esc(pos.source)}</div></div></div>
-      ${(pos.exits || []).length ? `<p class="note">${pos.exits.map(e => `${hhmmss(e[0])} sold for ${(+e[3]).toFixed(4)} SOL: ${esc(e[1])}`).join("<br>")}</p>` : ""}
+      ${(pos.exits || []).length ? `<p class="note">${pos.exits.map(e => `${hhmmss(e[0])} sold for ${sol(+e[3], 4)}${U()}: ${esc(e[1])}`).join("<br>")}</p>` : ""}
       <div class="tbar-row" style="margin-top:6px">${sellBtns(d.mint)}</div></div>` : "";
   const au = d.audit;
   const auditBlock = au ? `<p class="note">Gate audit: “${esc(au.gate)}” ${au.since_s}s ago. Since then it peaked at ${au.peak_x.toFixed(2)}x and bottomed at ${au.trough_x.toFixed(2)}x (${esc(au.outcome)}).</p>` : "";
@@ -1765,7 +1775,7 @@ function renderDrawer(d) {
       <div class="fact"><div class="l">Market cap</div><div class="v num">$${(d.mcap_usd / 1000).toFixed(1)}K</div></div>
       <div class="fact"><div class="l">Score</div><div class="v num">${d.score.toFixed(0)}</div></div>
       <div class="fact"><div class="l">Buyers 60s</div><div class="v num">${fx(f.buyers_60s, 0)}</div></div>
-      <div class="fact"><div class="l">Net inflow 60s</div><div class="v num ${cls(f.net_flow_60s)}">${fx(f.net_flow_60s, 2)} SOL</div></div>
+      <div class="fact"><div class="l">Net inflow 60s</div><div class="v num ${cls(f.net_flow_60s)}">${flowAmt(f.net_flow_60s)}</div></div>
     </div>
     ${posBlock}
     <div class="dr-sec"><h4>Price <small class="note">(last 150 trades)</small></h4><canvas id="dr-chart" height="130"></canvas></div>
@@ -1780,8 +1790,8 @@ function renderDrawer(d) {
     </div>
     <p class="note">Mint <span class="num">${esc(d.mint)}</span> <button class="small" data-copymint="${esc(d.mint)}">Copy</button> · creator ${short(d.creator)}</p>`;
   const ch = d.chart || [];
-  if (ch.length > 1) lineChart($("dr-chart"), ch, {axis: true, fill: true, fmt: v => v.toExponential(1),
-    refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [], hover: i => `${ch[i].toExponential(3)} SOL`});
+  if (ch.length > 1) lineChart($("dr-chart"), ch, {axis: true, fill: true, fmt: pxAxis,
+    refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [], hover: i => px(ch[i])});
   else $("dr-chart").outerHTML = `<div class="nochart-box">No trades since the bot started watching this coin, so there's no price line yet.
     ${pos ? "Your position is valued at the last price seen. " : ""}A coin nobody trades can be hard to sell.</div>`;
 }
@@ -1869,7 +1879,7 @@ function svgHours(rows) {
   const m = Math.max(1e-9, ...rows.map(r => Math.abs(r.pnl_sol))), mid = (h - B + T) / 2, half = (h - B - T) / 2;
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="P&L by hour"><line x1="0" x2="${w}" y1="${mid}" y2="${mid}" stroke="var(--axis)"/>
     ${Array.from({length: 24}, (_, k) => { const r = by[k]; const x = k * bw + 3;
-      const bar = r ? (() => { const bh = Math.abs(r.pnl_sol) / m * half; return `<rect x="${x.toFixed(1)}" y="${(r.pnl_sol >= 0 ? mid - bh : mid).toFixed(1)}" width="${(bw - 6).toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="2" fill="${r.pnl_sol >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".85"><title>${k}:00 UTC · ${r.n} trades · ${signed(r.pnl_sol)} SOL · win ${Math.round(r.win_rate * 100)}%</title></rect>`; })() : "";
+      const bar = r ? (() => { const bh = Math.abs(r.pnl_sol) / m * half; return `<rect x="${x.toFixed(1)}" y="${(r.pnl_sol >= 0 ? mid - bh : mid).toFixed(1)}" width="${(bw - 6).toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="2" fill="${r.pnl_sol >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".85"><title>${k}:00 UTC · ${r.n} trades · ${signed(r.pnl_sol)}${U()} · win ${Math.round(r.win_rate * 100)}%</title></rect>`; })() : "";
       return bar + `<text x="${(k * bw + bw / 2).toFixed(1)}" y="${h - 4}" text-anchor="middle">${k}</text>`; }).join("")}</svg>`;
 }
 function groupTable(rows, keyLabel = "") {
@@ -1885,8 +1895,8 @@ function renderAnalytics(a) {
   $("an-status").textContent = `Updated ${new Date().toLocaleTimeString([], {hour12: false})} · ${k.n || 0} closed trades (callout bags kept separate: ${a.callouts?.n || 0})`;
   const card = (l, v, sub = "", c = "") => `<div class="kpi"><div class="label">${l}</div><div class="value num ${c}">${v}</div><div class="sub">${sub}</div></div>`;
   $("an-kpis").innerHTML = !k.n ? `<div class="kpi"><div class="label">No closed trades yet</div><div class="sub">Numbers appear after the first exits.</div></div>` : [
-    card("Net P&amp;L (SOL)", (k.pnl_sol > 0 ? "+" : k.pnl_sol < 0 ? "−" : "") + Math.abs(k.pnl_sol).toFixed(3), pct(k.return_pct, 1) + " on start", cls(k.pnl_sol)),
-    card("Expectancy", pct(k.expectancy_pct, 1), `${signed(k.expectancy_sol, 4)} SOL per trade`, cls(k.expectancy_pct)),
+    card(`Net P&amp;L (${usdMode() ? "$" : "SOL"})`, (k.pnl_sol > 0 ? "+" : k.pnl_sol < 0 ? "−" : "") + sol(Math.abs(k.pnl_sol)), pct(k.return_pct, 1) + " on start", cls(k.pnl_sol)),
+    card("Expectancy", pct(k.expectancy_pct, 1), `${signed(k.expectancy_sol, 4)}${U()} per trade`, cls(k.expectancy_pct)),
     card("Win rate", Math.round(k.win_rate * 100) + "%", k.breakeven_win_rate != null ? `break-even ${Math.round(k.breakeven_win_rate * 100)}% at this payoff` : ""),
     card("Payoff", fx(k.payoff), `avg win ${pct(k.avg_win_pct)} / loss ${pct(k.avg_loss_pct)}`),
     card("Profit factor", fx(k.profit_factor), `${k.wins} wins · ${k.losses} losses`),
@@ -1896,7 +1906,7 @@ function renderAnalytics(a) {
     card("Edge confidence", a.edge ? Math.round(a.edge.p_positive * 100) + "%" : "–", "resamples with positive expectancy"),
     card("Kelly (full)", k.kelly_full == null ? "–" : (k.kelly_full * 100).toFixed(0) + "%", "the bot sizes at ¼ of the model's Kelly"),
     card("Median hold", k.median_hold_s == null ? "–" : dur(k.median_hold_s), `${fx(k.trades_per_hour, 1)} trades/hour`),
-    card("Fees est. (SOL)", fx(k.fees_est_sol, 3), `on ${fx(k.volume_sol, 2)} SOL bought`),
+    card(`Fees est. (${usdMode() ? "$" : "SOL"})`, sol(k.fees_est_sol), `on ${sol(k.volume_sol, 2)}${U()} bought`),
   ].join("");
   $("an-hl").innerHTML = (a.insights || []).map(i => `<li class="${esc(i.level)}">${esc(i.text)}</li>`).join("");
   $("an-eq").innerHTML = svgEquity(dd.series);
@@ -2021,8 +2031,8 @@ function buddyOnDone(m) {
 function buddyOnTrade(l) {
   const v = parseFloat((l.text.match(/([+-]\d+\.\d+) SOL/) || [])[1]);
   if (!isFinite(v)) return;
-  if (v > 0) buddyFlash("happy", `Nice, ${l.text.split(" ")[0]} closed +${v.toFixed(3)} SOL!`, l.text.match(/\[(\w+)/)?.[1] || "");
-  else buddyFlash("sad", `Ouch, ${l.text.split(" ")[0]} closed ${v.toFixed(3)} SOL.`, l.text.match(/\[(\w+)/)?.[1] || "", 3000);
+  if (v > 0) buddyFlash("happy", `Nice, ${l.text.split(" ")[0]} closed ${signed(v)}${U()}!`, l.text.match(/\[(\w+)/)?.[1] || "");
+  else buddyFlash("sad", `Ouch, ${l.text.split(" ")[0]} closed ${signed(v)}${U()}.`, l.text.match(/\[(\w+)/)?.[1] || "", 3000);
 }
 
 // ---------------------------------------------------------------- token logos
@@ -2088,7 +2098,7 @@ function renderDesk() {
   const r = d.risk || {}, lim = d.limits, lossUsed = Math.max(0, -d.day_pnl) / (lim.daily_loss_sol || 1);
   cards.risk = agentCard("risk", d.defense.on ? "blocked" : "working",
     d.defense.on ? `Defense mode: ${esc(d.defense.reason)}. Sizes are cut until it lifts.`
-      : `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)} SOL of the ${lim.daily_loss_sol} SOL loss limit; drawdown ${fx(Math.max(0, d.drawdown_pct), 1)}% (kill switch at ${lim.kill_dd_pct}%).`,
+      : `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)}${U()} of the ${sol(lim.daily_loss_sol, 1)}${U()} loss limit; drawdown ${fx(Math.max(0, d.drawdown_pct), 1)}% (kill switch at ${lim.kill_dd_pct}%).`,
     {extra: `<div class="mb ${lossUsed < .6 ? "ok" : ""}"><div class="t"><span>daily loss limit used</span><b>${Math.round(lossUsed * 100)}%</b></div><div class="tr"><i style="width:${Math.min(lossUsed, 1) * 100}%"></i></div></div>`,
      stats: `<span><b>${d.open}</b> / ${lim.max_open} positions</span>`, btns: `<button class="small" data-tab-link="controls">Risk dial</button>`});
   // feed
@@ -2141,7 +2151,7 @@ function renderDesk() {
     exits: hold.length ? ["work", hot ? `${tname(hot.h.mint, hot.h.symbol)} <b class="${cls(hot.h.gain_pct)}">${pct(hot.h.gain_pct, 1)}</b>: closest exit is ${esc(hot.g.label)} (${esc(hot.g.value)} of ${esc(hot.g.limit)})` : hold.every(h => h.manual && !h.bot) ? `Watching your ${hold.length} position(s): they exit on your rules.` : `Managing ${hold.length} position(s).`]
       : ["idle", "Nothing open. I take over the moment the scanner buys."],
     risk: d.defense.on ? ["alert", `Defense mode: ${esc(d.defense.reason)}`]
-      : ["idle", `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)} SOL of a ${lim.daily_loss_sol} SOL loss limit. ${d.open}/${lim.max_open} open.`],
+      : ["idle", `Dial on <b>${esc(r.name || "?")}</b>. Today ${signed(d.day_pnl)}${U()} of a ${sol(lim.daily_loss_sol, 1)}${U()} loss limit. ${d.open}/${lim.max_open} open.`],
     feed: !f.host ? ["idle", "Simulated market: no real feed to watch."] : f.degraded ? ["alert", `Problem: ${esc(f.degraded_reason)}`]
       : ["work", `${esc(f.host)}: ${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing.${f.non_sol_skipped ? ` Skipped ${f.non_sol_skipped} non-SOL trades.` : ""}`],
     operator: d.chat.available ? ["idle", ag ? `Last action: ${esc(ag.text)}` : "Ask me anything in Chat, or paste a contract address."] : ["sleep", "Claude Code isn't set up here."],
@@ -2195,7 +2205,7 @@ function candHTML(c, L) {
   const mom = c.checks.filter(x => x.group === "momentum"), flags = c.checks.filter(x => x.group === "flag");
   const label = {buy: "buy signal", blocked: "would buy", wait: "waiting", early: "filling", pass: "passed", out: "out", holding: "holding", done: "done"}[c.verdict] || c.verdict;
   return `<div class="cand v-${c.verdict}" data-open="${esc(c.mint)}" tabindex="0">
-    <div class="who">${tok(c.mint, c.symbol, "md")}<span class="v-pill ${c.verdict}">${label}</span><span class="note">${dur(c.age)} old · MC ${fx(c.mcap_sol, 0)} SOL</span></div>
+    <div class="who">${tok(c.mint, c.symbol, "md")}<span class="v-pill ${c.verdict}">${label}</span><span class="note">${dur(c.age)} old · MC ${mcap(c.mcap_sol)}</span></div>
     <div><div class="cwin" title="curve ${c.progress}% · buy window ${lo}–${hi}%"><span class="band" style="left:${lo}%;width:${hi - lo}%"></span><span class="fill" style="width:${Math.min(c.progress, 100)}%"></span></div>
       <div class="why">${esc(c.why)}</div>
       ${mom.length ? `<div class="mbars">${mom.map(m => `<div class="mb ${m.ok ? "ok" : ""}"><div class="t"><span>${esc(m.label)}</span><b>${esc(m.value)} <span class="note">/ ${esc(m.limit.replace(">= ", ""))}</span></b></div><div class="tr"><i style="width:${(Math.min(m.frac ?? 0, 1) * 100).toFixed(0)}%"></i></div></div>`).join("")}</div>` : ""}
@@ -2204,7 +2214,7 @@ function candHTML(c, L) {
 function holdHTML(h) {
   return `<div class="hold" data-open="${esc(h.mint)}" tabindex="0"><div class="top">${tok(h.mint, h.symbol, "md")}<span class="tag ${h.source === "late" ? "late" : ""}">${esc(h.source)}</span><span class="spacer"></span>
     <span class="num ${cls(h.gain_pct)}" style="font-weight:750;font-size:19px">${pct(h.gain_pct, 1)}</span></div>
-    <div class="note">${dur(h.held_s)} held · peak ${pct(h.peak_gain_pct)} · worth ${sol(h.value_sol)} SOL</div>
+    <div class="note">${dur(h.held_s)} held · peak ${pct(h.peak_gain_pct)} · worth ${sol(h.value_sol)}${U()}</div>
     <div class="gauges">${h.watch.map(g => { const f = g.frac ?? 0; return `<div class="mb gauge ${f >= .85 ? "hot" : f >= .6 ? "warm" : ""}"><div class="t"><span>${esc(g.label)}</span><b>${esc(g.value)} <span class="note">/ ${esc(g.limit)}</span></b></div>${g.frac == null ? "" : `<div class="tr"><i style="width:${(f * 100).toFixed(0)}%"></i></div>`}</div>`; }).join("")}</div></div>`;
 }
 function reviewHTML(r) {
@@ -2674,10 +2684,10 @@ function dataLine(id) {                                // fresh sentences from l
     s.sol_usd ? `SOL is $${(+s.sol_usd).toFixed(2)} right now.` : "",
     L.tracked ? `${L.tracked} coins on the radar at ${hh}.` : "",
     f.lag_s != null ? `Feed is ${fx(f.lag_s, 1)} s behind the chain at ${hh}.` : "",
-    s.equity != null ? `Equity ${(+s.equity).toFixed(3)} SOL at ${hh}.` : "",
+    s.equity != null ? `Equity ${sol(+s.equity)}${U()} at ${hh}.` : "",
     c ? `${c.symbol} sits at ${fx(c.progress, 0)}% of its curve.` : "",
     p ? `${p.symbol} is ${pct(p.gain_pct, 0)} since we bought it.` : "",
-    last ? `Last close: ${last.symbol}, ${last.pnl >= 0 ? "+" : ""}${(+last.pnl).toFixed(3)} SOL.` : "",
+    last ? `Last close: ${last.symbol}, ${signed(+last.pnl)}${U()}.` : "",
     sm.closed ? `${sm.closed} trades closed, ${Math.round((sm.win_rate || 0) * 100)}% won.` : "",
   ].filter(x => x && !linesUsed().has(x));
 }
@@ -2931,7 +2941,7 @@ function renderBoards() {
   if (spark.length > 1) { const lo = Math.min(...spark), hi = Math.max(...spark), r = hi - lo || 1;
     path = spark.map((v, i) => `${(10 + i / (spark.length - 1) * (w * .4)).toFixed(1)},${(80 - (v - lo) / r * 20).toFixed(1)}`).join(" "); }
   setHTML(pnl, `<text x="10" y="14" class="pb-t">P&amp;L BOARD</text>
-    <text x="10" y="32" class="pb-big">${sol(s.equity)} SOL</text><text x="10" y="43" class="pb-s ${cls(eqd)}">${signed(eqd)} vs start</text>
+    <text x="10" y="32" class="pb-big">${sol(s.equity)}${U()}</text><text x="10" y="43" class="pb-s ${cls(eqd)}">${signed(eqd)} vs start</text>
     <text x="10" y="53" class="pb-s ${cls(s.day_pnl)}">today ${signed(s.day_pnl)}</text>
     <polyline points="${path}" class="pb-line ${eqd >= 0 ? "up" : "down"}"/>
     <text x="${(w * .5).toFixed(0)}" y="14" class="pb-s">${sm.closed} trade${sm.closed === 1 ? "" : "s"} · ${sm.closed ? Math.round(sm.win_rate * 100) + "% won" : "–"}</text>
@@ -3003,7 +3013,7 @@ function chatLines(a, b) {
     [`Dial's on ${r.name || "?"} at ${hh}. Nervous?`, `Never. The stops are set.`],
     top ? [`Seen ${top.symbol}? ${fx(top.progress, 0)}% full.`, `Watching it. ${String(top.why || "").slice(0, 60)}`] : null,
     p ? [`${p.symbol} is ${pct(p.gain_pct, 0)}. Selling?`, p.gain_pct > 50 ? `Initials, then let it ride.` : `Not yet. The plan says hold.`] : null,
-    [`Today: ${signed(d.day_pnl || 0)} SOL so far (${hh}).`, (d.day_pnl || 0) >= 0 ? `Green day. Don't jinx it.` : `It's not over till 00:00 UTC.`],
+    [`Today: ${signed(d.day_pnl || 0)}${U()} so far (${hh}).`, (d.day_pnl || 0) >= 0 ? `Green day. Don't jinx it.` : `It's not over till 00:00 UTC.`],
     ["Coffee machine's broken again.", "It's not broken. It got rugged."], ["Did you see that bundle earlier?", "Twenty wallets, one block. Classic."],
     ["What's the best trade you ever skipped?", "The one that went to zero an hour later."], ["Initials or full send?", "Initials. Always initials."],
     ["Do you ever sleep?", "Only when the feed is clean."], ["Why do devs always sell at 80%?", "Because that's where the buyers are."],
@@ -3051,7 +3061,7 @@ function relay(ev) {
     sc.busy = "relay-hand"; setProp(sc, "📁");
     goTo(sc, [dx + 2.5, dy - .3], () => { hsay("exits", `Got <b>${esc(ev.sym)}</b>. Watching the exits.`, {force: true}); setTimeout(() => goHome(sc), 2500); }, 3);
   } else if (ev.kind === "close") {
-    hsay("exits", ev.win ? `Closed <b>${esc(ev.sym)}</b> <b class="up">${ev.v.toFixed(3)} SOL</b> ✓` : `<b>${esc(ev.sym)}</b> <b class="down">${ev.v.toFixed(3)} SOL</b>. Next one.`,
+    hsay("exits", ev.win ? `Closed <b>${esc(ev.sym)}</b> <b class="up">${signed(ev.v)}${U()}</b> ✓` : `<b>${esc(ev.sym)}</b> <b class="down">${signed(ev.v)}${U()}</b>. Next one.`,
       {force: true, kind: ev.win ? "act" : "alert"});
     floatOver(ex, `${ev.v > 0 ? "+" : ""}${ev.v.toFixed(3)}`, ev.win ? "up" : "down");
   } else if (ev.kind === "noteReply") {               // a persona walks to the corkboard and gives its take
@@ -3122,7 +3132,7 @@ function screenHTML(kind) {
     case "operator": return cards.operator + `<div class="log" style="margin-top:8px">${(d.log || []).filter(l => l.level === "agent").slice(-8).reverse().map(l => `<div><time>${hhmmss(l.ts)}</time><span>${esc(l.text)}</span></div>`).join("") || `<div class="empty">No actions yet.</div>`}</div>`;
     case "recorder": return cards.recorder;
     case "board": { const sm = s.summary;
-      return `<div class="kpis">${[["Equity", sol(s.equity) + " SOL"], ["Today", signed(s.day_pnl)], ["Realized", signed(sm.realized_pnl_sol)], ["Won", sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"], ["Profit factor", sm.closed ? fx(sm.profit_factor) : "–"]].map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value num">${v}</div></div>`).join("")}</div>
+      return `<div class="kpis">${[["Equity", sol(s.equity) + U()], ["Today", signed(s.day_pnl)], ["Realized", signed(sm.realized_pnl_sol)], ["Won", sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"], ["Profit factor", sm.closed ? fx(sm.profit_factor) : "–"]].map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value num">${v}</div></div>`).join("")}</div>
         <div style="margin:10px 0">${svgSpark((s.equity_hist || []).slice(-200).map(e => e[1]), "var(--series)", 70, 600)}</div>
         <table><thead><tr><th>Coin</th><th>Source</th><th class="r">P&amp;L</th><th>Exit</th></tr></thead><tbody>${(s.closed || []).slice(0, 10).map(c => `<tr><td>${tok(c.mint, c.symbol)}</td><td>${esc(c.source)}</td><td class="r ${cls(c.pnl)}">${signed(c.pnl)}</td><td class="why">${esc(c.exit)}</td></tr>`).join("")}</tbody></table>`; }
     case "cork": return `<div class="mem-list" style="max-height:none">${$("mem-list").innerHTML}</div>`;
@@ -3382,15 +3392,17 @@ function renderTradePanel(s) {
   if (TR.amt == null && !$("tr-amt").value) TR.amt = (m.presets_sol || [])[1] ?? (m.presets_sol || [])[0] ?? null;   // a sensible default size
   const pres = (m.presets_sol || []).map(v => `<button data-tramt="${v}" aria-pressed="${TR.amt === v}">${v}</button>`).join("");
   setHTML($("tr-presets"), pres);
-  $("tr-sub").textContent = `your own trades · bonding-curve coins · max ${m.max_sol ?? "?"} SOL · ${s.mode.startsWith("live") ? "REAL MONEY" : "paper"}`;
+  const amtNow = TR.amt || parseFloat($("tr-amt").value);
+  $("tr-sub").textContent = `your own trades · bonding-curve coins · max ${m.max_sol ?? "?"} SOL · ${s.mode.startsWith("live") ? "REAL MONEY" : "paper"}`
+    + (usdMode() && amtNow > 0 ? ` · ${amtNow} SOL ≈ ${usdAbs(amtNow * s.sol_usd)}` : "");
   const mint = TR.mint;
   if (!isMint(mint)) { setHTML($("tr-coin"), `<span class="note">Paste a contract address, or press Trade in any coin's details.</span>`); setHTML($("tr-metrics"), "");
     setHTML($("tr-orders"), ""); setHTML($("tr-ord-quick"), ""); return; }
   const w = s.watching.find(x => x.mint === mint), p = s.positions.find(x => x.mint === mint), q = (m.queue || []).includes(mint);
   const i = TR.info && TR.info.mint === mint ? TR.info : null;
   const sym = (w && w.symbol) || (p && p.symbol) || (i && i.symbol) || short(mint);
-  const facts = p ? `<b class="${cls(p.gain_pct)}">${pct(p.gain_pct, 1)}</b> · worth ${sol(p.value_sol)} SOL · held ${dur(p.held_s)}`
-    : w ? `curve ${(w.progress * 100).toFixed(0)}% · MC ${fx(w.mcap_sol, 0)} SOL · ${w.buyers} buyers · <span title="What the bot's own rules make of it">bot's take: ${esc(w.status)}, score ${fx(w.score, 0)}</span>`
+  const facts = p ? `<b class="${cls(p.gain_pct)}">${pct(p.gain_pct, 1)}</b> · worth ${sol(p.value_sol)}${U()} · held ${dur(p.held_s)}`
+    : w ? `curve ${(w.progress * 100).toFixed(0)}% · MC ${mcap(w.mcap_sol)} · ${w.buyers} buyers · <span title="What the bot's own rules make of it">bot's take: ${esc(w.status)}, score ${fx(w.score, 0)}</span>`
     : i ? `${esc(i.stage || "")}${i.mcap_usd ? " · MC $" + fmtUsd(i.mcap_usd) : ""}${i.curve_pct != null ? ` · curve ${fx(i.curve_pct, 0)}%` : ""}` : "looking it up…";
   setHTML($("tr-coin"), `<span class="tok" data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym, "md")}<b>${esc(sym)}</b></span>
     <span class="note">${facts}</span>${q ? `<span class="tag late">queued: buying at its first trade</span>` : ""}${p ? `<span class="tbar-row">${sellBtns(mint)}</span>` : ""}`);
@@ -3419,8 +3431,8 @@ async function trChart() {
   if (ch.length > 1) {
     box.hidden = false; cv.hidden = false; svg.innerHTML = "";
     $("tr-chartnote").textContent = `last ${ch.length} trades · live${pos ? " · dashed line = your entry" : ""}`;
-    lineChart(cv, ch, {axis: true, fill: true, fmt: v => v.toExponential(1), refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [],
-      hover: k => `${ch[k].toExponential(3)} SOL`});
+    lineChart(cv, ch, {axis: true, fill: true, fmt: pxAxis, refs: pos ? [{y: pos.entry, label: "entry", dash: true}] : [],
+      hover: k => px(ch[k])});
   } else if (i && (i.candles || []).length > 1) {
     box.hidden = false; cv.hidden = true; svg.innerHTML = svgCandles(i.candles); $("tr-chartnote").textContent = "candles from its pool (DexScreener)";
   } else {
@@ -3587,11 +3599,11 @@ function renderPortfolio() {
   $("pf-kpis").innerHTML = `<div class="kpi"><div class="label">My wallets</div><div class="value num">${mine.length ? money(d.mine_usd) : "–"}</div><div class="sub">${mine.length} wallet(s) marked mine</div></div>
     <div class="kpi"><div class="label">Watching</div><div class="value num">${d.wallets.length - mine.length}</div><div class="sub">other wallets</div></div>
     <div class="kpi"><div class="label">SOL price</div><div class="value num">${d.sol_usd ? money(d.sol_usd) : "–"}</div><div class="sub">used for totals</div></div>
-    <div class="kpi"><div class="label">Bot (paper)</div><div class="value num">${s ? sol(s.equity) + " SOL" : "–"}</div><div class="sub">${s ? `${s.positions.length} open · not real money` : ""}</div></div>`;
+    <div class="kpi"><div class="label">Bot (paper)</div><div class="value num">${s ? sol(s.equity) + U() : "–"}</div><div class="sub">${s ? `${s.positions.length} open · not real money` : ""}</div></div>`;
   const bot = s ? `<section class="panel wcard"><div class="wc-head"><div class="wc-av">🤖</div><div><b>The bot</b> <span class="tag">paper</span><div class="note">simulated balance, not a wallet</div></div>
-      <div class="tot"><b class="num">${sol(s.equity)} SOL</b><span class="note num">${s.sol_usd ? money(s.equity * s.sol_usd) : ""}</span></div></div>
+      <div class="tot"><b class="num">${solRaw(s.equity)} SOL</b><span class="note num">${s.sol_usd ? money(s.equity * s.sol_usd) : ""}</span></div></div>
     <div class="wc-body">${s.positions.map(p => `<div class="hrow" data-open="${esc(p.mint)}" style="cursor:pointer"><span class="tok">${logo(p.mint, p.symbol, "md")}<span><b>${esc(p.symbol)}</b><small>${esc(p.source)} · ${dur(p.held_s)}</small></span></span>
-      <span class="r num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span><span class="r num"><b>${sol(p.value_sol)} SOL</b></span></div>`).join("") || `<span class="note">No open positions · ${sol(s.sol)} SOL cash</span>`}</div></section>` : "";
+      <span class="r num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</span><span class="r num"><b>${sol(p.value_sol)}${U()}</b></span></div>`).join("") || `<span class="note">No open positions · ${sol(s.sol)}${U()} cash</span>`}</div></section>` : "";
   if ($("pf-wallets").contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
   setHTML($("pf-wallets"), bot + d.wallets.map(walletCard).join("")
     + (d.wallets.length ? "" : `<section class="panel"><div class="empty">Add your Phantom (or any) wallet address above to see its coins, values and activity here. Watch-only: no keys, ever.</div></section>`));
@@ -3653,7 +3665,7 @@ function svgRibbon(rows) {
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:64px" role="img" aria-label="Recent trades">
     <line x1="0" x2="${w}" y1="${mid}" y2="${mid}" stroke="var(--axis)"/>${rows.map((r, i) => {
       const v = Math.max(-300, Math.min(300, r.pnl_pct)), bh = Math.max(2, Math.abs(v) / m * (mid - 3)), x = w - (rows.length - i) * bw;
-      return `<rect data-open="${esc(r.mint)}" style="cursor:pointer" x="${(x + 1).toFixed(1)}" y="${(v >= 0 ? mid - bh : mid).toFixed(1)}" width="${Math.max(bw - 2, 1).toFixed(1)}" height="${bh.toFixed(1)}" rx="1.5" fill="${v >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".88"><title>${esc(r.symbol)} · ${esc(r.source)} · ${pct(r.pnl_pct, 0)} (${signed(r.pnl)} SOL)</title></rect>`; }).join("")}</svg>`;
+      return `<rect data-open="${esc(r.mint)}" style="cursor:pointer" x="${(x + 1).toFixed(1)}" y="${(v >= 0 ? mid - bh : mid).toFixed(1)}" width="${Math.max(bw - 2, 1).toFixed(1)}" height="${bh.toFixed(1)}" rx="1.5" fill="${v >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".88"><title>${esc(r.symbol)} · ${esc(r.source)} · ${pct(r.pnl_pct, 0)} (${signed(r.pnl)}${U()})</title></rect>`; }).join("")}</svg>`;
 }
 const pulsePartial = (p, end, since) => p[0] === end || (since > p[0] && since - p[0] < 60);   // this minute, and the one the bot started in
 function svgPulse(pulse, since = 0, h = 150) {
@@ -3719,7 +3731,7 @@ function hbars(rows, max, color = r => "var(--series)") {
 }
 
 // ---------------------------------------------------------------- risk dial
-function riskText(l) { return `$${l.base_usd}–${l.max_usd} per trade, ${l.max_open_positions} positions, ${l.daily_loss_limit_sol} SOL daily loss limit`; }
+function riskText(l) { return `$${l.base_usd}–${l.max_usd} per trade, ${l.max_open_positions} positions, ${sol(l.daily_loss_limit_sol, 1)}${U()} daily loss limit`; }
 function setRisk(lv) {
   const r = snap && snap.risk; if (!r) return;
   const l = r.levels.find(x => x.level === lv); if (!l || lv === r.level) return;
@@ -3738,7 +3750,7 @@ function renderRisk(s) {
     $("dial").innerHTML = r.levels.map(l => `<button data-lv="${l.level}" aria-pressed="${l.level === r.level}" ${l.level > r.max_level ? "disabled" : ""}
       title="${esc(l.name)}: ${esc(riskText(l))}${l.level > r.max_level ? " (above risk.max_level)" : ""}">${esc(l.name)}</button>`).join("");
     $("dial-table").innerHTML = r.levels.map(l => `<tr class="${l.level === r.level ? "cur" : ""}"><td>${l.level} · ${esc(l.name)}</td>
-      <td class="r num">$${l.base_usd}–${l.max_usd}</td><td class="r num">${l.max_open_positions}</td><td class="r num">${l.daily_loss_limit_sol} SOL</td>
+      <td class="r num">$${l.base_usd}–${l.max_usd}</td><td class="r num">${l.max_open_positions}</td><td class="r num">${sol(l.daily_loss_limit_sol, 1)}${U()}</td>
       <td>${l.level === r.level ? '<span class="tag ok">current</span>' : l.level > r.max_level ? '<span class="note">above max</span>' : `<button class="small" data-lv="${l.level}">Use</button>`}</td></tr>`).join("");
   }
 }
@@ -3751,11 +3763,11 @@ function renderLiveVisuals(s) {
   $("k-win-ring").innerHTML = ringSvg(wr, wr >= .5 ? "var(--good-mark)" : wr >= .35 ? "var(--warn-mark)" : "var(--bad)");
   const used = s.day_pnl < 0 && lim.daily_loss_sol ? Math.min(1, -s.day_pnl / lim.daily_loss_sol) : 0;
   $("k-day-meter").firstChild.style.cssText = `width:${(used * 100).toFixed(1)}%;background:${used > .7 ? "var(--bad)" : used > .4 ? "var(--warn-mark)" : "var(--good-mark)"}`;
-  $("k-day-sub").textContent = lim.daily_loss_sol ? (used ? `${Math.round(used * 100)}% of the ${lim.daily_loss_sol} SOL daily loss limit used` : `loss limit ${lim.daily_loss_sol} SOL / day · resets 00:00 UTC`) : "UTC day, resets 00:00";
+  $("k-day-sub").textContent = lim.daily_loss_sol ? (used ? `${Math.round(used * 100)}% of the ${sol(lim.daily_loss_sol, 1)}${U()} daily loss limit used` : `loss limit ${sol(lim.daily_loss_sol, 1)}${U()} / day · resets 00:00 UTC`) : "UTC day, resets 00:00";
   const dd = Math.max(0, (1 - s.equity / sm.start_sol) * 100), kill = lim.kill_dd_pct || 100;
   const base = lim.kill_base || sm.start_sol, df = Math.min(1, Math.max(0, (1 - s.equity / base) * 100) / kill);   // how close the kill switch is
   $("k-dd").textContent = dd.toFixed(1) + "%";
-  $("k-dd-sub").textContent = lim.kill_base ? `below start · kill switch at ${(+lim.kill_at_sol).toFixed(3)} SOL (${kill}% below where you resumed)` : `below start · kill switch at ${kill}%`;
+  $("k-dd-sub").textContent = lim.kill_base ? `below start · kill switch at ${sol(+lim.kill_at_sol)}${U()} (${kill}% below where you resumed)` : `below start · kill switch at ${kill}%`;
   $("k-dd-meter").firstChild.style.cssText = `width:${Math.max(df * 100, dd ? 2 : 0).toFixed(1)}%;background:${df > .6 ? "var(--bad)" : df > .3 ? "var(--warn-mark)" : "var(--good-mark)"}`;
   const rows = s.closed.slice(0, 60).reverse();
   const w = rows.filter(r => r.pnl > 0).length;
@@ -3799,7 +3811,7 @@ function tokenCard(d) {
   const hcol = r => ({"bonding curve": "var(--axis)", "program / pool": "var(--axis)", creator: "var(--warn-mark)", insider: "var(--bad)"}[r.lab] || "var(--series)");
   const hrows = (h.top || []).slice(0, 8).map(x => ({label: `<span class="num">${short(x.owner)}</span>${x.label ? ` <span class="tag ${x.label === "insider" ? "bad" : x.label === "creator" ? "late" : ""}">${esc(x.label)}</span>` : ""}`,
     title: x.owner, v: x.pct, text: x.pct.toFixed(1) + "%", lab: x.label}));
-  const chart = (d.candles || []).length > 1 ? svgCandles(d.candles) : t && (t.chart || []).length > 1 ? svgArea(t.chart, 150, v => v.toExponential(2) + " SOL") : "";
+  const chart = (d.candles || []).length > 1 ? svgCandles(d.candles) : t && (t.chart || []).length > 1 ? svgArea(t.chart, 150, v => px(v, 2)) : "";
   const links = Object.entries(d.links || {}).concat(Object.entries(d.socials || {}).map(([k, u]) => [k === "twitter" ? "X" : k[0].toUpperCase() + k.slice(1), safeUrl(u)]))
     .filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(k)}</a>`).join(" · ");
   const flags = (d.flags || []).map(f => `<li class="${esc(f.level)}">${esc(f.text)}</li>`).join("");
@@ -3810,7 +3822,7 @@ function tokenCard(d) {
       <button class="small" data-copymint="${esc(d.mint)}">Copy CA</button></div>
     <div class="tc-body">
       <div class="big">${fact("Price", d.price_usd ? "$" + fmtPrice(d.price_usd) : "–")}${fact("Market cap", d.mcap_usd ? "$" + fmtUsd(d.mcap_usd) : "–")}
-        ${c && !c.complete ? fact("In curve", (+c.real_sol).toFixed(2) + " SOL") : fact("Liquidity", d.liquidity_usd ? "$" + fmtUsd(d.liquidity_usd) : "–")}
+        ${c && !c.complete ? fact("In curve", sol(+c.real_sol, 2) + U()) : fact("Liquidity", d.liquidity_usd ? "$" + fmtUsd(d.liquidity_usd) : "–")}
         ${fact("Volume 24h", tr && tr.vol_h24 != null ? "$" + fmtUsd(tr.vol_h24) : "–")}${fact("Holders", d.holder_count ? fmtUsd(d.holder_count) : "–")}
         ${fact("Age", age(d.age_s != null ? d.age_s : t && t.age_s))}</div>
       ${chg ? `<div class="chg">${chg}</div>` : ""}
@@ -4013,10 +4025,10 @@ function growInput() { const t = $("ch-in"); t.style.height = "auto"; t.style.he
 function renderChatSide(s) {
   const sm = s.summary, eqd = s.equity - sm.start_sol;
   $("cs-mode").textContent = s.mode;
-  $("cs-acct").innerHTML = `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:22px;font-weight:700" class="num">${sol(s.equity)} SOL</span>
+  $("cs-acct").innerHTML = `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:22px;font-weight:700" class="num">${sol(s.equity)}${U()}</span>
       <span class="num ${cls(eqd)}">${signed(eqd)} (${pct(eqd / sm.start_sol * 100, 1)})</span></div>
     <div class="spark" style="height:36px;margin:6px 0">${svgSpark((s.equity_hist || []).slice(-120).map(e => e[1]), eqd >= 0 ? "var(--good-mark)" : "var(--bad)", 36)}</div>
-    <div class="note num">today ${signed(s.day_pnl)} SOL · ${sol(s.sol)} SOL cash · ${sm.closed} closed · win ${sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"}</div>
+    <div class="note num">today ${signed(s.day_pnl)}${U()} · ${sol(s.sol)}${U()} cash · ${sm.closed} closed · win ${sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"}</div>
     ${s.risk ? `<div class="note">risk dial: <b>${esc(s.risk.name)}</b> (${s.risk.level}/5) · ${esc(riskText(s.risk.levels[s.risk.level - 1]))}</div>` : ""}
     ${s.blocked ? `<div class="note" style="color:var(--warn)">entries blocked: ${esc(s.blocked)}</div>` : ""}`;
   $("cs-pos-sub").textContent = `${s.positions.length} open`;
@@ -4082,7 +4094,7 @@ function plRow(r, col) {
       <div class="pl-top"><b>${esc(r.symbol)}</b><span class="pl-name">${esc(r.name || "")}</span>${socials}<span class="note num">${age(r.age)}</span></div>
       <div class="pl-sub"><span class="num">MC <b>$${fmtUsd(r.mcap_usd)}</b></span><span class="pl-curve" title="Bonding curve ${fx(r.progress * 100, 0)}%"><i style="width:${Math.min(100, r.progress * 100).toFixed(0)}%"></i></span>
         <span class="num" title="Unique buyers">👥 ${r.buyers}</span><span class="num" title="Buys / sells"><span class="up">${r.buys}</span>/<span class="down">${r.sells}</span></span>
-        <span class="num ${cls(r.flow30)}" title="Net SOL in, last 30 s">${r.flow30 > 0 ? "+" : ""}${fx(r.flow30, 1)} SOL</span>
+        <span class="num ${cls(r.flow30)}" title="Net money in, last 30 s">${flowAmt(r.flow30, 1)}</span>
         <span class="num" title="Top 10 holders">t10 ${fx(r.top10, 0)}%</span><span class="num" title="Dev bought at launch">dev ${fx(r.dev_pct, 0)}%</span>${flags}</div></div>
     ${r.spark && r.spark.length > 2 ? `<span class="pl-spark">${svgSpark(r.spark, r.spark[r.spark.length - 1] >= r.spark[0] ? "var(--good)" : "var(--bad)", 26, 70)}</span>` : ""}
     <button class="pl-qb" data-mbuy="${esc(r.mint)}" data-sol="${qb}" title="Quick buy ${qb} SOL">⚡ ${qb}</button></div>`;
@@ -4365,6 +4377,7 @@ const GUIDE = [
       <li>The dashboard only answers on 127.0.0.1: reach it from another machine through an SSH tunnel.</li>
       <li><b>↻ Restart</b> (next to KILL) saves everything, reloads the bot's code and settings, and picks up where it left off: open positions and orders resume.</li>
       <li><b>Halted?</b> Press <b>Resume trading…</b> in the red banner. A restart doesn't clear a halt. If the account is still past the drawdown limit, the kill switch counts from where you resumed.</li>
+      <li><b>◎ SOL / $ USD</b> (header, or the <kbd>u</kbd> key): show every amount in SOL or in dollars at the current SOL price. Orders are always sized in SOL; in dollar mode the trade panel shows what your amount is worth.</li>
       <li><b>&gt;_ Terminal</b> (or the <kbd>&#96;</kbd> key): type commands instead of clicking: <code>status</code>, <code>pos</code>, <code>buy BONK 0.1</code>, <code>sell all</code>, <code>alert BONK &gt;= 1m</code>, <code>hand all</code>, <code>unhalt</code>, <code>log 20</code>, <code>ask …</code>. <code>help</code> lists them all. Bot commands only, never system commands.</li></ul>`},
   {id: "arrange", icon: "✎", title: "Make it yours", html: `
     <ul><li><b>✎ Arrange</b> (${K("a")}): every page becomes a 12-column board. Drag panels by their bar, drag a panel's right edge to resize it, pick a width (⅓ ½ ⅔ Full) and a height, hide what you don't use and bring it back from the bar at the bottom. Saved on the bot, so it follows you to any browser.</li>
@@ -4577,7 +4590,7 @@ function renderEdge() {
       ${s.caveats.length ? `<ul>${s.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}
       ${s.by_day.length ? `<div class="tablewrap"><table><thead><tr><th>Day</th><th class="r">Trades</th><th class="r">P&amp;L SOL</th><th class="r">Per SOL</th><th class="r">Won</th></tr></thead><tbody>
         ${s.by_day.map(d => `<tr><td>${esc(d.day)}</td><td class="r num">${d.n}</td><td class="r num ${cls(d.pnl)}">${signed(d.pnl)}</td><td class="r num ${cls(d.ret_pct)}">${pct(d.ret_pct, 1)}</td><td class="r num">${Math.round(d.win_rate * 100)}%</td></tr>`).join("")}</tbody></table></div>` : ""}
-      ${(s.best || []).length ? `<p class="note">Best trades: ${s.best.map(b => `${esc(b.symbol || "?")} ${signed(b.pnl)} SOL`).join(" · ")}</p>` : ""}</details>`).join("");
+      ${(s.best || []).length ? `<p class="note">Best trades: ${s.best.map(b => `${esc(b.symbol || "?")} ${signed(b.pnl)}${U()}`).join(" · ")}</p>` : ""}</details>`).join("");
   setHTML($("an-edge"), `<div class="tablewrap"><table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Per SOL staked</th><th class="r">Average trade (90% range)</th>
     <th class="r">Without best 3</th><th class="r">Days up</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>${why}
     <div class="form-row" style="margin-top:8px"><button class="small" data-edgecopy="1">Copy the bots' results as text for a group</button>
@@ -4936,6 +4949,19 @@ function applyTheme(t) { if (t === "light" || t === "dark") document.documentEle
 function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: "light", light: "dark", dark: "auto"}[cur] || "auto";
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
+function setUnit(u) {                          // SOL or $ everywhere amounts show; remembered in this browser
+  S.unit = u === "usd" ? "usd" : "sol"; store.set("unit", S.unit);
+  $("unit-btn").textContent = S.unit === "usd" ? "$ USD" : "◎ SOL"; $("unit-btn").setAttribute("aria-pressed", String(S.unit === "usd"));
+  if (S.unit === "usd" && !(snap && snap.sol_usd > 0)) toast("No SOL price yet: amounts stay in SOL until one arrives", "bad");
+  $("banners").dataset.h = "";
+  if (snap) render(snap);
+  if (S.analytics && typeof renderAnalytics === "function") renderAnalytics(S.analytics);
+  if (DK.data) renderDesk();
+  if (S.tab === "portfolio" && PF.data) renderPortfolio();
+  if (TR.mint) trChart();
+}
+$("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
+setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
@@ -5041,6 +5067,7 @@ addEventListener("keydown", e => {
   if (e.key === "Escape") { if (!$("term").hidden) termOpen(false); else if (!$("ctx").hidden) $("ctx").hidden = true; else if (!$("help").hidden) $("help").hidden = true; else if (!$("wardrobe").hidden) $("wardrobe").hidden = true;
     else if (!$("zscreen")?.hidden && $("zscreen")) zoomOut(); else if (RE.on) setRoomEdit(false); else if (AR.on) setArrange(false); else closeDrawer(); }
   else if (e.key === "`") { e.preventDefault(); termOpen(); }
+  else if (e.key === "u") $("unit-btn").click();
   else if (e.key === "a") setArrange(!AR.on);
   else if (e.key === "n") { e.preventDefault(); openComposer(); }
   else if ("123456789".includes(e.key)) setTab(TABS[+e.key - 1][0]);
