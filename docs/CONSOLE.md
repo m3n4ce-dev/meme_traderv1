@@ -123,6 +123,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - The coins they're in: who, buys/sells, net SOL, and market cap at their first buy → now. 📈 pins a coin.
   - A tape of their latest trades, with how long they held when they sell.
   - Load the KOL list with 👑 Refresh KOL list.
+- **🌐 Other chains:** trending and new pools on Solana, BNB Chain, Base and Ethereum (market cap, 1-hour volume, price change, buys/sells), with DexScreener links. Read-only: the bot trades pump.fun only.
 - **🔥 Copycat waves:** names launched 3+ times in the last hour, with the OG and the biggest one now.
 - **🎓 Graduation watch:** the graduation scanner's coins (curve %, market cap, age, a sparkline, and what it's waiting on).
 - **⚡ Market pulse:** launches, trades and graduations per minute.
@@ -195,7 +196,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **Open it:** on the trading floor, click the corkboard on the right wall. It zooms in.
 - **Add a note:** type a note, an X or article link, or a contract address, plus a comment if you like, then **📌 Pin it** (or Enter). The desk reads it and replies.
 - **🙈 Hide from board:** takes a note off the board; the desk still remembers it and reads it. **👁 Show on board** puts it back.
-- **🗑 Delete:** removes it for good. Click it twice to confirm.
+- **🗑 Delete:** removes it for good. Press the 🗑 Delete button, then press it again (it asks "Delete for good?") to confirm.
 - **What the board shows:** the newest 6 notes that aren't hidden. Desk → Teach the desk shows all of them, with the personas' replies.
 
 ## The AI desk and its huddles
@@ -209,11 +210,37 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - They propose up to 3 setting changes, each with an **Apply** button. Nothing changes until you press it.
 - **Teach the desk:** Desk → Teach the desk. Paste a link, an address or a note; the personas reply under it.
 
+## The lab: the team tests changes on the recorded market
+
+- **Where:** Desk → 🔬 The lab.
+- **How a test works:** one setting of the graduation play changed, replayed on the last 24 hours of recordings against the current settings. Same coins, same costs, same fill delay, compared in 6-hour blocks.
+- **Verdicts:** better, worse, no clear difference, or no effect.
+- **Who starts tests:**
+  - **The team:** a routine one-step test every 6 hours (`lab.auto_every_min`), at most 4 tests a day, only when 8 GB of memory is free.
+  - **The meetings:** they can attach tests to their plan's experiments, and read the results at the next huddle.
+  - **You:** *Test a change* (pick the setting, type the value, Test it).
+- **In the room:** Claude sends a bot to the lab bench, the lab board shows what's being tested, and the result is announced.
+- **"Better" is promising, not proven:** the panel counts every test run, and the best of many tries always looks better than it is. Nothing changes the bot until you Apply a change.
+- **It runs in the background** as a low-priority process, one test at a time, taking ~10–20 minutes. Trading carries on.
+
 ## Strategies on and off, and the risk dial
 
 - **Strategy buttons** (Live, under the top cards): Sniper, Copy, Graduation plays, Callouts. A click turns one on or off **and saves it**, so it stays that way after a restart.
 - **Risk dial** (Live or Controls): Cautious, Normal, Bold, Aggressive, Max. It scales trade size, open positions and the daily loss limit together.
 - **Pause:** ⏸ Pause or `p` stops new entries; open positions are still managed.
+
+## HQ: everything running on this machine
+
+Controls → 🏠 HQ shows the status of everything running on this machine:
+- **The bot:** mode, uptime and memory.
+- **The services:** sniper, wallet recorder and edge-scout.
+- **Market data:** server, delay, drops and data rate.
+- **The Helius backup:** in use or standing by, and its allowance.
+- **The wallet recorder, the lab and the AI desk.**
+- **Whether Claude's chat is available.**
+- **Free disk and memory.**
+
+Press Refresh to update it.
 
 ## Settings
 

@@ -678,6 +678,19 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .cork-add { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; } .cork-add input { flex: 1 1 200px; }
 .cork-list { display: grid; gap: 6px; } .cork-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--ring); border-radius: 8px; }
 .cork-row.off { opacity: .55; } .cork-t { flex: 1; min-width: 0; } .cork-ic { font-size: 18px; }
+.hq-svcs { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; } .hq-rows { display: grid; gap: 6px; }
+.hq-rows > div { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .hq-rows b { min-width: 120px; }
+.hq-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--warn, #d69e2e); } .hq-dot.ok { background: var(--good, #22c55e); } .hq-dot.bad { background: var(--bad, #ef4444); }
+.lab-run { padding: 6px 8px; border: 1px dashed var(--ring); border-radius: 8px; margin-bottom: 8px; } .lab-qs { display: grid; gap: 4px; margin-bottom: 8px; }
+.lab-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; } .lab-add select { max-width: 100%; } .lab-add input { width: 110px; }
+.cdock { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 130; width: min(640px, calc(100vw - 32px)); }
+.cd-bar { display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--ring); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.cd-bar input { flex: 1; min-width: 0; border: none; background: transparent; box-shadow: none; padding: 6px 4px; font-size: 14px; } .cd-bar input:focus { outline: none; }
+.cd-av img { width: 26px; height: 26px; image-rendering: pixelated; border-radius: 50%; background: var(--surface-2); display: block; }
+.cd-panel { margin-bottom: 8px; background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; max-height: min(60vh, 520px); display: flex; flex-direction: column; box-shadow: 0 10px 32px rgba(0,0,0,.3); }
+.cd-head { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--ring); } .cd-head .spacer { flex: 1; }
+.cd-msgs { overflow: auto; padding: 8px 10px; } .cd-msgs .msg .bubble { max-width: 100%; }
+main { padding-bottom: 80px; }                  /* (room for the chat bar) */
 .wd-act { padding: 10px 14px; border-top: 1px solid var(--ring); display: grid; gap: 6px; }
 .wd-actrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } .wd-actrow > .note:first-child { width: 64px; }
 #iso-ents g.re-drag { cursor: grabbing; filter: drop-shadow(0 0 6px #4ee08a); opacity: .9; } #iso-ents g.re-bad { filter: drop-shadow(0 0 6px #ff6b6b); opacity: .6; }
@@ -812,11 +825,13 @@ a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: 
 .lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; padding: 4px 0 16px; }
 .lc-card { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lc-viewbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 10px; }
+.lc-views > *, .lc-grid > * { min-width: 0; } .lc-view .tablewrap { overflow-x: auto; } .kt-row { overflow-wrap: anywhere; }
+[data-view="charts"] .toolbar { flex-wrap: wrap; row-gap: 6px; }
 .lc-views { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; margin-bottom: 12px; }
 .lc-views:empty { display: none; } .lc-view { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lc-view.wide { grid-column: 1 / -1; } .lc-views { align-items: start; } .lc-view td svg { width: 90px; height: 24px; display: block; } .lc-view table { width: 100%; } .lc-view .lc-h { margin-bottom: 6px; }
 .kt-tape { display: grid; gap: 3px; margin-top: 8px; max-height: 260px; overflow: auto; font-size: 13px; } .kt-row { padding: 2px 4px; border-radius: 6px; }
-.kt-row:hover { background: var(--surface-2); } .kt-kol { color: #f472b6; } .kt-smart { color: #f59e0b; }
+.kt-row:hover { background: var(--surface-2); } .lv-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; } .lv-chips .spacer { flex: 1; } .kt-kol { color: #f472b6; } .kt-smart { color: #f59e0b; }
 .lc-card.you { border-color: #22d3ee66; } .lc-card.pin { border-style: dashed; } .lc-card canvas { width: 100%; display: block; margin-top: 6px; }
 .lc-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .lc-h .spacer { flex: 1; } .lc-g { font-weight: 700; font-size: 15px; }
 .lc-legend { display: inline-flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -1133,6 +1148,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div class="desk-side">
         <aside class="panel inspector" aria-live="polite"><div id="dk-insp"></div></aside>
         <section class="panel" id="desk-huddle"><h2>Desk huddles <small>the team talks it over</small></h2><div id="dh-body"><div class="empty">Loading…</div></div></section>
+        <section class="panel" id="desk-lab"><h2>🔬 The lab <small>the team tests one change at a time on the recorded market</small></h2><div id="lab-body"><div class="empty">Loading…</div></div></section>
         <section class="panel" id="desk-brain"><h2>AI desk model <small>who the personas think with</small></h2><div id="db-body"><div class="empty">Loading…</div></div></section>
         <section class="panel teach">
           <h2>Teach the desk <small>saved to their memory</small></h2>
@@ -1310,6 +1326,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
 
   <!-- ============================================================ CONTROLS -->
   <section class="view" data-view="controls" hidden>
+    <section class="panel" id="hq-panel"><h2>🏠 HQ <small>everything running on this machine</small> <button class="small ghost" data-hqref="1">Refresh</button></h2><div id="hq-body"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="conn-panel"><h2>Connections <small>post calls, trade cards and proofs to X and Telegram · every post is your click</small></h2><div id="conn-body"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="keys-panel">
       <h2>API keys &amp; connections <small>saved to .env on this machine (owner-only file) · never shown again · never given to Claude</small></h2>
@@ -1368,6 +1385,15 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <div id="tipbox" class="tipbox" hidden role="status" aria-live="polite"><div class="tip-h">💡 Tip <span class="note">about your trade, which went through</span></div><div id="tip-body"></div>
   <div class="tip-btns"><button class="small primary" id="tip-ok">Got it</button><button class="small" id="tip-never">Don't show this one again</button><button class="small" id="tip-off">Turn tips off</button></div></div>
+<div class="cdock" id="cdock">
+  <div class="cd-panel" id="cd-panel" hidden role="dialog" aria-label="Chat with Claude">
+    <div class="cd-head"><span class="cd-av" id="cd-av"></span><b>Claude</b><span class="note hide-sm">the lead · the same chat as the Chat tab</span><span class="spacer"></span>
+      <button class="small ghost" data-cdfull="1">Open Chat</button><button class="small ghost" data-cdclose="1" aria-label="Close">×</button></div>
+    <div class="cd-msgs" id="cd-msgs"></div>
+  </div>
+  <div class="cd-bar"><span class="cd-av" id="cd-av2"></span><input id="cd-in" placeholder="Talk to Claude: ask anything, or tell him what to do…" autocomplete="off" aria-label="Message Claude">
+    <button class="small primary" data-cdsend="1">Send</button></div>
+</div>
 <div class="modal" id="wardrobe" hidden><div class="modal-box wd2" role="dialog" aria-label="Change your looks">
   <div class="wd2-head"><b>👕 Characters</b><span class="note">Pick a bot: its looks (Save changes), and how it acts (saved as you click). Drag a character in the room to move it.</span>
     <div class="spacer"></div><button class="small ghost" id="wd-cancel" aria-label="Close">×</button></div>
@@ -1550,7 +1576,7 @@ function renderChrome(s) {
       + (flaky ? ` · ⚠ ${(f.reconnects_1h || 0) + (f.switches_1h || 0)} drops/h` : "");
     fb.className = "badge hide-sm " + (stale ? "bad" : f.degraded || flaky ? "warn" : "ok");
     fb.title = stale ? "No market data recently - entries can't trigger. Check the internet / API key."
-      : `Market data from ${f.host || "?"}: trades arrive ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s" : "?"} after they happen on chain. Last hour: ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} server switches${f.mb_per_hour != null ? `, ${f.mb_per_hour} MB/hour of data` : ""}.${f.backup ? ` Backup ${f.backup.host}${f.backup.on ? " (in use now)" : ""}: ${f.backup.mb_today} of ${f.backup.mb_per_day} MB used today.` : ""}`;
+      : `Market data from ${f.host || "?"}: trades arrive ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s" : "?"} after they happen on chain. Last hour: ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} server switches${f.mb_per_hour != null ? `, ${f.mb_per_hour} MB/hour of data` : ""}.${f.backup ? ` Backup ${f.backup.host}${f.backup.on ? " (in use now)" : ""}: ${f.backup.mb_today} MB used today, ${f.backup.mb_left} MB left in its allowance (fills ${f.backup.mb_per_day} MB a day, saves up to ${f.backup.mb_bank}).` : ""}${f.backup && f.backup.last_probe ? ` Last check of ${f.backup.last_probe.host}, ${dur(f.backup.last_probe.ago_s)} ago: ${f.backup.last_probe.lag_s != null ? f.backup.last_probe.lag_s + " s behind" : "not usable"}.` : ""}`;
   }
   const b = [];
   if (s.halted) b.push(`<div class="banner bad">⛔ Halted: ${esc(s.halted)}. No new positions until you resume. <button class="small" data-unhalt="1">Resume trading…</button>${s.mode.startsWith("paper")
@@ -2007,7 +2033,9 @@ function tickChart(cv, c, o = {}) {
 }
 // ---------------------------------------------------------------- Charts tab: optional views (remembered here)
 const LV = {on: new Set((() => { try { return JSON.parse(store.get("lc-views") || "[]"); } catch { return []; } })()), data: {}, timer: 0, keys: {}};
-const VIEWS = [["kol", "👑 KOL tracker"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
+const VIEWS = [["kol", "👑 KOL tracker"], ["chains", "🌐 Other chains"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
+LV.chain = store.get("lv-chain") || "all"; LV.chainKind = store.get("lv-chainkind") || "trending"; LV.fresh = store.get("lv-fresh") !== "0";
+const ageShort = s => s == null ? "–" : s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 172800 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
 function renderViewBar() {
   setHTML($("lc-viewbar"), `<span class="note">Optional views:</span>` + VIEWS.map(([k, l]) => `<button class="chip ${LV.on.has(k) ? "on" : ""}" data-lcview="${k}" aria-pressed="${LV.on.has(k)}"><i></i>${l}</button>`).join(""));
 }
@@ -2020,6 +2048,7 @@ async function loadViews() {
     if (LV.on.has("kol")) LV.data.kol = await get("/api/kols") || LV.data.kol;
     if (LV.on.has("hot")) LV.data.hot = ((await get("/api/hot")) || {}).names || LV.data.hot;
     if (LV.on.has("grad")) LV.data.grad = ((await get("/api/desk")) || {}).late || LV.data.grad;
+    if (LV.on.has("chains") && Date.now() - (LV.chainsAt || 0) > 30000) { LV.chainsAt = Date.now(); LV.data.chains = await get("/api/chains") || LV.data.chains; }
     renderViews();
   }
   LV.timer = setTimeout(loadViews, 3000);
@@ -2059,6 +2088,22 @@ function viewBody(k) {
     return `<div class="note">The graduation scanner: coins filling their curve, the window is ${L.window ? L.window.join("–") : "55–85"}% · ${L.in_window || 0} in it now · ${L.tracked || 0} tracked</div>
       ${rows ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th class="r">Curve</th><th class="r">MC</th><th class="r">Age</th><th></th><th>Scanner</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Nothing near the window right now.</div>`}`;
   }
+  if (k === "chains") {
+    const d = LV.data.chains; if (!d) return `<div class="empty">Loading…</div>`;
+    const fresh = r => !LV.fresh || (r.age_s != null && r.age_s < 7 * 86400);                // memecoin-young: under a week
+    const nets = Object.keys(d.chains || {}), pool = (d[LV.chainKind] || {}), rows = (LV.chain === "all" ? nets.flatMap(n => (pool[n] || []).filter(fresh).slice(0, 8)) : (pool[LV.chain] || []).filter(fresh))
+      .slice().sort((a, b) => (b.vol_h1 || 0) - (a.vol_h1 || 0)).slice(0, 24);
+    const chip = (v, l, key) => `<button class="small ${(key === "kind" ? LV.chainKind : LV.chain) === v ? "primary" : "ghost"}" data-lvchain="${key}:${v}">${l}</button>`;
+    const pc = v => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${fx(v, 1)}%</span>`;
+    return `<div class="lv-chips">${chip("all", "All", "net")}${nets.map(n => chip(n, esc(d.chains[n]), "net")).join("")}<span class="spacer"></span><button class="small ${LV.fresh ? "primary" : "ghost"}" data-lvchain="fresh:${LV.fresh ? 0 : 1}" title="Only pools under a week old">Fresh only</button>${chip("trending", "🔥 Trending", "kind")}${chip("new", "🌱 New", "kind")}</div>
+      ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Chain</th><th>Pair</th><th class="r">MC</th><th class="r">Vol 1h</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th class="r">Buys/sells 1h</th><th class="r">Age</th><th></th></tr></thead><tbody>${rows.map(r => `
+        <tr><td><span class="tag">${esc(r.chain_name)}</span></td><td><b>${esc(r.symbol)}</b> <span class="note">${esc(r.name.split(" / ").slice(1).join(" / "))}</span></td>
+        <td class="r num">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r num">${r.vol_h1 != null ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
+        <td class="r num">${pc(r.chg_m5)}</td><td class="r num">${pc(r.chg_h1)}</td><td class="r num">${pc(r.chg_h24)}</td>
+        <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${ageShort(r.age_s)}</td>
+        <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${LV.fresh ? "Nothing under a week old here right now: turn off Fresh only, or try New." : "Nothing listed right now."}</div>`}
+      <p class="note">Read-only, from GeckoTerminal (refreshed every 90 s). The bot trades pump.fun only: other chains are watched, not traded, until the Solana bot proves an edge (docs/MULTICHAIN.md).${d.error ? ` · ${esc(d.error)}` : ""}</p>`;
+  }
   if (k === "pulse") return svgPulse(s.pulse || [], s.pulse_since || 0, 150);
   if (k === "equity") { const eh = (s.equity_hist || []).slice(-300).map(e => e[1]);
     return eh.length > 1 ? `<div class="note">${sol(eh[eh.length - 1])}${U()} now · ${signed(eh[eh.length - 1] - eh[0])}${U()} over this chart</div>${svgSpark(eh, eh[eh.length - 1] >= eh[0] ? "var(--good)" : "var(--bad)", 110, 600)}` : `<div class="empty">Collecting…</div>`; }
@@ -2069,7 +2114,7 @@ function renderViews() {
   const on = VIEWS.filter(([k]) => LV.on.has(k));
   if (box.dataset.k !== on.map(v => v[0]).join()) {
     box.dataset.k = on.map(v => v[0]).join(); LV.keys = {};
-    box.innerHTML = on.map(([k, l]) => `<section class="lc-view${k === "kol" ? " wide" : ""}" data-view-k="${k}"><div class="lc-h"><b>${l}</b><span class="spacer"></span><button class="small ghost" data-lcview="${k}" title="Hide this view">✕</button></div><div class="lv-body"></div></section>`).join("");
+    box.innerHTML = on.map(([k, l]) => `<section class="lc-view${k === "kol" || k === "chains" ? " wide" : ""}" data-view-k="${k}"><div class="lc-h"><b>${l}</b><span class="spacer"></span><button class="small ghost" data-lcview="${k}" title="Hide this view">✕</button></div><div class="lv-body"></div></section>`).join("");
   }
   for (const [k] of on) {
     const body = box.querySelector(`[data-view-k="${k}"] .lv-body`); if (!body || body.matches(":hover") && k !== "pulse" && k !== "equity") continue;   // (lists don't jump under the mouse)
@@ -2279,7 +2324,24 @@ function renderAnalytics(a) {
 }
 
 // ---------------------------------------------------------------- controls view
+async function loadHQ() {
+  let d; try { d = await (await fetch("/api/hq", {cache: "no-store"})).json(); } catch (e) { $("hq-body").innerHTML = `<div class="empty">Couldn't reach the bot (${esc(e)})</div>`; return; }
+  const dot = ok => `<span class="hq-dot ${ok === true ? "ok" : ok === false ? "bad" : "warn"}"></span>`;
+  const svc = Object.entries(d.services).map(([u, st]) => `<span>${dot(st === "active")} ${esc(u)} <span class="note">${esc(st)}</span></span>`).join("");
+  const f = d.feed || {}, b = f.backup, r = d.recorder || {};
+  const rows = [
+    ["Bot", d.bot.halted ? false : true, `${esc(d.bot.mode)} · up ${dur(d.bot.up_s)} · ${d.bot.rss_mb} MB${d.bot.paused ? " · entries paused" : ""}${d.bot.halted ? " · HALTED: " + esc(d.bot.halted) : ""}`],
+    ["Market data", f.degraded_reason ? null : true, `${esc(f.host || "?")} · ${f.lag_s != null ? (+f.lag_s).toFixed(1) + " s behind" : "?"}${f.degraded_reason ? " · " + esc(f.degraded_reason) : ""} · ${f.reconnects_1h || 0} reconnects, ${f.switches_1h || 0} switches in the last hour${f.mb_per_hour != null ? ` · ${f.mb_per_hour} MB/h` : ""}`],
+    ["Helius backup", b ? true : null, b ? `${b.on ? "in use now" : "standing by"} · ${b.mb_today} MB today · ${b.mb_left} MB left` : "no Helius key saved"],
+    ["Wallet recorder", r.active === true ? true : r.active === false ? false : null, r.active == null ? "no status" : `${r.active ? "recording" : "paused"}${r.pause_reason ? " · " + esc(r.pause_reason) : ""} · updated ${dur(r.updated_s || 0)} ago`],
+    ["The lab", true, `${d.lab.running ? "testing now" : "idle"} · ${d.lab.queued} queued · ${d.lab.tests} tests done`],
+    ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
+    ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
+    ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
+  $("hq-body").innerHTML = `<div class="hq-svcs">${svc}</div><div class="hq-rows">${rows.map(([k, ok, v]) => `<div>${dot(ok)}<b>${k}</b><span class="note">${v}</span></div>`).join("")}</div>`;
+}
 async function loadControls() {
+  loadHQ();
   try { const r = await fetch("/api/controls", {cache: "no-store"}); S.controls = await r.json(); renderControls(); }
   catch (e) { $("ctl").innerHTML = `<div class="empty">Couldn't load settings (${esc(e)})</div>`; }
 }
@@ -2394,7 +2456,7 @@ const AGENT = {
   risk: ["🛡️", "Risk officer", "sizing, daily loss limit, kill switch"],
   feed: ["📡", "Feed watchdog", "keeps the market data fresh and complete"],
   desk: ["🧠", "AI desk", "four Claude personas vote on each entry"],
-  operator: ["✦", "Claude operator", "your chat assistant: acts only with your OK"],
+  operator: ["✦", "Claude, the lead", "runs the team (rounds, tasks, meetings) and your chat: acts only with your OK"],
   recorder: ["🗂️", "Wallet recorder", "records old coins' trades for the wallet study"],
   bench: ["🪑", "On the bench", "strategies that are switched off"],
 };
@@ -2414,7 +2476,7 @@ function agentCard(id, state, thought, o = {}) {
 const tname = (mint, sym) => `<span data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym)}<b>${esc((sym || "").trim() || short(mint))}</b></span>`;
 function renderDesk() {
   const d = DK.data; if (!d) return;
-  renderBrain(d); renderHuddles(d);
+  renderBrain(d); renderHuddles(d); loadLab();
   const L = d.late, cands = L.candidates || [], hold = d.holding || [], st = d.strategies || {};
   const cards = {};
   // scanner
@@ -3393,6 +3455,7 @@ function kickIso() { if (!IO.raf && IO.built) { IO.last = performance.now(); IO.
 function busyCount() { return Object.values(IO.bots).filter(b => b.busy).length; }
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function errand2(b) {
+  if (b.id === "operator" && leaderRound()) return;            // the lead's errands are rounds
   const t = Math.random();
   if (t < (b.id === "recorder" ? .45 : .22) && startTask(b, "lab")) return;
   if (t > .7 && startTask(b, "lounge")) return;
@@ -3449,9 +3512,11 @@ setInterval(() => {
   applyPhase(); layoutChat(); renderBoards(); houseTabs(); renderHouseBoards();
   while (IO.events.length) { if (relay(IO.events[0]) === false) break; IO.events.shift(); }
   if (busyCount() >= 3 || IO.zoom) return;
+  labRoom();
+  if (Date.now() > LEAD.nextRound && Math.random() < 1 / 20) { LEAD.nextRound = Date.now() + 45000 + Math.random() * 45000; leaderRound(); }
   const away = Object.values(IO.bots).filter(b => b.busy === "task").length;
   if (away < 2 && Math.random() < 1 / 15) {                   // keep the lounge and the lab lived in
-    const pool = Object.values(IO.bots).filter(b => canRoam(b) && Math.random() < (MOVE_F[actOf(b.id).move] ?? 1));
+    const pool = Object.values(IO.bots).filter(b => b.id !== "operator" && canRoam(b) && Math.random() < (MOVE_F[actOf(b.id).move] ?? 1));   // (the lead stays on the floor)
     if (pool.length) startTask(pick(pool), Math.random() < .5 ? "lab" : "lounge");
   }
   for (const b of Object.values(IO.bots)) {
@@ -3840,7 +3905,57 @@ const freeStop = (room, k) => !Object.values(IO.bots).some(o => o.spot === room 
 const canRoam = b => !b.busy && !b.path.length && b.mood !== "sleep" && actOf(b.id).move !== "still" && !["alert", "act"].includes(b.mood);
 function startTask(b, room) {
   const ts = TASKS[room].filter(t => t.pair ? freeStop("lounge", "pongL") && freeStop("lounge", "pongR") : freeStop(room, t.steps[0][0]));
-  return ts.length ? runTask(b, room, pick(ts)) : false;
+  if (!ts.length) return false;
+  const task = pick(ts);
+  if (b.id !== "operator" && !task.pair) leaderAssign(b, task, room);
+  return runTask(b, room, task);
+}
+// ---- Claude leads the team: hands out the tasks, makes the rounds, chairs the meetings at the head of the table
+const LEAD = {nextRound: Date.now() + 30000, said: 0};
+const TASK_ASK = {"running a backtest": "go run a backtest on yesterday's tape", "reading the wallet study": "check the wallet study boards",
+  "servicing the rack": "give the recorder's rack a look", "comparing exits": "compare the exits in the lab",
+  "on the arcade": "take ten on the arcade", "grabbing a snack": "grab a snack, you've earned it", "napping": "five minutes on the beanbag",
+  "watching the pulse": "keep an eye on the pulse from the lounge"};
+function leaderAssign(b, task, room) {
+  if (Date.now() - LEAD.said < 20000 || !IO.bots.operator) return;
+  LEAD.said = Date.now();
+  hsay("operator", esc(`${botLook(b.id).name}, ${TASK_ASK[task.name] || "take a break in the " + room}.`), {force: true});
+}
+function leaderAsk(id) {
+  const n = botLook(id).name;
+  return pick({scanner: [`${n}, anything near the window?`, `${n}, what's filling its curve?`], exits: [`${n}, how are the open ones?`, `${n}, any exit close?`],
+    risk: [`${n}, where are we against the limit?`, `${n}, how much room today?`], feed: [`${n}, how's the data?`, `${n}, are we on time?`],
+    recorder: [`${n}, how's the study going?`, `${n}, rack still writing?`], veteran: [`${n}, seen this setup before?`], narrative: [`${n}, what's the story today?`],
+    skeptic: [`${n}, what worries you right now?`], quant: [`${n}, what do the numbers say?`]}[id] || [`${n}, what are you seeing?`]);
+}
+function leaderAnswer(id) {                                   // each one answers from its own corner of the bot
+  const d = DK.data || {}, s = snap || {}, L = d.late || {}, f = d.feed || s.feed || {}, w = S.wallets, sm = s.summary || {};
+  const top = (L.candidates || []).find(c => ["wait", "buy", "early"].includes(c.verdict)), ps = s.positions || [];
+  const best = ps.slice().sort((a, b) => b.gain_pct - a.gain_pct)[0];
+  const ans = {
+    scanner: top ? `${top.symbol} is at ${fx(top.progress, 0)}%, ${top.verdict === "early" ? "not in the window yet" : "in the window"}. ${L.in_window || 0} in it, ${L.tracked || 0} tracked.` : `${L.tracked || 0} tracked, nothing near the window.`,
+    exits: best ? `${ps.length} open. Best is ${best.symbol} at ${pct(best.gain_pct, 0)}, in at ${mcUsd(best.entry_mcap_sol)} MC.` : "Nothing open. Ready when the scanner is.",
+    risk: s.risk ? `Today ${signed(+s.day_pnl || 0)}${U()}, dial on ${s.risk.name}${s.defense && s.defense.on ? ", defense mode on" : ""}.` : "",
+    feed: f.host ? `${f.host}, ${f.lag_s != null ? fx(f.lag_s, 1) + " s" : "?"} behind${f.backup && f.backup.on ? ", on the Helius backup" : ""}.` : "",
+    recorder: w && !w.pending ? `Day ${fx(w.days, 1)} of ${w.period_days}: ${w.qualified} wallets qualify.` : "Recording every trade. The study fills in over two weeks.",
+    quant: sm.closed ? `${sm.closed} closed this run, ${Math.round((sm.win_rate || 0) * 100)}% won, PF ${fx(sm.profit_factor, 2)}.` : "",
+  }[id];
+  return ans || dataLine(id)[0] || "All good here.";
+}
+function leaderRound() {
+  const c = IO.bots.operator; if (!c || !canRoam(c) || (c.room || "floor") !== "floor") return false;
+  const team = Object.values(IO.bots).filter(b => b !== c && (b.room || "floor") === "floor" && !b.busy && !b.path.length && b.mood !== "sleep");
+  if (!team.length) return false;
+  const t = pick(team), dest = [Math.min(GX - .6, Math.max(.6, t.x + (t.x > GX / 2 ? -1 : 1))), t.y + .3];
+  c.busy = "round"; setProp(c, "📋");
+  goTo(c, dest, () => {
+    if (c.busy !== "round") return;
+    c.face = t.x > c.x ? 1 : -1; drawBot(c);
+    hsay("operator", esc(leaderAsk(t.id)), {force: true});
+    setTimeout(() => { if (c.busy === "round") hsay(t.id, esc(leaderAnswer(t.id)), {force: true}); }, 2400);
+    setTimeout(() => { if (c.busy === "round") goHome(c); }, 7000);
+  });
+  return true;
 }
 function runTask(b, room, task) {
   if (task.pair) return pingPong(b);
@@ -3866,6 +3981,8 @@ function pingPong(a) {
   const others = Object.values(IO.bots).filter(o => o !== a && canRoam(o) && (!DESK_AT[o.id] || o.mood === "idle"));
   if (!others.length || !freeStop("lounge", "pongL") || !freeStop("lounge", "pongR")) return false;
   const b = pick(others), len = 15000 + Math.random() * 9000;
+  if (IO.bots.operator && a.id !== "operator" && b.id !== "operator" && Date.now() - LEAD.said > 20000) {
+    LEAD.said = Date.now(); hsay("operator", esc(`${botLook(a.id).name}, ${botLook(b.id).name}: ping-pong, best of five. Then back to it.`), {force: true}); }
   let here = 0;
   const done = () => { IO.ppOn = false; ppBall(); for (const p of [a, b]) if (p.busy === "task" && p.task === "playing ping-pong") { p.spot = null; p.task = null; goHome(p); } };
   for (const [p, k, face] of [[a, "pongL", 1], [b, "pongR", -1]]) {
@@ -3894,7 +4011,7 @@ function ppBall() {                                              // the ball, wh
   ents.appendChild(g); sortDepth();
 }
 function labLine(b, k) {
-  const w = S.wallets, e = S.analytics && S.analytics.edge, late = e && (e.strategies || []).find(s => s.source === "late");
+  const w = S.wallets, e = S.analytics && S.analytics.edge_check, late = e && (e.strategies || []).find(s => s.source === "late");
   const lines = [
     k === "wallets" && w && !w.pending ? `Wallet study: day ${fx(w.days, 1)} of ${w.period_days}, ${w.qualified} wallets qualify, about ${(w.wallets || []).filter(x => !x.cluster).length + (w.clusters || []).length} real traders.` : "",
     k === "edge" && late && late.n ? `Graduation plays: ${pct(late.ret_pct, 1)} per SOL over ${late.n} trades. ${late.level === "promising" ? "Promising, not proven." : ""}` : "",
@@ -3912,7 +4029,7 @@ function renderHouseBoards() {
       ${rows.map((r, i) => { const bh = r[1] / top * 34, bw = (w - 12) / 30; return `<rect x="${(6 + i * bw).toFixed(1)}" y="${(h - 4 - bh).toFixed(1)}" width="${Math.max(bw - 1.5, 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#3e8bd8"/>${r[5] ? `<circle cx="${(6 + i * bw + bw / 2).toFixed(1)}" cy="${(h - 8 - bh).toFixed(1)}" r="2" fill="#f5b83c"/>` : ""}`; }).join("")}`);
   } else if (IO.room === "lab") {
     if (Date.now() - houseDataAt > 60000) { houseDataAt = Date.now(); loadWallets(); if (!S.analytics) fetch("/api/analytics", {cache: "no-store"}).then(r => r.json()).then(a => { S.analytics = a; }).catch(() => {}); }
-    const w = S.wallets, e = S.analytics && S.analytics.edge, W = 5.4 * UNIT;
+    const w = S.wallets, e = S.analytics && S.analytics.edge_check, W = 5.4 * UNIT;
     const b1 = $("iso-wb1"), b2 = $("iso-wb2"); if (!b1 || !b2) return;
     const groups = w && !w.pending ? (w.clusters || []).length : 0, indep = w && !w.pending ? (w.wallets || []).filter(x => !x.cluster).length + groups : 0;
     setHTML(b1, `<text x="8" y="14" class="pb-t">WALLET STUDY</text>${w && !w.pending ? `
@@ -3922,13 +4039,17 @@ function renderHouseBoards() {
       <text x="8" y="70" class="pb-s">freeze ${new Date(w.freeze_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})} · verdict ~${new Date(w.verdict_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})}</text>`
       : `<text x="8" y="34" class="pb-s">loading the recorder's data…</text>`}`);
     const strat = e ? (e.strategies || []).filter(s => s.n && s.source !== "manual").slice(0, 3) : [];
+    const LB = (snap || {}).lab || {}, lr = LB.running, ll = LB.last;
+    const labTop = lr ? `<text x="8" y="14" class="pb-t">LAB: TESTING</text><text x="8" y="28" class="pb-s">${esc(labName(lr.key).slice(0, 26))}</text><text x="8" y="40" class="pb-s">${lr.now} → ${lr.value} · last 24 h</text>`
+      : ll ? `<text x="8" y="14" class="pb-t">LAB: LAST RESULT</text><text x="8" y="28" class="pb-s">${esc(labName(ll.key).slice(0, 26))} ${ll.now} → ${ll.value}</text><text x="8" y="40" class="pb-s">${esc(ll.status === "failed" ? "run failed" : ll.verdict || "")} · ${LB.tries || 0} tests so far</text>` : "";
+    if (labTop) { setHTML(b2, labTop + `<text x="8" y="58" class="pb-t">EDGE</text>${strat.slice(0, 1).map(s => `<text x="8" y="70" class="pb-s ${cls(s.ret_pct)}">${esc(s.label.slice(0, 14))} ${pct(s.ret_pct, 1)} per SOL</text>`).join("")}`); return; }
     setHTML(b2, `<text x="8" y="14" class="pb-t">EDGE CHECK</text>${strat.length ? strat.map((s, i) => `
       <text x="8" y="${30 + i * 22}" class="pb-s">${esc(s.label.slice(0, 18))} · ${s.n} trades</text>
       <text x="8" y="${40 + i * 22}" class="pb-s ${cls(s.ret_pct)}">${pct(s.ret_pct, 1)} per SOL · ${esc(s.level)}</text>`).join("") : `<text x="8" y="34" class="pb-s">no strategy results yet</text>`}`);
   }
 }
 
-function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat = []; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
+function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat.forEach(m => m.el.remove()); IO.chat = []; if ($("hchat")) $("hchat").innerHTML = ""; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
 
 // ---------------------------------------------------------------- arrange: every page is a 12-column board you can rearrange
 // Saved per page in the bot's UI store: {board: true, order: [pid], span: {pid: 1-12}, height: {pid: s|m|l}, hidden: [pid]}.
@@ -4598,7 +4719,9 @@ const TOOL = {get_status: ["📊", "Checked status", "Checking status"], get_pos
   pause_entries: ["⏸", "Paused entries", "Pausing entries"], resume_entries: ["▶️", "Resumed entries", "Resuming entries"],
   sell_position: ["💸", "Sold", "Selling"], buy_token: ["🛒", "Bought", "Buying"], watch_token: ["👀", "Watching token", "Adding to watch"],
   add_paper_funds: ["💰", "Added paper SOL", "Adding paper SOL"], add_note: ["📝", "Wrote a note", "Writing a note"],
-  set_risk_level: ["🎚", "Turned the risk dial", "Turning the risk dial"]};
+  set_risk_level: ["🎚", "Turned the risk dial", "Turning the risk dial"], set_position_exits: ["🛡", "Set exits", "Setting exits"],
+  place_order: ["📌", "Placed an order", "Placing an order"], cancel_order: ["✕", "Cancelled an order", "Cancelling an order"],
+  console_help: ["📖", "Read the console manual", "Reading the manual"], ui_action: ["🖥", "Changed the screen", "Changing the screen"]};
 const QUICK = [["Desk check", "Do a desk check: feed, P&L, positions, radar and analytics. Act only if something clearly needs it, then sum up in a few lines."],
   ["How are we doing?", "How are we doing today? Short answer with the key numbers."], ["Anything to sell?", "Look at the open positions. Anything worth selling now? Why?"],
   ["Best on radar", "What are the 3 most interesting tokens on the radar right now, and why?"], ["Explain last trade", "Explain the most recent closed trade: why it was entered, how it exited, and what we can learn."],
@@ -4617,6 +4740,11 @@ function actionText(name, a) {
     case "sell_position": return `Sell <b>${Math.round((a.fraction ?? 1) * 100)}%</b> of ${tokenName(a.mint)}`;
     case "buy_token": return `Buy <b>$${esc(a.usd)}</b> of ${tokenName(a.mint)}`;
     case "watch_token": return `Start tracking ${tokenName(a.mint)}`;
+    case "set_position_exits": return `Exits on ${tokenName(a.mint)}: ${[a.stop_loss_pct != null ? `stop <b>-${esc(a.stop_loss_pct)}%</b>` : "",
+      a.take_profit_pct != null ? `take profit <b>+${esc(a.take_profit_pct)}%</b>${a.take_profit_fraction != null ? ` (sells ${Math.round(a.take_profit_fraction * 100)}%)` : ""}` : "",
+      a.trail_pct != null ? `trail <b>${esc(a.trail_pct)}%</b> off the peak` : ""].filter(Boolean).join(", ")}`;
+    case "place_order": return `${a.side === "alert" ? "Alert" : a.side === "sell" ? `Limit sell <b>${Math.round((a.fraction ?? 1) * 100)}%</b>` : `Limit buy <b>${esc(a.sol)} SOL</b>`} of ${tokenName(a.mint)} when MC is <b>${(a.when || (a.side === "buy" ? "below" : "above"))} $${fmtUsd(+a.mcap_usd)}</b>`;
+    case "cancel_order": return `Cancel order <b>${esc(a.order_id)}</b>`;
     case "add_paper_funds": return `Add <b>${esc(a.sol)} paper SOL</b>${a.keep_after_restart ? " and keep it as the starting balance" : " (until the next restart)"}`;
     case "add_note": return `Journal note: “${esc(a.text)}”`;
     case "set_risk_level": { const r = snap && snap.risk, l = r && r.levels.find(x => x.level === +a.level);
@@ -4762,6 +4890,34 @@ function onChat(m) {
     buddyRender();
   } else if (m.ev === "status") { const {type, ev, ...rest} = m; Object.assign(C.st, rest); if (C.loaded) renderChatHead(); buddyRender(); }
   else if (m.ev === "cleared") { C.msgs = []; C.byId = {}; if (C.loaded) renderChat(true); }
+  if (m.ev === "msg" && S.tab !== "chat" && (m.msg.parts || []).some(p => p.approval && p.approval.status === "pending")) cdOpen(true);   // Claude needs an OK
+  cdSoon();
+}
+// ---- the chat bar on every tab: talk to Claude (the lead) without leaving the page; approvals show up here too
+const CD = {open: false, raf: 0};
+function cdAvatar() {
+  const img = `<img src="${headURL(botLook("operator").look)}" alt="">`;
+  for (const id of ["cd-av", "cd-av2"]) { const e = $(id); if (e && e.dataset.h !== img) { e.dataset.h = img; e.innerHTML = img; } }
+}
+function cdRender() {
+  const dock = $("cdock"); if (!dock) return;
+  dock.hidden = S.tab === "chat";                              // (the Chat tab is the full version)
+  cdAvatar();
+  if (!CD.open || dock.hidden) return;
+  const box = $("cd-msgs"), msgs = C.msgs.slice(-6);
+  box.innerHTML = msgs.length ? msgs.map(m => `<div>${msgHTML(m)}</div>`).join("")
+    : `<div class="empty">Ask Claude anything: how to do something, what the team is up to, or tell him to set a stop, place an order or buy. Every action waits for your Approve.</div>`;
+  box.scrollTop = box.scrollHeight;
+}
+function cdSoon() { if (!CD.raf) CD.raf = requestAnimationFrame(() => { CD.raf = 0; cdRender(); }); }
+async function cdOpen(on) {
+  CD.open = on; $("cd-panel").hidden = !on;
+  if (on && !C.loaded) { try { await loadChat(); } catch { /* the chat tab shows why */ } }
+  cdRender();
+}
+function cdSend() {
+  const v = $("cd-in").value.trim(); if (!v) return;
+  cdOpen(true); chatSend(v); $("cd-in").value = "";
 }
 function chatSend(text) {
   text = String(text ?? $("ch-in").value).trim();
@@ -5325,7 +5481,7 @@ document.addEventListener("pointerdown", e => { if (!$("ctx").hidden && !e.targe
 const EDGE_LV = {good: ["ok", "looks real"], promising: ["ok", "promising"], fragile: ["warn", "fragile"], unclear: ["", "can't tell yet"],
                  bad: ["bad", "losing"], early: ["", "too early"], none: ["", "no trades"]};
 function renderEdge() {
-  const e = S.analytics && S.analytics.edge; if (!e || !$("an-edge")) return;
+  const e = S.analytics && S.analytics.edge_check; if (!e || !$("an-edge")) return;
   if (!e.strategies.length) { setHTML($("an-edge"), `<div class="empty">No closed trades in the last 14 days yet.</div>`); return; }
   const rows = e.strategies.map(s => {
     const [k, l] = EDGE_LV[s.level] || ["", s.level];
@@ -5370,6 +5526,57 @@ function renderWallets() {
     <p class="note">Picked with hindsight from coins that already ran, which always looks good: it proves nothing yet. The test is how listed wallets do after the freeze, against random coins and random wallets (docs/WALLETS.md).</p>`);
 }
 // ---- desk huddles: the team's meetings, written by the desk's model from the bot's real state, played out at the AI table
+// ---- the team's lab: experiments replayed on the last 3 days of recordings
+const LABV = {at: 0, data: null, seenRun: null, seenDone: null};
+const LAB_NAMES = {"late.min_net_flow_sol": "Net inflow needed (SOL / 30 s)", "late.min_buyers": "Unique buyers needed", "late.min_buy_sell_ratio": "Buys/sells ratio",
+  "late.min_near_high": "Within this much of its high", "late.min_curve_pct": "Window opens at curve %", "late.max_curve_pct": "Window closes at curve %",
+  "late.max_age_s": "Max coin age (s)", "late.flow_window_s": "Flow window (s)", "late.stop_loss_pct": "Stop loss %", "late.stall_s": "Exit after no new high (s)",
+  "late.max_hold_s": "Max hold (s)", "late.exit_curve_pct": "Exit at curve %"};
+const labName = k => LAB_NAMES[k] || k;
+const labTest = x => `${labName(x.key)}: ${x.now} → <b>${x.value}</b>`;
+async function loadLab() {
+  if (Date.now() - LABV.at < 8000) return; LABV.at = Date.now();
+  try { const r = await fetch("/api/lab", {cache: "no-store"}); if (r.ok) { LABV.data = await r.json(); renderLab(); } } catch { /* next time */ }
+}
+function renderLab() {
+  const d = LABV.data, box = $("lab-body"); if (!d || !box || box.contains(document.activeElement)) return;
+  const vtag = v => `<span class="tag ${{better: "ok", worse: "bad", "no clear difference": "late", "no effect": "", "not enough data": ""}[v] || ""}">${esc(v || "–")}</span>`;
+  const who = b => ({team: "the team", you: "you", quant: botLook("quant").name})[b] || (LOOK[b] ? botLook(b).name : b);
+  const run = d.running ? `<div class="lab-run"><span class="typing"><i></i><i></i><i></i></span> ${esc(who(d.running.by))} is testing ${labTest(d.running)} · started ${ago(d.running.started)} ago</div>` : "";
+  const q = (d.queued || []).map(x => `<div class="lab-q">${labTest(x)} <span class="note">· ${esc(who(x.by))}${x.why ? ": " + esc(x.why.slice(0, 70)) : ""}</span> <button class="small ghost" data-labdrop="${esc(x.id)}" title="Take it off the queue">✕</button></div>`).join("");
+  const rows = (d.done || []).slice(0, 10).map(x => { const r = x.result || {}, n = r.now || {}, c = r.change || {};
+    return `<tr><td>${labTest(x)}<div class="note">${esc(who(x.by))}${x.why ? " · " + esc(x.why.slice(0, 60)) : ""}</div></td>
+      <td class="r num">${n.pnl_sol != null ? signed(n.pnl_sol) : "–"}<div class="note">${n.trades ?? "–"} trades</div></td>
+      <td class="r num">${c.pnl_sol != null ? signed(c.pnl_sol) : "–"}<div class="note">${c.trades ?? "–"} trades</div></td>
+      <td class="r num">${r.blocks ? `${r.better_blocks} / ${r.blocks}` : "–"}</td><td>${x.status === "failed" ? `<span class="tag bad" title="${esc(r.error || "")}">failed</span>` : vtag(r.verdict)}</td></tr>`; }).join("");
+  const opts = Object.keys(d.testable || {}).map(k => `<option value="${esc(k)}">${esc(labName(k))} (now ${d.baseline[k] ?? "?"})</option>`).join("");
+  setHTML(box, `${run}${q ? `<div class="lab-qs">${q}</div>` : ""}
+    ${rows ? `<div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">Now</th><th class="r">With the change</th><th class="r" title="6-hour blocks where the change made more">Blocks better</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty">No results yet. The team runs a routine test every 6 hours, and the meetings can propose their own.</div>`}
+    <div class="lab-add"><span class="note">Test a change:</span><select id="lab-key">${opts}</select><input id="lab-val" type="number" step="any" placeholder="new value"><button class="small primary" data-labadd="1">Test it</button></div>
+    <p class="note">${d.tries || 0} tests run so far. Each replays the last 24 hours twice, with the current settings and with the one change. "Better" there is promising, not proven: the best of many tries always looks better than it is. Nothing changes the bot until you Apply it.</p>`);
+}
+function labRoom() {                                          // the room plays out the lab's work
+  const L = (snap || {}).lab; if (!L || !IO.built) return;
+  const pickBot = by => IO.bots[by] ? by : by === "you" ? "operator" : "quant";
+  if (L.running && L.running.id !== LABV.seenRun) {
+    LABV.seenRun = L.running.id;
+    const id = pickBot(L.running.by), b = IO.bots[id], label = `${labName(L.running.key).toLowerCase()} ${L.running.now} → ${L.running.value}`;
+    if (id !== "operator") hsay("operator", esc(`${botLook(id).name}, take this one to the lab: ${label}.`), {force: true});
+    if (b && !b.busy && !b.path.length && actOf(id).move !== "still")
+      runTask(b, "lab", {name: "testing " + label, steps: [["bench", 50, "⌨️", () => `Replaying the last day: ${label}.`],
+        ["rack", 8, "🛠", () => "Pulling the recordings."], ["bench2", 50, "⌨️", () => "Same coins, same costs, one change."]]});
+  }
+  if (L.last && L.last.id !== LABV.seenDone) {
+    const first = LABV.seenDone === null; LABV.seenDone = L.last.id;
+    if (!first && L.last.finished && Date.now() / 1000 - L.last.finished < 600) {
+      const id = pickBot(L.last.by);
+      hsay(id, esc(`Lab result, ${labName(L.last.key).toLowerCase()} ${L.last.now} → ${L.last.value}: ${L.last.status === "failed" ? "the run failed" : L.last.verdict}.`), {force: true, kind: L.last.verdict === "better" ? "act" : ""});
+      setTimeout(() => hsay("operator", esc(L.last.verdict === "better" ? "Promising. It goes on the agenda for the next huddle." : "Noted. We keep what we have."), {force: true}), 3000);
+    }
+    LABV.at = 0;
+  }
+}
 function renderHuddles(d) {
   const box = $("dh-body"); if (!box) return;
   const hs = d.huddles || [], h = hs[0], awake = d.desk && d.desk.enabled, every = d.huddle_minutes;
@@ -5398,12 +5605,13 @@ function renderHuddles(d) {
 }
 function playHuddle(h) {
   if (!IO.built || !IO.bots) return;
-  const [tx, ty] = TABLE_AT, stand = [[tx - .8, ty + .4], [tx - .8, ty + 1.4], [tx + 2.7, ty + .4], [tx + 2.7, ty + 1.4], [tx + .5, ty + 2.8], [tx + 1.5, ty + 2.8]];
-  const speakers = [...new Set(h.lines.map(l => l.who))].filter(id => IO.bots[id]);
+  const [tx, ty] = TABLE_AT, stand = [[tx - .8, ty + .4], [tx - .8, ty + 1.4], [tx + .5, ty + 2.8], [tx + 1.5, ty + 2.8], [tx - .8, ty + 2.4], [tx + 2.6, ty + 2.6]];   // (the right end is Claude's)
+  const speakers = [...new Set(["operator", ...h.lines.map(l => l.who)])].filter(id => IO.bots[id]);   // Claude always chairs
   let k = 0;
+  if (h.lines[0] && h.lines[0].who !== "operator") setTimeout(() => hsay("operator", esc("Team, gather round: quick huddle."), {force: true}), 2500);
   for (const id of speakers) {
-    const b = IO.bots[id]; b.busy = "huddle"; b.spot = null; setProp(b, "");
-    const dest = SEAT[id] || stand[k++ % stand.length];
+    const b = IO.bots[id]; b.busy = "huddle"; b.spot = null; setProp(b, id === "operator" ? "📋" : "");
+    const dest = id === "operator" ? [tx + 2.35, ty + 1] : SEAT[id] || stand[k++ % stand.length];        // the head of the table
     goTo(b, dest, () => { b.face = dest[0] < tx + 1 ? 1 : -1; drawBot(b); }, 3);
   }
   h.lines.forEach((l, i) => setTimeout(() => { const b = IO.bots[l.who]; if (b) hsay(l.who, esc(l.say), {force: true}); }, 4500 + i * 3600));
@@ -5443,6 +5651,7 @@ function setTab(t) {
   lcSync();
   if (t === "charts" && snap) renderCharts(snap);
   if (t === "charts") loadViews();
+  cdRender();
   if (t === "chat") { $$(".tabs button").find(b => b.dataset.tab === "chat")?.classList.remove("dotted");
     if (!C.loaded) loadChat(); else renderChat(true);
     if (snap) renderChatSide(snap); setTimeout(() => $("ch-in").focus(), 30); }
@@ -5798,13 +6007,20 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-hqref],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.hqref) { loadHQ(); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
+  if (d.lvchain) { const [key, v] = d.lvchain.split(":");
+    if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
+    LV.keys = {}; renderViews(); return; }
+  if (d.labdrop) { send({action: "lab_drop", id: d.labdrop}); LABV.at = 0; setTimeout(loadLab, 600); return; }
+  if (d.labadd) { const v = $("lab-val").value; if (v === "") { $("lab-val").focus(); return; }
+    send({action: "lab_add", key: $("lab-key").value, value: +v}); $("lab-val").value = ""; t.blur(); LABV.at = 0; setTimeout(loadLab, 600); return; }
   if (d.anmc) { S.anMc = d.anmc; if (S.analytics) renderAnalytics(S.analytics); return; }
   if (d.lcpin) { lcPin(d.lcpin); if (S.drawer === d.lcpin) t.textContent = `📈 ${lcPinned(d.lcpin) ? "Unpin" : "Pin"}`; return; }
   if (d.kolref) { t.disabled = true; send({action: "kols_refresh"}); setTimeout(() => t.disabled = false, 8000); return; }
@@ -5882,6 +6098,9 @@ document.addEventListener("click", e => {
   if (d.copyaddr) { e.stopPropagation(); navigator.clipboard.writeText(d.copyaddr).then(() => toast("Address copied", "ok")); return; }
   if (d.lv) { setRisk(+d.lv); return; }
   if (d.advapply) { const v = $("adv-" + d.advapply).value; send({action: "set", key: d.advapply, value: v}); return; }
+  if (d.cdsend) { cdSend(); return; }
+  if (d.cdclose) { cdOpen(false); return; }
+  if (d.cdfull) { cdOpen(false); setTab("chat"); return; }
   if (d.decide) { send({action: "chat_decide", aid: d.decide, allow: d.allow === "1"}); t.closest(".btns")?.querySelectorAll("button").forEach(b => b.disabled = true); return; }
   if (d.ask !== undefined) { if (S.tab !== "chat") setTab("chat"); if (d.ask) chatSend(d.ask); else $("ch-in").focus(); return; }
   if (d.sell) { e.stopPropagation(); if (confirm("Sell this whole position now?")) send({action: "sell", mint: d.sell}); return; }
@@ -5912,6 +6131,8 @@ addEventListener("keydown", e => {
     if (e.key === "Enter" && e.target.id === "xf-in") addX();
     if (e.key === "Enter" && (e.target.id === "mem-note" || (e.target.id === "mem-in" && !e.shiftKey))) { e.preventDefault(); memAdd(); }
     if (e.key === "Enter" && e.target.id === "tr-amt") $("tr-buy").click();
+    if (e.target.id === "cd-in" && e.key === "Enter") { e.preventDefault(); cdSend(); }
+    if (e.target.id === "cd-in" && e.key === "Escape") cdOpen(false);
   if (e.key === "Enter" && (e.target.id === "cork-in" || e.target.id === "cork-note")) { e.preventDefault(); corkAdd(); }
     if (e.key === "Enter" && (e.target.id === "pf-addr" || e.target.id === "pf-label")) $("pf-add").click();
     return; }

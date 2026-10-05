@@ -83,7 +83,8 @@ async def _run(args, params) -> None:
     else:
         feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls, f.commitment, f.max_gap_pct, f.stall_s, f.max_lag_s,
                                memory_path=DATA / "feed_endpoints.json", backup_ws_url=f.get("backup_ws_url", ""),
-                               backup_mb_per_day=float(f.get("backup_mb_per_day", 1200)))
+                               backup_mb_per_day=float(f.get("backup_mb_per_day", 1200)),
+                               backup_bank_mb=float(f.get("backup_bank_mb", 4800)))
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"
@@ -565,6 +566,8 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    lr = sub.add_parser("lab-run", help="run one of the team's lab experiments (the bot starts these itself)")
+    lr.add_argument("id")
     sub.add_parser("mcap-backfill", help="market caps in/out for trades closed before they were recorded (from the feed files)")
     sub.add_parser("kols", help="fetch kolscan.io's KOL wallet list once (data/kols.json): the live charts name them")
     ed = sub.add_parser("edge", help="is each strategy's edge real? margin of error, big-winner dependence, day by day")
@@ -584,6 +587,19 @@ def main() -> None:
     args = ap.parse_args()
     if args.cmd == "calls":                        # reads the ledger only: no config needed
         _calls(args)
+        return
+    if args.cmd == "lab-run":                      # a separate, low-priority process: the result goes to a file
+        import json
+
+        from .lab import run as lab_run
+
+        out = DATA / "lab" / f"{args.id}.result.json"
+        try:
+            res = lab_run(args.id, DATA)
+        except Exception as e:                       # the bot reads the error and marks the experiment failed
+            res = {"error": f"{type(e).__name__}: {e}"}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(res))
         return
     if args.cmd == "mcap-backfill":
         from .mcapfill import run as fill

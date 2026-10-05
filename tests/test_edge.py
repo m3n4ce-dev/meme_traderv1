@@ -68,7 +68,8 @@ def test_the_analytics_feed_carries_the_edge_check(tmp_path):
         async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
             return await (await c.get("/api/analytics")).json()
     d = asyncio.run(go())
-    assert d["edge"]["strategies"][0]["source"] == "late" and "Edge check" in d["edge"]["text"]
+    assert d["edge_check"]["strategies"][0]["source"] == "late" and "Edge check" in d["edge_check"]["text"]
+    assert "edge" not in d or "p_positive" in (d["edge"] or {}) or d["edge"] is None    # analytics' own edge confidence stays
 
 
 def test_endpoint_tests_never_echo_the_url_and_helius_fills_the_rpc(tmp_path, monkeypatch):
