@@ -2655,8 +2655,9 @@ class Engine:
 
         pin, pout = Desk(self.p.desk, client=object()).prices()   # (a client stand-in: just for the price list)
         calls = int(getattr(self.desk, "calls", 0) or 0)
-        tin = getattr(self.desk, "input_tokens", 0) / calls if calls else 1600     # measured once there are votes
-        tout = getattr(self.desk, "output_tokens", 0) / calls if calls else 350
+        # measured once there are votes; before that, what a vote used here on 2026-10-04 (~2¢ a review on Opus)
+        tin = getattr(self.desk, "input_tokens", 0) / calls if calls else 700
+        tout = getattr(self.desk, "output_tokens", 0) / calls if calls else 150
         per_vote = tin / 1e6 * pin + tout / 1e6 * pout
         return {"provider": provider_of(self.p.desk), "model": model_of(self.p.desk), "base_url": self.p.desk.get("base_url") or "",
                 "ready": provider_ready(self.p.desk), "per_vote_usd": round(per_vote, 5),
