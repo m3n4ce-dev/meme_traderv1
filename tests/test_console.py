@@ -101,3 +101,10 @@ def test_ui_actions_reach_open_dashboards_and_the_corkboard_hides_notes(tmp_path
     assert ack["ok"] and e.memory.items_[0]["off_board"] is True             # hidden, still remembered
     assert e.memory.set_board("n1", True) and "off_board" not in e.memory.items_[0]
     assert not e.memory.set_board("gone", False)
+
+
+def test_howto_questions_carry_the_manual_and_others_dont():
+    from meme_trader.ui.chat import with_manual
+    p = with_manual("How do I hide a note on the bulletin board?", "How do I hide a note on the bulletin board?")
+    assert "[Console manual" in p and "Hide from board" in p
+    assert with_manual("what's my P&L today", "what's my P&L today") == "what's my P&L today"

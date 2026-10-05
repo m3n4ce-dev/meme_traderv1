@@ -71,7 +71,22 @@ tab) through its `console_help` tool, and can do the screen actions marked **(ch
   - The Charts tab's Sell buttons.
   - In the terminal: `sell <coin|all> [pct]`.
 
+## Market cap: where you got in
+
+- **Where it shows:**
+  - every position card (`MC $7.3K → $21K`: when you got in, and now);
+  - the trade panel ("in at $X MC");
+  - each Charts card;
+  - Live → Closed trades (`MC in → out`).
+- **The live charts' scale** is market cap in dollars, with "in at $X" on the entry line.
+- **Analytics → By entry market cap:** results by the market cap trades got in at, for All, You or Bots.
+- **Older trades** were filled in from the recorded market data.
+
 ## Hand a position to the bots, or go away
+
+- **In Live → Manual trade:**
+  - **🤖 Give to bots** hands over the coin you hold; **✋ Take back** undoes it.
+  - On a coin you don't hold, **🤖 Buy & give to bots** buys the amount picked, and the bots take over once it fills.
 
 - **🤖 Hand to the bots** (on a position card): the bots ride it for a runner. Half comes out at 2x, the rest trails 30% off its peak once up 30%, and the stop is 40% down.
 - **✋ Take back:** your own exits apply again.
