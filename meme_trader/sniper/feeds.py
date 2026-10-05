@@ -59,6 +59,7 @@ class PumpPortalFeed(Feed):
         self.urls = [f"{self.URL}?api-key={key}" if key else self.URL] + list(fallback_urls or [])
         self.url_idx = 0
         self.ws = None
+        self.last_launch = 0.0                          # when a new coin last came in (on any server)
         self.watched: set[str] = set()
         self.accounts: set[str] = set()
 
@@ -92,6 +93,7 @@ class PumpPortalFeed(Feed):
 
         backoff = 1
         while True:
+            why = "connection closed"
             try:
                 url = self.urls[self.url_idx]
                 async with aiohttp.ClientSession() as session, session.ws_connect(url, heartbeat=20) as ws:
@@ -106,6 +108,7 @@ class PumpPortalFeed(Feed):
                     connected = time.time()
                     async for msg in ws:
                         if self.degraded and time.time() - connected > 300:
+                            why = "trying the primary again"
                             break                       # on a backup: go try the primary again
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             continue
@@ -114,11 +117,15 @@ class PumpPortalFeed(Feed):
                         except (ValueError, TypeError, KeyError, AttributeError):
                             continue                    # one malformed message must not stop the feed
                         if e:
+                            if isinstance(e, Launch):
+                                self.last_launch = e.ts
                             yield e
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as err:
-                print(f"[feed] {self.host} disconnected: {err!r}; retrying in {backoff}s")
+                why = f"disconnected: {err!r}"
             self.ws = None
+            old = self.host
             self.url_idx = (self.url_idx + 1) % len(self.urls)
+            print(f"[feed] launches {old}: {why[:160]}; switching to {self.host} in {backoff}s")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
@@ -394,7 +401,9 @@ class SolanaTradeFeed(Feed):
 
     @property
     def host(self) -> str:
-        return self.launches.host if self.launches.degraded else self._hostname(self.ws_url)
+        return self._hostname(self.ws_url)
+
+    LAUNCH_QUIET_S = 60     # new coins arrive ~30 a minute: a minute without one means the launch feed is broken
 
     @property
     def gap_pct(self) -> float:
@@ -406,8 +415,11 @@ class SolanaTradeFeed(Feed):
 
     @property
     def degraded_reason(self) -> str:
-        if self.launches.degraded:
-            return f"launch feed on backup {self.launches.host}"
+        # The launch feed's backup (pumpdev.io) carries new coins like PumpPortal does (measured 2026-10-05: 27-47 a
+        # minute, against 30 on average); trades come from the RPC here. So only a backup that's gone quiet pauses entries.
+        quiet = time.time() - self.launches.last_launch
+        if self.launches.degraded and quiet > self.LAUNCH_QUIET_S:
+            return f"launch feed on backup {self.launches.host}: no new coins for {quiet:.0f}s"
         if not self.trades_up:
             return f"no trade data from {self.host}"
         if not self.quality.measured:                   # ~20-30 s after (re)connecting
@@ -574,8 +586,12 @@ class SolanaTradeFeed(Feed):
             self.backup_bank_ts = now
         return self.backup_bank
 
+    # Seen 2026-10-05 10:17-10:37: with the allowance spent, the refill (~0.8 MB a minute) made the backup look usable
+    # every 30 s; the bot moved over, spent it in seconds and moved back: 33 switches an hour, each pausing entries.
+    BACKUP_MIN_MB = 100     # move onto the backup only with this much left (~10-15 minutes of the stream)
+
     def _backup_ok(self, now: float) -> bool:
-        return self.backup_idx is not None and self.ws_idx != self.backup_idx and self._backup_left_mb(now) > 0
+        return self.backup_idx is not None and self.ws_idx != self.backup_idx and self._backup_left_mb(now) >= self.BACKUP_MIN_MB
 
     def _free_order(self) -> list[int]:
         """The free endpoints in rotation order after the current one (the backup is never just 'next')."""
