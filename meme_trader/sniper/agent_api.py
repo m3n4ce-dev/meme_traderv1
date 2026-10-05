@@ -267,7 +267,7 @@ class AgentAPI:
         if mint in self.e.positions or mint in self.e.pending:
             raise AgentError("already holding it, or an order is in flight")
         if s.migrated or s.curve.progress * 100 >= self.e.p.late.exit_curve_pct:
-            raise AgentError("too close to (or past) graduation - the bot trades the bonding curve only")
+            raise AgentError("too close to (or past) graduation - the bots' strategies trade the bonding curve only")
         if s.dev_sold:
             raise AgentError("the creator has sold - refused")
         sol = round(usd / self.e.sol_price.usd, 5)

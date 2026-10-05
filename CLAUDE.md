@@ -30,10 +30,13 @@ and act only with a concrete reason.
    which is journaled and shown on the dashboard.
 4. Report what you saw, what you did, and why, in a few lines.
 
-Facts to keep in mind (paper results, 2026-10-03; see BUILD_LOG #12-#13):
-- Graduation plays (`late`) were the only strategy with positive results; the early sniper and $1
-  callouts lost and are off in the owner's config. The edge is small and concentrated in a few big wins.
+Facts to keep in mind (paper results, 2026-10-03 to 10-04; see BUILD_LOG #32 and the Analytics edge check):
+- Graduation plays (`late`) are the only strategy with positive results: +6.5% per SOL over 162 paper trades
+  ("promising, not proven": its best three trades made 92% of the profit, 1.5 days, settings changed 8 times).
+  The early sniper lost (-13.8%) and is off. The frozen `graduation-v1` test decides (~2026-10-17).
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
+- Manual trading is the owner's: never resize or block it. Positions the owner hands to the bots "ride"
+  (half out at 2x, a 30% trail, a stop 40% down). Lifting a kill-switch halt is the owner's call only.
 
 The bot enforces the limits, not you: you can't raise sizing, positions, loss limit or stop loss above
 the owner's configured values, re-enable a strategy the owner turned off, switch to live, save risk

@@ -660,3 +660,39 @@ def test_the_desk_can_think_with_cheaper_or_local_models(monkeypatch):
     assert e.set_desk_brain("anthropic", "claude-haiku-4-5") == ""
     b = e.desk_brain()
     assert b["model"] == "claude-haiku-4-5" and b["per_review_usd"] < 0.02 and b["ready"] == ""
+
+
+def test_thinking_models_get_room_and_prices_come_from_the_provider_list():
+    """Qwen3.5/3.8 on Hugging Face reply with 'reasoning' and, when it fills max_tokens, no 'content' at all."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    from meme_trader.sniper.desk import OpenAICompat, model_price
+
+    calls = []
+
+    async def chat(request):
+        body = await request.json()
+        calls.append(body["max_tokens"])
+        if len(calls) == 1:                               # thought until it ran out of room: no content key
+            return web.json_response({"choices": [{"finish_reason": "length", "message": {"role": "assistant", "reasoning": "hmm " * 50}}],
+                                      "usage": {"prompt_tokens": 10, "completion_tokens": 700}})
+        return web.json_response({"choices": [{"finish_reason": "stop", "message": {"content": '\n{"vote": "pass", "conviction": 60}', "reasoning": "ok"}}],
+                                  "usage": {"prompt_tokens": 10, "completion_tokens": 900}})
+
+    async def models(_):
+        return web.json_response({"data": [{"id": "Qwen/Big", "providers": [{"status": "live", "pricing": {"input": 2, "output": 6}},
+                                                                             {"status": "live", "pricing": {"input": 1.5, "output": 7}}]}]})
+
+    async def go():
+        app = web.Application()
+        app.add_routes([web.post("/v1/chat/completions", chat), web.get("/v1/models", models)])
+        async with TestServer(app) as srv:
+            base = str(srv.make_url("/v1"))
+            d, tin, tout = await OpenAICompat(base).chat_json("Qwen/Big:fastest", "s", "u", 700)
+            price = await model_price(base, "", "Qwen/Big:fastest")
+            missing = await model_price(base, "", "Qwen/Other")
+            return d, tin, tout, price, missing
+    d, tin, tout, price, missing = asyncio.run(go())
+    assert d["vote"] == "pass" and calls == [700, 2100] and (tin, tout) == (20, 1600)   # a retry with room, both counted
+    assert price == (2.0, 7.0) and missing is None                                       # the highest live price: never low
