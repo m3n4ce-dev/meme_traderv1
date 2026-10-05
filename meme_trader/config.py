@@ -235,6 +235,7 @@ def validate_sniper(sn: dict) -> None:
             raise ConfigError("sniper.chat.model must be one of: \"\", opus, sonnet, haiku")
     _num(sn, "feed.stall_s", 0, lo_open=True)
     _num(sn, "feed.max_lag_s", 0)
+    _num(sn, "feed.backup_mb_per_day", 0)
     _num(sn, "execution.paper_delay_s", 0, 60)
     if "risk" in sn:
         _num(sn, "risk.max_level", 1, 5)
