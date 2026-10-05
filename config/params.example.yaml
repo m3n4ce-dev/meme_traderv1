@@ -176,10 +176,9 @@ sniper:
     use_own_exits: true          # also apply our stop loss / initials / trailing stop
     pause_after_losses: 5        # auto-pause a leader after N copied losses in a row
 
-  manual:                        # your own trades from the dashboard: Buy / Ape / sell 25-50% / Initials / Exit
+  manual:                        # your own trades from the dashboard: Buy / add / sell 25-50% / Initials / Exit
     max_sol: 2.0                 # largest single manual buy
     presets_sol: [0.05, 0.1, 0.25, 0.5, 1.0]
-    ape_sol: 0.5                 # one-click Ape size
     stop_loss_pct: 0             # automatic stop for manual positions; 0 = off (you manage it)
     take_profit_pct: 0           # sell take_profit_frac at this gain; 0 = off
     take_profit_frac: 0.5        # share of the bag sold at that take profit

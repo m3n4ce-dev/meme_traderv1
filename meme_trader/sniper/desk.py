@@ -90,8 +90,8 @@ REPLY_SCHEMA = {
 }
 
 
-async def reply_note(client, p, persona: str, item: dict, live: dict | None = None) -> dict:
-    """One persona's reply to a memory item. {'reply', 'stance', tokens} or {'error'}; never raises."""
+async def reply_note(brain: "Desk", p, persona: str, item: dict, live: dict | None = None) -> dict:
+    """One persona's reply to a memory item, from the desk's model. {'reply', 'stance', tokens} or {'error'}."""
     saved = {k: item.get(k) for k in ("kind", "title", "url", "author", "mint", "summary") if item.get(k)}
     saved["owner_note"] = item.get("note") or ""
     saved["text"] = (item.get("text") or "")[:4000]
@@ -99,21 +99,15 @@ async def reply_note(client, p, persona: str, item: dict, live: dict | None = No
     payload = {"saved": saved, "discussion_so_far": talk}
     if live:
         payload["live_metrics"] = live
+    i0, o0 = brain.input_tokens, brain.output_tokens
     try:
-        r = await client.beta.messages.create(
-            model=p.model,
-            max_tokens=4000,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-            system=[{"type": "text", "text": PERSONAS[persona] + NOTE_RUBRIC, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": json.dumps(payload, default=str)}],
-            output_config={"effort": p.get("note_effort", "low"), "format": {"type": "json_schema", "schema": REPLY_SCHEMA}},
-        )
-        if r.stop_reason == "refusal":
-            return {"error": "refused", "input_tokens": r.usage.input_tokens, "output_tokens": r.usage.output_tokens}
-        d = json.loads(next(b.text for b in r.content if b.type == "text"))
-        return {"reply": str(d["reply"])[:1200], "stance": d["stance"], "input_tokens": r.usage.input_tokens,
-                "output_tokens": r.usage.output_tokens}
+        d, why = await brain.chat(PERSONAS[persona] + NOTE_RUBRIC, json.dumps(payload, default=str), REPLY_SCHEMA,
+                                  effort=p.get("note_effort", "low"), max_tokens=500)
+        used = {"input_tokens": brain.input_tokens - i0, "output_tokens": brain.output_tokens - o0}
+        if d is None:
+            return {"error": why, **used}
+        stance = str(d.get("stance", "neutral")).lower()
+        return {"reply": str(d.get("reply", ""))[:1200], "stance": stance if stance in ("bullish", "bearish", "neutral", "skip") else "neutral", **used}
     except Exception as e:                          # network, key, parse: shown in the thread, never raised
         return {"error": f"{type(e).__name__}: {e}"[:400]}
 
@@ -164,6 +158,86 @@ def aggregate(votes: list[Vote], weights: dict, quorum: float, veto_conviction: 
     return Verdict(approve, size, votes, f"{'APPROVED' if approve else 'PASSED'} {tally} | {why}")
 
 
+# ---- where the personas think: Claude, or any service that speaks the standard chat-completions API
+PROVIDERS = {
+    "anthropic": {"label": "Claude (Anthropic)", "key": "ANTHROPIC_API_KEY", "base_url": "", "model": "claude-opus-5-5",
+                  "note": "the best judgement; billed per call on your Anthropic account"},
+    "github": {"label": "GitHub Models", "key": "GITHUB_MODELS_TOKEN", "base_url": "https://models.github.ai/inference",
+               "model": "openai/gpt-4.1-mini", "note": "free with a GitHub token, rate-limited (fine for a few votes an hour)"},
+    "huggingface": {"label": "Hugging Face", "key": "HF_TOKEN", "base_url": "https://router.huggingface.co/v1",
+                    "model": "meta-llama/Llama-3.3-70B-Instruct", "note": "open models; small free monthly credit, then pay as you go"},
+    "openrouter": {"label": "OpenRouter", "key": "OPENROUTER_API_KEY", "base_url": "https://openrouter.ai/api/v1",
+                   "model": "meta-llama/llama-3.3-70b-instruct:free", "note": "many models; ones ending in :free cost nothing but are rate-limited"},
+    "local": {"label": "A model on this machine", "key": "", "base_url": "http://127.0.0.1:11434/v1", "model": "llama3.2",
+              "note": "Ollama, LM Studio or llama.cpp: free, but on this mini PC's CPU too slow for trade votes (12 s limit)"},
+}
+CLAUDE_MODELS = {"claude-opus-5-5": ("Claude Opus 5.5", 4.0, 20.0), "claude-sonnet-5-5": ("Claude Sonnet 5.5", 2.0, 10.0),
+                 "claude-haiku-4-5": ("Claude Haiku 4.5 (price is an estimate)", 1.0, 5.0)}      # name, $/MTok in, out
+
+
+def provider_of(p) -> str:
+    return str(p.get("provider") or "anthropic")
+
+
+def provider_ready(p) -> str:
+    """'' when the desk can reach its model, else what's missing (a key, a URL)."""
+    prov = provider_of(p)
+    spec = PROVIDERS.get(prov)
+    if spec is None:
+        return f"unknown model provider {prov!r}"
+    if spec["key"] and not os.environ.get(spec["key"]):
+        return f"add {spec['key']} in Controls → API keys" if prov != "anthropic" else \
+            "add an Anthropic API key first (Controls -> API keys)"
+    if prov != "anthropic" and not (p.get("base_url") or spec["base_url"]):
+        return "set the model server's URL"
+    return ""
+
+
+def model_of(p) -> str:
+    prov, m = provider_of(p), str(p.get("model") or "")
+    if prov == "anthropic":
+        return m if m.startswith("claude") else PROVIDERS["anthropic"]["model"]
+    return m if m and not m.startswith("claude") else PROVIDERS[prov]["model"]
+
+
+def parse_json(text: str) -> dict:
+    """The first JSON object in a reply (models without structured outputs sometimes wrap it in prose or ```)."""
+    t = (text or "").strip()
+    i, j = t.find("{"), t.rfind("}")
+    if i < 0 or j <= i:
+        raise ValueError("no JSON object in the reply")
+    return json.loads(t[i:j + 1])
+
+
+class OpenAICompat:
+    """POST {base}/chat/completions: GitHub Models, Hugging Face, OpenRouter, Ollama, LM Studio, llama.cpp..."""
+
+    def __init__(self, base_url: str, key: str = "", timeout_s: float = 60):
+        self.base, self.key, self.timeout = base_url.rstrip("/"), key, timeout_s
+
+    async def chat_json(self, model: str, system: str, user: str, max_tokens: int = 700) -> tuple[dict, int, int]:
+        import aiohttp
+
+        body = {"model": model, "temperature": 0.3, "max_tokens": max_tokens, "response_format": {"type": "json_object"},
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {self.key}"} if self.key else {})}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
+            for attempt in (0, 1):
+                async with s.post(self.base + "/chat/completions", json=body, headers=headers) as r:
+                    d = await r.json(content_type=None)
+                if r.status == 400 and attempt == 0 and "response_format" in json.dumps(d):
+                    body.pop("response_format")              # the server doesn't do JSON mode: ask in words instead
+                    continue
+                if r.status >= 300:
+                    err = d.get("error") if isinstance(d, dict) else d
+                    msg = err.get("message") if isinstance(err, dict) else err
+                    raise RuntimeError(f"HTTP {r.status}: {str(msg)[:200]}")
+                u = d.get("usage") or {}
+                return parse_json(d["choices"][0]["message"]["content"]), int(u.get("prompt_tokens") or 0), \
+                    int(u.get("completion_tokens") or 0)
+        raise RuntimeError("no answer")
+
+
 def client_kwargs() -> dict:
     """A user API key (sk-ant-usr-...) isn't tied to a workspace: every request must name one in the
     anthropic-workspace-id header (ANTHROPIC_WORKSPACE_ID). Workspace keys (sk-ant-api...) don't need it."""
@@ -195,37 +269,75 @@ def friendly_error(err: str) -> str:
 
 class Desk:
     def __init__(self, p, client=None):
-        """p: params.sniper.desk"""
+        """p: params.sniper.desk. provider: anthropic (default), github, huggingface, openrouter or local."""
         self.p = p
-        self.client = client
-        if client is None and p.enabled and os.environ.get("ANTHROPIC_API_KEY"):
-            import anthropic
+        self.provider = provider_of(p)
+        self.model = model_of(p)
+        self.client = client                     # Anthropic SDK client
+        self.compat: OpenAICompat | None = None  # any other provider
+        self.caps: dict | None = None            # Claude: does this model take effort / structured outputs?
+        if client is None and p.enabled and not provider_ready(p):
+            if self.provider == "anthropic":
+                import anthropic
 
-            self.client = anthropic.AsyncAnthropic(**client_kwargs())
-        self.enabled = bool(p.enabled and self.client)
+                self.client = anthropic.AsyncAnthropic(**client_kwargs())
+            else:
+                spec = PROVIDERS[self.provider]
+                self.compat = OpenAICompat(p.get("base_url") or spec["base_url"],
+                                           os.environ.get(spec["key"], "") if spec["key"] else "")
+        self.enabled = bool(p.enabled and (self.client or self.compat))
         self.calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
 
+    async def _claude_caps(self) -> dict:
+        if self.caps is None:
+            try:
+                c = (await self.client.models.retrieve(self.model)).capabilities
+                self.caps = {"effort": bool(c["effort"]["supported"]), "json": bool(c["structured_outputs"]["supported"])}
+            except Exception:                    # older SDK or no models endpoint: the request Opus has always taken
+                self.caps = {"effort": True, "json": True}
+        return self.caps
+
+    async def chat(self, system: str, user: str, schema: dict, effort: str | None = None,
+                   max_tokens: int = 700) -> tuple[dict | None, str]:
+        """One JSON answer from whichever model the desk uses: (parsed dict, '') or (None, 'refused')."""
+        if self.compat is not None:
+            want = "Reply with only a JSON object with these keys: " + ", ".join(schema["properties"]) + "."
+            d, i, o = await self.compat.chat_json(self.model, system + "\n\n" + want, user, max_tokens)
+            self.calls += 1
+            self.input_tokens += i
+            self.output_tokens += o
+            return d, ""
+        caps = await self._claude_caps()
+        oc: dict = {}
+        if caps["effort"] and effort:
+            oc["effort"] = effort
+        if caps["json"]:
+            oc["format"] = {"type": "json_schema", "schema": schema}
+        else:
+            system += "\n\nReply with only a JSON object with these keys: " + ", ".join(schema["properties"]) + "."
+        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"} if self.model.startswith("claude-opus") else {}
+        r = await self.client.beta.messages.create(
+            model=self.model, max_tokens=8000 if caps["effort"] else max_tokens,   # thinking needs room on the big models
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": user}], **({"output_config": oc} if oc else {}), **extra)
+        self.calls += 1
+        self.input_tokens += r.usage.input_tokens
+        self.output_tokens += r.usage.output_tokens
+        if r.stop_reason == "refusal":
+            return None, "refused"
+        return parse_json(next(b.text for b in r.content if b.type == "text")), ""
+
     async def _ask(self, persona: str, snapshot: dict) -> Vote:
         try:
-            r = await self.client.beta.messages.create(
-                model=self.p.model,
-                max_tokens=8000,                 # thinking is always on: room so a vote is never cut off
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-                system=[{"type": "text", "text": PERSONAS[persona] + RUBRIC, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": "Snapshot:\n" + json.dumps(snapshot, default=str)}],
-                output_config={"effort": self.p.effort, "format": {"type": "json_schema", "schema": VOTE_SCHEMA}},
-            )
-            self.calls += 1
-            self.input_tokens += r.usage.input_tokens
-            self.output_tokens += r.usage.output_tokens
-            if r.stop_reason == "refusal":
-                return Vote(persona, "pass", 0, error="refused")
-            text = next(b.text for b in r.content if b.type == "text")
-            d = json.loads(text)
-            return Vote(persona, d["vote"], max(0, min(100, int(d["conviction"]))), d["reasons"][:3], d["red_flags"][:5])
+            d, why = await self.chat(PERSONAS[persona] + RUBRIC, "Snapshot:\n" + json.dumps(snapshot, default=str),
+                                     VOTE_SCHEMA, effort=self.p.effort)
+            if d is None:
+                return Vote(persona, "pass", 0, error=why)
+            vote = str(d.get("vote", "pass")).lower()
+            return Vote(persona, vote if vote in ("buy", "pass") else "pass", max(0, min(100, int(d.get("conviction") or 0))),
+                        [str(x) for x in (d.get("reasons") or [])][:3], [str(x) for x in (d.get("red_flags") or [])][:5])
         except Exception as e:  # network, rate limit, parse - never block trading on the desk
             return Vote(persona, "pass", 0, error=f"{type(e).__name__}: {e}"[:400])
 
@@ -238,8 +350,16 @@ class Desk:
             votes = [Vote(x, "pass", 0, error="timeout") for x in personas]
         return aggregate(list(votes), dict(self.p.weights), self.p.quorum, self.p.veto_conviction)
 
+    def prices(self) -> tuple[float, float]:
+        """$ per million tokens in, out: Claude's list prices; other providers as set in the config (default 0)."""
+        if self.provider == "anthropic":
+            known = CLAUDE_MODELS.get(self.model)
+            return (known[1], known[2]) if known else (self.p.price_in_per_mtok, self.p.price_out_per_mtok)
+        return float(self.p.get("other_price_in_per_mtok") or 0), float(self.p.get("other_price_out_per_mtok") or 0)
+
     def cost_usd(self) -> float:
-        return self.input_tokens / 1e6 * self.p.price_in_per_mtok + self.output_tokens / 1e6 * self.p.price_out_per_mtok
+        pin, pout = self.prices()
+        return self.input_tokens / 1e6 * pin + self.output_tokens / 1e6 * pout
 
 
 def snapshot_for(s, now: float, kind: str, extra: dict | None = None) -> dict:

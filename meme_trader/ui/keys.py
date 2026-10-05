@@ -48,6 +48,12 @@ KEYS: dict[str, tuple[str, str, str, str]] = {
     "X_CLIENT_ID": ("X OAuth client ID", "Instead of the four keys: lets the Connect X button sign in any account. "
                     "Add http://127.0.0.1:8787/x/callback to the app's callback URLs.", "plain", "now"),
     "X_CLIENT_SECRET": ("X OAuth client secret", "Only for a confidential (Web App) client.", "secret", "now"),
+    "GITHUB_MODELS_TOKEN": ("GitHub Models token", "A cheaper brain for the AI desk: a GitHub token with the models:read "
+                            "permission (github.com/settings/tokens). Free, rate-limited.", "secret", "now"),
+    "HF_TOKEN": ("Hugging Face token", "A cheaper brain for the AI desk: huggingface.co/settings/tokens (open models).",
+                 "secret", "now"),
+    "OPENROUTER_API_KEY": ("OpenRouter API key", "A cheaper brain for the AI desk: openrouter.ai/keys (models ending in :free "
+                           "cost nothing).", "secret", "now"),
     "X_BEARER_TOKEN": ("X API bearer token", "Optional, paid: X's own API for the social-signal stream. The Desk's X "
                        "feed works without it.", "secret", "restart"),
     "JUPITER_API_KEY": ("Jupiter API key", "Quotes for the older DexScreener bot (python -m meme_trader).", "secret",

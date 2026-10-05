@@ -128,7 +128,7 @@ The engine makes split-second decisions on its own. An AI operator works one lev
 - It runs Claude Code headless on your Claude plan, so no API key is needed. A meter shows your 5-hour and weekly usage.
 - Claude gets only the bot's tools here: no shell, no files, no other connectors.
 
-**Manual trading:** paste a contract address and Buy, or 🦍 APE in one click; sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Paste any contract address to see its metrics first.
+**Manual trading:** paste a contract address and Buy (or add to a position you hold); sell 25% / 50%, take **Initials** or **Exit** on any position. Your positions exit only on the stop, take profit or trail you set. Paste any contract address to see its metrics first.
 
 **⚡ Pulse, limit orders, and a provable record:** Pulse shows new launches, the final stretch and fresh graduates with filters and one-click buys. Limit orders and alerts fire on market-cap levels. Every 📣 call goes into a hash-chained ledger, scored after costs at fixed horizons, and you can publish its head to X or Telegram so the record can't be rewritten ([EDGE_PROOF.md](docs/EDGE_PROOF.md)). Post calls, trade cards and proofs from the dashboard or `python -m meme_trader.social`.
 

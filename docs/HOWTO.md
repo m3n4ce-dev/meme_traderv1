@@ -52,13 +52,16 @@ Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls
     - **Hand-offs:** when the AI desk reviews a coin, the scanner carries it to the AI table and each persona says its vote. When the bot buys, the scanner hands the coin to the exit manager, who reports the result when it closes.
     - **Click to zoom:** click a bot, the **P&L board** or the **corkboard** to zoom into its screen. Esc goes back.
     - **Night shift:** after 17:30 (your clock) the room gets dark, the lamps and monitors glow and the city lights up.
+    - **🛠 Edit room:** drag the desks, the AI table, the couch and the plants; seats follow their furniture. **Reset room** puts it back.
+    - **Weather:** the window shows sun on a green day, then clouds, rain and a storm as the day gets red.
+    - **AI desk model:** pick Claude Opus, Sonnet or Haiku, or a cheaper or free service (GitHub Models, Hugging Face, OpenRouter, or a local model such as Ollama). It shows what a review costs and has a Test button.
     - **👕 Wardrobe ("Change your looks"):** the bots are Habbo-style pixel people. Pick a bot and change its hair (style and colour), hat, glasses, top, bottom, shoes and skin, or press 🎲 Random; rename it too. Every browser sees the change.
   - **Teach the desk:** paste an X post or article link, a contract address, or a note, with an optional comment. It's saved to the desk's memory, and **each of the four personas reads it and replies** in a thread under it (with an Anthropic key). Reply back, or start with `@skeptic` to ask one. Claude in Chat can read it all, and the AI desk sees your notes on any coin it votes on.
 - **Pulse**: new launches, the final stretch to graduation and fresh graduates, live. Each column has filters (age, market cap, buyers, inflow, top-10, dev, bundle, socials) and every row a ⚡ quick buy. A list stops updating while your mouse is on it.
 - **Calls**: your track record. 📣 Call puts a coin on the record at today's market cap; every call is hash-chained, then scored at 5 min, 1 h, 6 h and 24 h after costs (the peak is shown too). **Publish** posts the newest hash to X or Telegram so the record can't be rewritten; `python -m meme_trader.sniper calls verify` checks a ledger. See [EDGE_PROOF.md](EDGE_PROOF.md).
 - **Chat**: talk to Claude about the bot (see [14](#14-let-claude-operate-the-bot)).
 - **Manual trading** (Live tab, position cards, and every coin's details):
-  - Paste a contract address (or press **Trade** in a coin's details), pick an amount or type one, and press **Buy**. **🦍 APE** buys the preset size in one click.
+  - Paste a contract address (or press **Trade** in a coin's details), pick an amount or type one, and press **Buy**. On a coin you already hold, Buy adds to the position (the ＋ buttons on its card too).
   - The coin's metrics appear under the address: price, market cap, liquidity, volume, buys vs sells, price change, top-10 holding, holders, curve, age, dev holding and risk flags. They refresh every ~20 s.
   - **Limit orders and alerts:** buy when the market cap dips to a level (or breaks out above one), sell part of a position at a target, or just get alerted. They fire on the live price, survive restarts and expire after the time you pick. The quick buttons fill in common levels.
   - On any position, the bot's or yours: **25%**, **50%**, **Initials** (sell just enough to get your cost back; the rest rides free) and **Exit**.
@@ -69,7 +72,8 @@ Nine views. Switch with the tabs or the keys **1–9**: Live, Pulse, Desk, Calls
   - Paste an address to see its SOL, its coins with logos and dollar values, and its latest transactions.
   - Addresses only: nothing there can move funds. The list stays on this machine (`data/portfolio.json`).
   - Balances use your `SOLANA_RPC_URL` if you set one. The public endpoint is slow for big wallets.
-- **Analytics**: what is working, in plain English, plus charts:
+- **↻ Restart** (next to KILL): saves everything, reloads the bot's code and settings, and carries on. Open positions and orders resume.
+- **Analytics**: what is working, in plain English, plus charts (and the **Exit lab**: other exit rules run on the same entries, to see which would have done better):
   - equity and drawdown;
   - a projection of the next 100 trades;
   - breakdowns by strategy, exit, hour and model score;

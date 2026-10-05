@@ -4,6 +4,40 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #30: The couch, no APE, weather, room editor, exit lab, ↻ Restart, cheaper desk models
+
+- **Couch:** it sat on the front edge of the room facing out. It now stands against the back wall under the corkboard, facing into the room, and the napping personas face out from it.
+- **APE removed** ("kinda corny"): the button, the coin panel's APE, the server action and `manual.ape_sol`. Buy covers it, and on a coin you hold it adds to the position.
+- **Weather follows the day** (idea from Agent Virtual Office: the room reflects the team's state):
+  - The window shows sun on a green day, clouds below zero, rain past −2% of the account, and a storm with lightning past −6% or in defense mode.
+  - The scanner remarks on each change.
+- **🛠 Edit room** (idea from Pixel Agents' layout editor):
+  - Drag the desks, the AI table, the couch and the plants. Pieces snap to half tiles, can't overlap each other or the coffee counter and cooler, and must stay in the room.
+  - Seats follow their furniture, and the rug follows the table. Saved on the bot (`room` in data/ui.json); Reset room undoes it.
+- **Exit lab** (`sniper/exitlab.py`; idea from a public bot's notes: judge exits on the same paper entries):
+  - **How it works:** every bot entry starts shadow copies that run the bot's own exit code with other settings (graduation plays: stop 10% / 25%, stall 90 s, hold to 98% of the curve, a 2x take profit, a 20% trail once up 30%; sniper: stop 20% / 45%, no stall exit, a 2x take profit, the trail). Fills are instant, fees count on both sides, and shadows run up to 30 minutes.
+  - **Output:** Analytics → Exit lab compares each rule with "as now" on the same entries. History is in `data/exit_lab.jsonl`.
+  - **Measurement only:** it never trades. A better exit would be a new strategy version with its own test.
+- **↻ Restart** next to KILL: saves the state, then re-runs the same command in place (same PID, so systemd doesn't notice). It loads fresh code and settings, and positions and orders resume. Tested: the demo bot was back in about 9 s.
+- **Cheaper AI desk models** (owner: "local models or something cheaper than 4 cents per vote… or run from GitHub or Hugging Face"):
+  - **What it really cost:** the meter showed about 2¢ a review (½¢ a vote) on Claude Opus 5.5 ($4/$20 per million tokens). The "4 cents" on the cards was a stale estimate; the cards now quote the live estimate.
+  - **Providers** (Desk → AI desk model, saved to the config): Claude Opus 5.5, Sonnet 5.5 ($2/$10) or Haiku 4.5 (est. $1/$5), or any server with the standard chat-completions API:
+    - GitHub Models (free with a token, rate-limited)
+    - Hugging Face's router
+    - OpenRouter (`:free` models)
+    - a local server such as Ollama, LM Studio or llama.cpp
+  - **The panel** shows the cost per review (measured once there are votes), lists the models a local server has installed, and has a Test button.
+  - **Claude requests adapt** to what the model supports (effort, structured outputs), checked through the Models API. Other providers use JSON mode, or the request asks for JSON in words and the first JSON object in the reply is used.
+  - **Note replies** use the same model.
+  - **Measured on this machine** (12 cores, Ollama `llama3.2`): one vote in 5.1 s, free, but weaker (it called a 4% bundle "high"). Four at once on the CPU risk the 12 s vote limit, so local models suit note replies more than trade votes.
+- **Full test pass:**
+  - 276 tests.
+  - Every tab at 1440 px dark and light, and 420 px.
+  - Flows: buy, add, hand over, away, a limit alert, a call, the composer, Pulse, the palette, the desk model panel and its Test, the wardrobe, a note, the exit lab, the guide and a restart.
+  - Bugs it found and fixed: the Test button's missing import; the palette focusing its box late (fast typing fell through to shortcuts); the guide lacking the new features.
+
+---
+
 ## 2026-10-04 — Entry #29: A full health check after deploying #23/#24, and Habbo-style pixel people
 
 - **Deploy note:** #24 was stacked on #23 and merged into #23's branch (not main) seconds after #23 merged. #25 carries it to main; until then the bot runs from `habbo-room`.

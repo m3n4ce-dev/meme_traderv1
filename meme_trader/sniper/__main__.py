@@ -68,7 +68,9 @@ def _desk(params, force: bool):
         params["sniper"]["desk"]["enabled"] = True
     d = Desk(params.sniper.desk)
     if params.sniper.desk.enabled and not d.enabled:
-        print("AI desk requested but ANTHROPIC_API_KEY is not set - running without it")
+        from .desk import provider_ready
+
+        print(f"AI desk requested but not reachable ({provider_ready(params.sniper.desk) or 'no client'}) - running without it")
     return d if d.enabled else None
 
 
