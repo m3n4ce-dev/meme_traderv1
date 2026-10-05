@@ -41,8 +41,8 @@ class Lab:
                 self.items = json.loads((self.dir / "experiments.json").read_text())
             except (OSError, ValueError):
                 self.items = []
-        for x in self.items:                       # a run the bot was killed during never finishes: queue it again
-            if x.get("status") == "running":
+        for x in self.items:                       # a run without its own service died with the bot: queue it again
+            if x.get("status") == "running" and not x.get("unit"):   # (one in its own service is picked back up)
                 x["status"] = "queued"
 
     def save(self) -> None:

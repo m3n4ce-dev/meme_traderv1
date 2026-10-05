@@ -123,3 +123,26 @@ def test_the_ai_sets_exits_and_places_orders_for_the_owner():
     e.positions[s.mint].source = "late"                                  # the bot's own position: its strategy's exits
     with pytest.raises(AgentError, match="bot's own position"):
         asyncio.run(api.call("set_exits", {"mint": s.mint, "reason": WHY, "stop_loss_pct": 10}))
+
+
+def test_a_run_in_its_own_service_is_picked_up_after_a_restart(tmp_path, monkeypatch):
+    e = market(launches=3)
+    e.persist = True
+    lab = Lab(tmp_path / "lab")
+    x, _ = lab.add("late.stop_loss_pct", 20, "wider stop", "team", 1000.0, {"late.stop_loss_pct": 15})
+    x.update(status="running", started=__import__("time").time(), unit="meme-lab-" + x["id"])
+    lab.save()
+    (tmp_path / "lab" / f"{x['id']}.result.json").write_text(json.dumps(compare([tr(10, -0.01)], [tr(10, 0.02)], (0.0, 3 * 21600))))
+    e.xlab = Lab(tmp_path / "lab")                                       # the bot restarts: the run stays "running"
+    assert e.xlab.running() and e.xlab.running()["id"] == x["id"]
+    monkeypatch.setattr(labmod, "free_mb", lambda: None)
+
+    async def go():
+        e._lab_step()
+        await e._lab_task
+    asyncio.run(go())
+    assert e.xlab.items[0]["status"] == "done" and e.xlab.items[0]["result"]["verdict"]
+    lab2 = Lab(tmp_path / "lab2")                                        # without its own service: queued again
+    y, _ = lab2.add("late.stall_s", 60, "", "team", 1.0, {"late.stall_s": 45})
+    y["status"] = "running"; lab2.save()
+    assert Lab(tmp_path / "lab2").queued()[0]["id"] == y["id"]

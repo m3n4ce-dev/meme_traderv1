@@ -2974,14 +2974,78 @@ class Engine:
             c = self.xlab.auto_candidate(self.lab_baseline(), time.time())
             if c:
                 self.lab_add(c[0], c[1], "routine check: one step either side of the current setting", "quant")
+        r = self.xlab.running()                       # a run in its own service, from before a restart: pick it up
+        if r is not None:
+            self._lab_task = asyncio.create_task(self._lab_finish(r, self._lab_poll(r)))
+            return
         q = self.xlab.queued()
         if q:
             self._lab_task = asyncio.create_task(self._lab_run(q[0]))
 
+    async def _lab_poll(self, x: dict) -> dict:
+        """Wait for a run in its own service: its result file, or the service stopping without one."""
+        out = DATA / "lab" / f"{x['id']}.result.json"
+        gone = 0
+        while time.time() - (x.get("started") or time.time()) < 3600:
+            if out.exists():
+                try:
+                    return json.loads(out.read_text())
+                except ValueError:
+                    pass                                 # (still being written)
+            p = await asyncio.create_subprocess_exec("systemctl", "--user", "is-active", "--quiet", x["unit"])
+            gone = gone + 1 if await p.wait() != 0 else 0
+            if gone >= 2 and not out.exists():           # stopped twice in a row and nothing written
+                return {"error": "the run stopped without a result (out of memory, or killed)"}
+            await asyncio.sleep(10)
+        stop = await asyncio.create_subprocess_exec("systemctl", "--user", "stop", x["unit"])
+        await stop.wait()
+        return {"error": "took over an hour: stopped"}
+
+    async def _lab_finish(self, x: dict, work) -> None:
+        try:
+            res = await work
+        except Exception as e:                          # never leave it "running"
+            res = {"error": f"{type(e).__name__}: {e}"}
+        x["finished"] = time.time()
+        if res.get("error"):
+            x["status"], x["result"] = "failed", {"error": str(res["error"])[:300]}
+            self.say("error", f"lab: the {x['key']} test failed: {x['result']['error'][:120]}")
+        else:
+            x["status"], x["result"] = "done", res
+            n, c = res["now"], res["change"]
+            self.say("info", f"lab: {x['key']} {x['now']} -> {x['value']}: {res['verdict']} "
+                             f"({c['pnl_sol']:+.3f} vs {n['pnl_sol']:+.3f} SOL, {c['trades']} vs {n['trades']} trades, "
+                             f"{res['better_blocks']} of {res['blocks']} blocks better)")
+        self.xlab.save()
+
     async def _lab_run(self, x: dict) -> None:
+        import shutil
         import sys
 
+        cfg = self.p.get("lab") or {}
         x["status"], x["started"] = "running", time.time()
+        out = DATA / "lab" / f"{x['id']}.result.json"
+        out.unlink(missing_ok=True)
+        cmd = [sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"]]
+        if cfg.get("detach", True) and shutil.which("systemd-run"):
+            # its own short-lived service: survives the bot restarting, and can't take more than memory_max_mb
+            x["unit"] = f"meme-lab-{x['id']}"
+            self.xlab.save()
+            self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
+                       f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
+            try:
+                p = await asyncio.create_subprocess_exec(
+                    "systemd-run", "--user", "--quiet", "--collect", f"--unit={x['unit']}",
+                    "-p", f"MemoryMax={int(cfg.get('memory_max_mb', 6000))}M", "-p", "Nice=19",
+                    f"--working-directory={ROOT}", *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+                _, err = await p.communicate()
+                if p.returncode:
+                    raise RuntimeError((err or b"").decode(errors="replace")[-200:] or f"systemd-run exit {p.returncode}")
+            except Exception as e:
+                await self._lab_finish(x, asyncio.sleep(0, {"error": f"couldn't start the run: {e}"}))
+                return
+            await self._lab_finish(x, self._lab_poll(x))
+            return
         self.xlab.save()
         self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
                    f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
