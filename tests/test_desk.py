@@ -704,3 +704,28 @@ def test_model_errors_say_which_side_failed():
     assert "credits are used up" in friendly_error("RuntimeError: HTTP 402: You have depleted your monthly included credits.")
     assert "provider rejected the token" in friendly_error("RuntimeError: HTTP 401: invalid token")
     assert friendly_error("AuthenticationError: Error code: 401 - invalid x-api-key") == "Anthropic rejected the API key"
+
+
+def test_the_team_huddles_from_the_bots_real_state(monkeypatch):
+    """Owner: 'do the bots talk to each other? It doesn't seem like it. They should be close to AGI.'"""
+    from meme_trader.sniper import desk as deskmod
+
+    e = engine()
+    seen = {}
+
+    async def fake_chat(self, system, user, schema, effort=None, max_tokens=700):
+        seen["system"], seen["user"] = system, json.loads(user)
+        self.input_tokens += 2000; self.output_tokens += 500
+        return {"lines": [{"who": "scanner", "say": "Nothing in the window, Quant."},
+                          {"who": "quant", "say": "Then the sniper is the leak: -13.8% over 55 trades."},
+                          {"who": "nobody", "say": "dropped: not a team member"}],
+                "takeaway": "Graduation plays carry the account.", "suggestion": "Turn the sniper off."}, ""
+    monkeypatch.setattr(deskmod.Desk, "chat", fake_chat)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-test")
+    assert asyncio.run(e.huddle("test")) == ""
+    h = e.huddles[-1]
+    assert [x["who"] for x in h["lines"]] == ["scanner", "quant"] and h["suggestion"] == "Turn the sniper off."
+    assert "grow the account" in seen["system"] and {"edge_check_14d", "settings"} <= set(seen["user"]["desk_brief"])
+    assert h["cost_usd"] > 0 and e.desk_view()["huddles"][0]["id"] == h["id"]
+    asyncio.run(e.huddle("again"))
+    assert seen["user"]["previous_takeaways"] == ["Graduation plays carry the account."]   # they don't repeat themselves

@@ -796,6 +796,8 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: var(--series); color: #fff; border-color: transparent; }
 /* orders */
 .ord-list { display: grid; gap: 4px; margin-top: 6px; }
+.dh-lines { display: grid; gap: 6px; margin: 6px 0; max-height: 360px; overflow: auto; } .dh-take { margin: 6px 0 2px; font-size: 13px; }
+.dh-sugg { margin: 4px 0; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--warn-mark) 14%, transparent); font-size: 13px; }
 .cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
 .tr-chartbox { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--ring); border-radius: 10px; background: var(--surface-2); }
 .tr-chart-h { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; } #tr-chart { width: 100%; display: block; }
@@ -1096,6 +1098,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div class="office" id="office" aria-label="The trading room: each agent at work (or on a break), and what it is saying. Click one to see its screen."></div>
       <div class="desk-side">
         <aside class="panel inspector" aria-live="polite"><div id="dk-insp"></div></aside>
+        <section class="panel" id="desk-huddle"><h2>Desk huddles <small>the team talks it over</small></h2><div id="dh-body"><div class="empty">Loading…</div></div></section>
         <section class="panel" id="desk-brain"><h2>AI desk model <small>who the personas think with</small></h2><div id="db-body"><div class="empty">Loading…</div></div></section>
         <section class="panel teach">
           <h2>Teach the desk <small>saved to their memory</small></h2>
@@ -2084,7 +2087,7 @@ function agentCard(id, state, thought, o = {}) {
 const tname = (mint, sym) => `<span data-open="${esc(mint)}" style="cursor:pointer">${logo(mint, sym)}<b>${esc((sym || "").trim() || short(mint))}</b></span>`;
 function renderDesk() {
   const d = DK.data; if (!d) return;
-  renderBrain(d);
+  renderBrain(d); renderHuddles(d);
   const L = d.late, cands = L.candidates || [], hold = d.holding || [], st = d.strategies || {};
   const cards = {};
   // scanner
@@ -4851,6 +4854,38 @@ function renderWallets() {
     ${(d.recent_moves || []).length ? `<p class="note" style="margin-top:8px">Recent runs: ${d.recent_moves.slice(0, 8).map(m => `${esc(m.sym || "?")} ${m.x}x`).join(" · ")}</p>` : ""}
     <p class="note">Picked with hindsight from coins that already ran, which always looks good: it proves nothing yet. The test is how listed wallets do after the freeze, against random coins and random wallets (docs/WALLETS.md).</p>`);
 }
+// ---- desk huddles: the team's meetings, written by the desk's model from the bot's real state, played out at the AI table
+function renderHuddles(d) {
+  const box = $("dh-body"); if (!box) return;
+  const hs = d.huddles || [], h = hs[0], awake = d.desk && d.desk.enabled, every = d.huddle_minutes;
+  const who = id => esc((botLook(id) || {}).name || id);
+  const head = `<div class="form-row" style="margin-bottom:6px"><button class="small primary" data-huddle="1" ${d.huddling ? "disabled" : ""}>${d.huddling ? "Meeting…" : "📣 Call a huddle"}</button>
+    <span class="note">${awake && every ? `every ${every} min while the desk is awake` : "the desk is resting: call one any time"} · one call on ${esc((d.desk.brain || {}).model || "the desk's model")}${h && h.cost_usd ? ` (~$${h.cost_usd.toFixed(3)})` : ""}</span></div>
+    ${d.huddle_error ? `<p class="note down">Last try failed: ${esc(d.huddle_error)}</p>` : ""}`;
+  if (!h) { setHTML(box, head + `<div class="empty">No huddles yet.</div>`); return; }
+  setHTML(box, head + `<div class="note">${ago(h.ts)} ago · ${esc(h.reason)}</div>
+    <div class="dh-lines">${h.lines.map(l => `<div class="msg">${avatarChip(l.who)}<div class="mb"><div class="mh"><b>${who(l.who)}</b></div><div>${esc(l.say)}</div></div></div>`).join("")}</div>
+    <p class="dh-take"><b>Takeaway:</b> ${esc(h.takeaway)}</p>
+    ${h.suggestion ? `<p class="dh-sugg">💡 <b>Suggestion for you:</b> ${esc(h.suggestion)} <span class="note">(their idea, not an action: change it yourself if you agree)</span></p>` : ""}
+    ${hs.length > 1 ? `<details><summary class="note">Earlier huddles (${hs.length - 1})</summary>${hs.slice(1).map(x => `<p class="note">${ago(x.ts)} ago: ${esc(x.takeaway)}${x.suggestion ? ` · 💡 ${esc(x.suggestion)}` : ""}</p>`).join("")}</details>` : ""}`);
+  if (h.id !== IO.huddleSeen) {
+    IO.huddleSeen = h.id;
+    if (Date.now() / 1000 - (h.wall || 0) < 600) setTimeout(() => playHuddle(h), 400);    // a fresh one: they meet in the room
+  }
+}
+function playHuddle(h) {
+  if (!IO.built || !IO.bots) return;
+  const [tx, ty] = TABLE_AT, stand = [[tx - .8, ty + .4], [tx - .8, ty + 1.4], [tx + 2.7, ty + .4], [tx + 2.7, ty + 1.4], [tx + .5, ty + 2.8], [tx + 1.5, ty + 2.8]];
+  const speakers = [...new Set(h.lines.map(l => l.who))].filter(id => IO.bots[id]);
+  let k = 0;
+  for (const id of speakers) {
+    const b = IO.bots[id]; b.busy = "huddle"; b.spot = null; setProp(b, "");
+    const dest = SEAT[id] || stand[k++ % stand.length];
+    goTo(b, dest, () => { b.face = dest[0] < tx + 1 ? 1 : -1; drawBot(b); }, 3);
+  }
+  h.lines.forEach((l, i) => setTimeout(() => { const b = IO.bots[l.who]; if (b) hsay(l.who, esc(l.say), {force: true}); }, 4500 + i * 3600));
+  setTimeout(() => { for (const id of speakers) { const b = IO.bots[id]; if (b && b.busy === "huddle") goHome(b); } }, 4500 + h.lines.length * 3600 + 3000);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
   const v = all[S.labKind || "late"], dp = all.desk_pass;
@@ -5226,7 +5261,7 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -5255,6 +5290,7 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.huddle) { t.disabled = true; t.textContent = "Meeting…"; send({action: "huddle"}); setTimeout(loadDesk, 6000); setTimeout(loadDesk, 15000); return; }
   if (d.room) { showRoom(d.room); return; }
   if (d.edgecopy) { const txt = S.analytics?.edge?.text || ""; navigator.clipboard.writeText(txt).then(() => toast("Copied: paste it into your group", "ok"), () => toast("Couldn't copy: select the text in Analytics instead", "bad")); return; }
   if (d.unhalt) { unhaltAsk((q, f) => { if (confirm(q)) f(); }); return; }
