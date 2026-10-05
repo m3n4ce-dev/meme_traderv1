@@ -150,7 +150,7 @@ Task recipes are in [docs/HOWTO.md](docs/HOWTO.md).
 
 ## The dashboard
 
-- **Tabs:** Live, Pulse, Desk, Calls, Chat, Portfolio, Analytics, Controls, Guide.
+- **Tabs:** Live, Pulse, Desk, Chat, Portfolio, Analytics (with the 📣 calls track record), Controls, Guide.
   - **Ctrl+K** finds anything: tabs, coins, settings, guide pages.
   - **✎ Arrange** lets you drag, resize and hide any panel.
 - **>_ Terminal** (the `` ` `` key): every command, typed.

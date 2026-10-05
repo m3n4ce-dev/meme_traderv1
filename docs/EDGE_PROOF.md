@@ -15,9 +15,9 @@ Screenshots of winners prove nothing; anyone can crop out the losers. A tamper-e
 ## The call ledger (in this repo)
 
 - **Where:** `data/calls.jsonl`, append-only. Outcomes are in `data/calls_outcomes.json` and can be recomputed from market data.
-- **Who calls:** you, from the 📣 Call button (Live → Manual trade, the Calls tab, the coin menu, Ctrl+K). The bot's own entries go in as caller `bot`.
+- **Who calls:** you, from the 📣 Call button (Live → Manual trade, Analytics → Calls & track record, the coin menu, Ctrl+K). The bot's own entries go in as caller `bot`.
 - **Tamper-evident:** each record stores the SHA-256 of the record before it. Editing, deleting or reordering any call changes every hash after it.
-- **Publishing the head:** the newest hash pins the whole history. Calls → *Publish* (or `python -m meme_trader.social proof --to x,telegram`) posts it and records the anchor in the chain.
+- **Publishing the head:** the newest hash pins the whole history. Analytics → Calls & track record → *Publish* (or `python -m meme_trader.social proof --to x,telegram`) posts it and records the anchor in the chain.
 - **Verifying:** anyone with the exported file runs `python -m meme_trader.sniper calls verify --file calls.jsonl` and compares the head with the published one.
 - **Scoring, honestly:**
   - The market cap 5 min, 1 h, 6 h and 24 h after the call; the stats use these fixed-hold returns minus ~5% round-trip costs.
