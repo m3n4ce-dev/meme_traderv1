@@ -207,3 +207,18 @@ def test_a_coin_matching_the_dump_profile_is_passed_over_for_good():
             and evaluate_late_entry(s, e.now, e.p.late, e._late_red(s))[1] == "one-sided buying"]
     asyncio.run(e._maybe_late())
     assert cand and all(s.late_tried for s in cand) and not any(p.source == "late" for p in e.positions.values())
+
+
+
+def test_a_queued_test_is_run_against_the_settings_of_the_moment(tmp_path, monkeypatch):
+    e = market(launches=2)
+    e.persist = True
+    e.xlab = Lab(tmp_path / "lab")
+    x, _ = e.xlab.add("late.stall_s", 60, "", "team", 1000.0, {"late.stall_s": 45})        # queued with an old baseline
+    e.p.lab = {**(e.p.get("lab") or {}), "detach": False}
+
+    async def fake_exec(*a, **k):
+        raise OSError("no subprocess in this test")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    asyncio.run(e._lab_run(x))
+    assert "execution.paper_delay_s" in x["baseline"] and x["now"] == e.p.late.stall_s
