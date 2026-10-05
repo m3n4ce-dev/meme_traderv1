@@ -414,8 +414,17 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             return {"ok": True, "recorder": info, "text": "Wallet recorder: " + ("recording" if info["active"] else info["pause_reason"])
                     + ("" if info["running"] else " (the meme-wallets service isn't running)")}
         if action == "desk_brain":
+            from ..sniper import desk as deskmod
+
             err = engine.set_desk_brain(str(cmd.get("provider") or ""), str(cmd.get("model") or ""), str(cmd.get("base_url") or ""))
-            return {"ok": not err, "text": err or "AI desk model saved", "brain": engine.desk_brain()}
+            note = ""
+            if not err and engine.p.desk.get("provider") != "anthropic":
+                spec = deskmod.PROVIDERS[engine.p.desk["provider"]]
+                price = await deskmod.model_price(engine.p.desk.get("base_url") or spec["base_url"],
+                                                  os.environ.get(spec["key"], "") if spec["key"] else "", deskmod.model_of(engine.p.desk))
+                engine.set_desk_prices(*(price or (0.0, 0.0)))
+                note = f" · ${price[0]:g} / ${price[1]:g} per million tokens" if price else " · no price listed: the estimate shows 0"
+            return {"ok": not err, "text": err or "AI desk model saved" + note, "brain": engine.desk_brain()}
         if action == "desk_models":                       # what a local / compatible server has installed
             import aiohttp
 

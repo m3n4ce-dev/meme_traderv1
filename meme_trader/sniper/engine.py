@@ -2788,6 +2788,16 @@ class Engine:
                 "providers": {k: {kk: v[kk] for kk in ("label", "key", "base_url", "model", "note")} for k, v in PROVIDERS.items()},
                 "claude_models": {k: v[0] for k, v in CLAUDE_MODELS.items()}}
 
+    def set_desk_prices(self, pin: float, pout: float, who: str = "dashboard") -> None:
+        """Another provider's price for its cost estimate ($ per million tokens), saved with the model."""
+        self.p.desk["other_price_in_per_mtok"], self.p.desk["other_price_out_per_mtok"] = round(pin, 4), round(pout, 4)
+        if who == "dashboard" and self.persist:
+            try:
+                for k in ("other_price_in_per_mtok", "other_price_out_per_mtok"):
+                    self.save_setting(f"desk.{k}", self.p.desk[k])
+            except OSError:
+                pass
+
     def set_desk_brain(self, provider: str, model: str = "", base_url: str = "", who: str = "dashboard") -> str:
         from .desk import PROVIDERS
 

@@ -25,6 +25,15 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **Wrong exit description:** the exit manager described a manual position by the bots' time limit ("closest exit is time held, 12.7 of 30 min"). Your positions have no time exit. It now shows your own stop, take profit and trail, or the ride rules once handed over (regression test).
   - **"Paused: paused."** The recorder said this; it now says "Paused from the dashboard: the wallet study misses trades until I resume."
   - **Chart note:** the position card's "no trades since you bought" note sat on top of the chart; it's now under it.
+- **Qwen on Hugging Face** (owner connected Hugging Face and asked for "a nice big new Qwen agentic model"):
+  - **The catalogue:** the router serves 33 Qwen models.
+  - **One real vote each:**
+    - **Qwen3.8-2.4T-A95B:** about 4.5 s and $0.0034 a vote (about 1.4¢ a review vs ~2.3¢ on Opus), with sensible reasons. Chosen.
+    - **Qwen3.5-397B-A17B and Qwen3.8-27B:** they "think" first. Even with 4,000 tokens of room they ran 34 s and 8 s without answering, so they're too slow for 12 s votes.
+  - **Client fixes:**
+    - The client crashed on these replies: it expected an answer field, and thinking models send `reasoning` instead (KeyError: 'content'). It now retries once with more room when a model ran out thinking, and otherwise says plainly "pick an Instruct model" (tested with a fake server).
+    - Routing suffixes like `:fastest` work.
+  - **Real prices:** the cost estimate for other providers was $0, so a paid model read "free". Picking a model now reads its price from the provider's list: Hugging Face per provider (the highest live price, so it never reads low), OpenRouter per token. It's saved with the model.
 - **CLAUDE.md:** the operator's facts are updated: the edge-check numbers, manual trading is the owner's, hand-over riding, and lifting a halt is the owner's call only.
 
 ---
