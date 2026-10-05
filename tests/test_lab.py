@@ -222,3 +222,24 @@ def test_a_queued_test_is_run_against_the_settings_of_the_moment(tmp_path, monke
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     asyncio.run(e._lab_run(x))
     assert "execution.paper_delay_s" in x["baseline"] and x["now"] == e.p.late.stall_s
+
+
+def test_lab_replays_compare_rules_without_the_accounts_stops(tmp_path, monkeypatch):
+    from meme_trader.sniper import research
+    lab = Lab(tmp_path / "lab")
+    x, _ = lab.add("late.min_age_s", 30, "", "team", 1000.0, {"late.min_age_s": 0, "execution.paper_delay_s": 2.5})
+    seen = {}
+    monkeypatch.setattr(research, "load_policy", lambda name: {"name": name})
+    monkeypatch.setattr(research, "load_events", lambda files, **k: ([], {"first": 0.0, "last": 86400.0}))
+
+    def fake_run(pol, events, jobs_list, jobs=0):
+        seen.update({j[0]: j[2] for j in jobs_list})
+        return {j[0]: {"trades": []} for j in jobs_list}
+    monkeypatch.setattr(research, "run_variants", fake_run)
+    f = tmp_path / "feed-2026-10-05.jsonl"
+    f.write_text('{"ts": 86400}\n')
+    out = labmod.run(x["id"], tmp_path, files=[f])
+    for sets in seen.values():
+        assert "capital.daily_loss_limit_sol=1000000" in sets and "capital.max_drawdown_pct=100" in sets
+        assert "risk_adapt.enabled=false" in sets and "execution.paper_delay_s=2.5" in sets
+    assert "late.min_age_s=30" in seen["change"] and out["account_stops"].startswith("off")
