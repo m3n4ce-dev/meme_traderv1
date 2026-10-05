@@ -163,6 +163,11 @@ class Engine:
         self.book = Book(self.p.capital.starting_sol)
         self.creators: dict[str, deque] = defaultdict(deque)
         self.symbols: dict[str, deque] = defaultdict(deque)
+        # coin families: launches sharing a ticker or a name (pump.fun "vamps" copy a running coin's name or
+        # ticker). The first one launched is the OG. key -> deque[(launch ts, mint)], mint -> (ts, symbol, name)
+        self.families: dict[str, deque] = defaultdict(deque)
+        self.fam_meta: dict[str, tuple] = {}
+        self.fam_since = time.time()
         self.rejects: Counter = Counter()
         self.stats = Counter()
         self.log: deque = deque(maxlen=300)
@@ -614,6 +619,7 @@ class Engine:
         self._pulse_row()[1] += 1
         self.creators[e.creator].append(e.ts)
         self.symbols[e.symbol.upper()].append(e.ts)
+        self._fam_add(e.mint, e.ts, e.symbol, e.name)
         s = TokenState(e.mint, e, e.ts)
         s.on_launch(e)
         self.tokens[e.mint] = s
@@ -987,6 +993,11 @@ class Engine:
                  for n in self.memory.for_mint(s.mint)]
         if saved:
             extra = {**extra, "owner_notes": saved}
+        fam = self.family(s.mint)
+        if fam:                      # copies of one name fight over the same buyers: which one is this?
+            extra = {**extra, "name_family": {"coins_sharing_name_or_ticker_6h": fam["n"], "is_first_launched": fam["og"],
+                                              "launch_order": fam["rank"], "seconds_after_first": fam["after_og_s"],
+                                              "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
         try:
             v = await self.desk.review(snapshot_for(s, self.now, kind, extra))
         finally:
@@ -1527,6 +1538,13 @@ class Engine:
         for mint, until in list(self.watch_until.items()):
             if until <= self.now and mint not in self.positions and (mint not in self.tokens or self.tokens[mint].decided):
                 await self._unwatch(mint)
+        cut = self.now - self.FAMILY_S
+        for k in list(self.families):
+            q = self.families[k]
+            while q and q[0][0] < cut:
+                self.fam_meta.pop(q.popleft()[1], None)
+            if not q:
+                del self.families[k]
         for book, horizon in ((self.creators, 86400), (self.symbols, 3600)):
             for k in list(book):
                 q = book[k]
@@ -2297,9 +2315,58 @@ class Engine:
             self._ledger_busy = False
 
     # ------------------------------------------------------------------ Pulse: new, final stretch, graduated
+    FAMILY_S = 6 * 3600          # how far back a launch can be another's OG
+
+    @staticmethod
+    def _fam_keys(symbol: str, name: str) -> set[str]:
+        """'$GIZMO' / 'Gizmo' / 'gizmo!' are one family: lowercase letters and digits only. Ticker and name share
+        one namespace, since a copy often keeps the name and changes the ticker, or the other way round."""
+        t, n = re.sub(r"[^a-z0-9]+", "", (symbol or "").lower()), re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+        return {k for k in (t if len(t) >= 2 else "", n if len(n) >= 3 else "") if k}
+
+    def _fam_add(self, mint: str, ts: float, symbol: str, name: str) -> None:
+        if mint in self.fam_meta:
+            return
+        self.fam_meta[mint] = (ts, symbol, name)
+        for k in self._fam_keys(symbol, name):
+            self.families[k].append((ts, mint))
+
+    def family(self, mint: str, full: bool = False) -> dict | None:
+        """This coin's family (coins launched in the last 6 h sharing its ticker or name), or None if it's alone.
+        rank 1 = the OG: the first launched since the bot started watching (fam_since)."""
+        meta = self.fam_meta.get(mint)
+        if meta is None:
+            return None
+        members: dict[str, float] = {}
+        for k in self._fam_keys(meta[1], meta[2]):
+            for ts, m in self.families.get(k, ()):
+                members[m] = ts
+        if len(members) < 2:
+            return None
+        order = sorted(members, key=lambda m: (members[m], m))
+        og = order[0]
+        usd = self.sol_price.usd
+
+        def mc(m: str) -> float | None:
+            s = self.tokens.get(m)
+            return s.market_cap_sol * usd if s is not None and s.price_known else None
+        lead = max(order, key=lambda m: mc(m) or 0.0)
+        out = {"n": len(order), "rank": order.index(mint) + 1, "og": og == mint, "og_mint": og,
+               "og_symbol": self.fam_meta[og][1], "after_og_s": round(members[mint] - members[og]),
+               "og_known": members[og] - self.fam_since > 120}      # the OG launched after the bot started watching
+        if mc(lead):
+            out.update(lead_mint=lead, lead_symbol=self.fam_meta[lead][1], lead_mcap_usd=round(mc(lead)))
+        if full:
+            out["members"] = [{"mint": m, "symbol": self.fam_meta[m][1], "name": self.fam_meta[m][2][:40],
+                               "rank": order.index(m) + 1, "age_s": round(self.now - members[m]), "mcap_usd": mc(m),
+                               "migrated": bool(self.tokens.get(m) and self.tokens[m].migrated)}
+                              for m in [og] + [x for x in sorted(order, key=lambda m: -(mc(m) or 0.0)) if x != og][:9]]
+        return out
+
     def _pulse_token(self, s: TokenState, usd: float, spark: bool) -> dict:
         L = s.launch
-        return {"mint": s.mint, "symbol": s.symbol, "name": (L.name if L else "")[:40], "age": round(s.age(self.now)),
+        f = self.family(s.mint)
+        return {"fam": f and {k: f.get(k) for k in ("n", "rank", "og", "og_symbol", "after_og_s", "og_known", "lead_symbol")},"mint": s.mint, "symbol": s.symbol, "name": (L.name if L else "")[:40], "age": round(s.age(self.now)),
                 "mcap_usd": s.market_cap_sol * usd, "progress": s.curve.progress, "buyers": len(s.buyers),
                 "buys": s.buys, "sells": s.sells, "flow30": round(s.net_flow_sol(self.now, 30), 2),
                 "vol_sol": round(s.volume_sol, 2), "top10": round(s.top_holders_pct(10), 1),
@@ -2804,7 +2871,7 @@ class Engine:
             "p": p, "ev_pct": self._ev(p) if p is not None else None,
             "drivers": self.model.drivers(feats) if self.model else [],
             "features": {k: round(v, 4) for k, v in feats.items()},
-            "cluster": s.cluster, "desk": s.desk,
+            "cluster": s.cluster, "desk": s.desk, "family": self.family(mint, full=True),
             "holders": [{"wallet": w, "pct": t / 1e9 * 100, "dev": w == s.creator,
                          "funder": self.funders.get(w, ("", ""))[0]} for w, t in holders],
             "tape": [{"ts": t, "side": side, "sol": sol, "trader": tr} for t, _, side, sol, tr in list(s.trades)[-40:]][::-1],
@@ -2898,7 +2965,7 @@ class Engine:
             for t, why, _tok, sol in pos.exits or []:
                 marks.append({"t": round(t, 2), "p": at(t), "side": "sell", "who": k, "label": f"{lab} sold part for {sol:.3f} SOL ({why[:40]})"})
         marks.sort(key=lambda m: m["t"])
-        return {"mint": mint, "symbol": s.symbol, "pts": pts, "marks": marks, "now": round(self.now, 2),
+        return {"mint": mint, "symbol": s.symbol, "pts": pts, "marks": marks, "now": round(self.now, 2), "fam": self.family(mint),
                 "price": s.curve.price, "entry": pos.entry_price if pos else None,
                 "position": None if pos is None else {"source": pos.source, "bot": pos.bot or "",
                                                        "gain_pct": round(pos.gain_pct(s.curve.price), 1),
@@ -3086,7 +3153,7 @@ class Engine:
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
                 "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual, "bot": pos.bot,
-                "adds": len(pos.adds or []), "ride_tp": pos.ride_tp, "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
+                "adds": len(pos.adds or []), "ride_tp": pos.ride_tp, "fam": self.family(m), "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })

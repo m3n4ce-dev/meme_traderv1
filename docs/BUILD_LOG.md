@@ -4,6 +4,27 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #41: The OG among copies
+
+**Owner's request:** "If there is a bunch of coins, would be good to mark the OG."
+
+**Why it matters:** copying is the norm. Of 8,029 launches in 5.1 hours on the night of Oct 4, 71% shared a name or ticker with another launch. "PUMP" had 169 and "SI" 152 (one of the owner's +120% trades).
+
+**How families are built:**
+- The engine indexes every launch by ticker and by name. Both are lowercased with only letters and digits kept, in one namespace, since a copy often keeps the name and changes the ticker or the other way round.
+- Coins sharing either key within 6 hours form a family.
+- The first one launched is the **OG**. It is only known if it launched after the bot started watching; if not, the dashboard says an older original may exist.
+
+**Where it shows:**
+- **Badges** on Pulse rows, position cards and the Charts tab: `OG · n` or `copy k/n`.
+- **The coin popup** lists the family: the OG first, then the biggest by market cap, with ages and graduations.
+- **A buy tip** when you buy a copy: which coin is the OG and which is biggest now. It's a tip only, never a block.
+- **The AI desk** gets a `name_family` block (launch order, count, which is biggest) with each review.
+
+**Not done:** the bot doesn't prefer OGs or avoid copies. That would be a strategy change, and it needs a measurement first.
+
+---
+
 ## 2026-10-05 — Entry #40: Health check: why the bot stopped trading, and three other bugs
 
 **Owner's request:** "Analyze and debug the project."
