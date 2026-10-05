@@ -319,6 +319,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                                   "today": x["today"], "ready": f"{x['ready']['passed']} of {len(x['ready']['checks'])}",
                                   "last_scan_s": round(time.time() - x["last_scan"]) if x["last_scan"] else None})(engine.xchain.view()),
             "desk": {"awake": bool(engine.desk), "model": (d.get("desk") or {}).get("model") if isinstance(d.get("desk"), dict) else None,
+                     "vote_s": engine.vote_speed(),
                      "huddles": len(engine.huddles), "huddle_error": engine.huddle_error},
             "chat": {"available": bool(chat and chat._status().get("available"))} if chat else {"available": False},
             "machine": {"disk_free_gb": round(du.free / 1e9, 1), "disk_used_pct": round(du.used / du.total * 100), "mem_free_mb": round(free_mb() or 0)},
