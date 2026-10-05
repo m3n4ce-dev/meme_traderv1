@@ -143,6 +143,16 @@ def test_defense_mode_after_a_losing_streak():
     assert snap["defense"]["on"] and snap["defense"]["minutes_left"] > 0
 
 
+def test_defense_mode_ignores_the_owners_manual_trades():
+    eng = engine()
+    eng.book.closed = [trade_row(-20, i, source="manual") for i in range(12)]   # the owner's losing run
+    eng._update_defense()
+    assert not eng._defensive()                             # the bots aren't slowed down for the owner's trades
+    eng.book.closed += [trade_row(-20, 20 + i) for i in range(5)]
+    eng._update_defense()
+    assert eng._defensive() and "5 losses" in eng.defense_reason
+
+
 def test_controls_validate_apply_and_save_without_touching_other_settings(tmp_path):
     eng = engine()
     assert "between" in eng.set_control("entry.min_score", 101)
