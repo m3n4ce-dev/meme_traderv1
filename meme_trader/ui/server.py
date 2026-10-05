@@ -263,6 +263,12 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         return web.Response(text=body, content_type="application/x-ndjson", headers={
             "Content-Disposition": f'attachment; filename="calls-{L.head[:12]}.jsonl"', "Cache-Control": "no-store"})
 
+    async def kols_view(_):                     # the Charts tab's KOL tracker
+        return _json(engine.kol_view())
+
+    async def hot_names(_):                     # the Charts tab's copycat waves
+        return _json({"names": engine.hot_names()})
+
     async def pulse_board(_):
         return _json(engine.pulse_view())
 
@@ -781,6 +787,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory),
                     web.get("/api/calls", calls), web.get("/api/calls/export", calls_export),
                     web.get("/api/pulse", pulse_board), web.get("/api/social", social),
+                    web.get("/api/kols", kols_view), web.get("/api/hot", hot_names),
                     web.get("/api/card.png", card_png), web.get("/x/connect", x_connect),
                     web.get("/x/callback", x_callback),
                     web.get("/api/ui", ui_state)])

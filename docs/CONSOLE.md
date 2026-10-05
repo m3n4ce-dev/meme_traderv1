@@ -115,6 +115,19 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - Pinned cards show the change since you pinned, market cap and curve, plus Buy buttons and Unpin.
   - Up to 8 pins, remembered in this browser.
 
+## Charts tab: optional views (KOL tracker and more)
+
+- **Turn them on** with the chips under the Charts header; each is remembered in this browser. ✕ hides a view.
+- **👑 KOL tracker:**
+  - Live trades by known wallets (kolscan.io's KOLs and the wallet study's wallets) on any coin the bot sees.
+  - The coins they're in: who, buys/sells, net SOL, and market cap at their first buy → now. 📈 pins a coin.
+  - A tape of their latest trades, with how long they held when they sell.
+  - Load the KOL list with 👑 Refresh KOL list.
+- **🔥 Copycat waves:** names launched 3+ times in the last hour, with the OG and the biggest one now.
+- **🎓 Graduation watch:** the graduation scanner's coins (curve %, market cap, age, a sparkline, and what it's waiting on).
+- **⚡ Market pulse:** launches, trades and graduations per minute.
+- **💼 Equity:** your account over time.
+
 ## OG and copies: coins sharing a name or ticker
 
 - **The badges:** most launches copy another coin's name or ticker. A coin marked **OG · n** was the first of n coins with that name in the last 6 hours; **copy k/n** came later.
