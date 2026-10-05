@@ -108,3 +108,12 @@ def test_howto_questions_carry_the_manual_and_others_dont():
     p = with_manual("How do I hide a note on the bulletin board?", "How do I hide a note on the bulletin board?")
     assert "[Console manual" in p and "Hide from board" in p
     assert with_manual("what's my P&L today", "what's my P&L today") == "what's my P&L today"
+
+
+@pytest.mark.parametrize("text, attach", [("How do I hide a note on the bulletin board?", True), ("make it white", True),
+                                          ("turn off the speech bubbles", True), ("where is the kill switch", True),
+                                          ("show me my P&L today", False), ("what's the market doing", False),
+                                          ("add 0.5 SOL to BONK", False), ("change risk to bold", False)])
+def test_only_howto_questions_get_the_manual(text, attach):
+    from meme_trader.ui.chat import with_manual
+    assert ("[Console manual" in with_manual(text, text)) is attach

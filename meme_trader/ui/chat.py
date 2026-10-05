@@ -60,14 +60,22 @@ bubbles, notifications, or how a character acts or where it stands - just do it 
 needed), then say in one line what you did and the shortcut for next time (e.g. the t key for the theme)."""
 
 
-HOWTO = re.compile(r"\b(how (do|can|to|would)|where('s| is| are| do)|can (i|you|we)|is there a way|turn (on|off)|"
-                   r"switch|change|hide|show|delete|remove|add|pin|move|find|set up|enable|disable)\b", re.I)
+# a question about using the dashboard: a how-to form, or a do-verb about something on the screen
+HOWTO = re.compile(r"\b(how (do|can|to|would|does)|where('s| is| are| do| can)|is there a way|can i|what does .{1,30} (button|tab|badge|icon) do)\b", re.I)
+UI_VERB = re.compile(r"\b(turn|switch|change|hide|show|delete|remove|add|pin|unpin|move|open|close|enable|disable|make)\b", re.I)
+UI_NOUN = re.compile(r"\b(theme|dark|light|white|tab|page|panel|button|chart|board|note|corkboard|bulletin|character|bot|bubble|speech|"
+                     r"dialog|screen|dashboard|console|layout|room|lounge|lab|view|tracker|units?|amounts|dollars|notifications?|pop-?ups?)\b", re.I)
+
+
+def _is_howto(text: str) -> bool:
+    t = text or ""
+    return bool(HOWTO.search(t) or (UI_VERB.search(t) and UI_NOUN.search(t)))
 
 
 def with_manual(prompt: str, text: str) -> str:
     """A question about using the dashboard gets the matching console-manual sections attached, so the answer
     never depends on the model remembering to look (it once answered "I don't have a tool" for a button)."""
-    if not HOWTO.search(text or ""):
+    if not _is_howto(text):
         return prompt
     from .manual import search
     found = search(text, top=3, budget=4500)["found"]
