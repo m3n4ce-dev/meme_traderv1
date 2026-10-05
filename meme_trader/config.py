@@ -244,6 +244,18 @@ def validate_sniper(sn: dict) -> None:
         _require(sn["risk"]["level"] <= sn["risk"]["max_level"], "sniper.risk.level can't be above risk.max_level")
     _require(sn["late"].get("entry_mode", "rule") in ("rule", "window"),
              "sniper.late.entry_mode must be rule or window")
+    if "xchain" in sn:
+        x = sn["xchain"]
+        _require(isinstance(x.get("chains"), list) and set(x["chains"]) <= {"bsc", "base", "eth", "solana"},
+                 "sniper.xchain.chains must be a list from: bsc, base, eth, solana")
+        for k in ("min_liq_usd", "min_vol_h1_usd", "min_age_min", "max_age_h", "min_mcap_usd", "max_mcap_usd", "size_usd",
+                  "max_tax_pct", "extra_slip_pct", "cooldown_h"):
+            _num(sn, f"xchain.{k}", 0)
+        for k in ("poll_s", "scan_s", "stop_loss_pct", "take_profit_pct", "trail_pct", "max_hold_h"):
+            _num(sn, f"xchain.{k}", 0, lo_open=True)
+        _num(sn, "xchain.take_profit_fraction", 0, 1, lo_open=True)
+        _require(isinstance(x.get("max_open"), int) and x["max_open"] >= 1, "sniper.xchain.max_open must be a whole number >= 1")
+        _require(x["min_mcap_usd"] <= x["max_mcap_usd"], "sniper.xchain.min_mcap_usd can't be above max_mcap_usd")
     _require(isinstance((sn.get("market") or {}).get("non_organic_wallets", []), list),
              "sniper.market.non_organic_wallets must be a list of wallet addresses")
 

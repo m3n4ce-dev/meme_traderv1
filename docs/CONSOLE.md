@@ -123,7 +123,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - The coins they're in: who, buys/sells, net SOL, and market cap at their first buy → now. 📈 pins a coin.
   - A tape of their latest trades, with how long they held when they sell.
   - Load the KOL list with 👑 Refresh KOL list.
-- **🌐 Other chains:** trending and new pools on Solana, BNB Chain, Base and Ethereum (market cap, 1-hour volume, price change, buys/sells), with DexScreener links. Read-only: the bot trades pump.fun only.
+- **🌐 Other chains:** trending and new pools on Solana, BNB Chain, Base and Ethereum (market cap, 1-hour volume, price change, buys/sells), with DexScreener links. The other-chain bot (below) trades from these lists, with paper money.
 - **🔥 Copycat waves:** names launched 3+ times in the last hour, with the OG and the biggest one now.
 - **🎓 Graduation watch:** the graduation scanner's coins (curve %, market cap, age, a sparkline, and what it's waiting on).
 - **⚡ Market pulse:** launches, trades and graduations per minute.
@@ -223,10 +223,32 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **"Better" is promising, not proven:** the panel counts every test run, and the best of many tries always looks better than it is. Nothing changes the bot until you Apply a change.
 - **It runs in the background** as a low-priority process, one test at a time, taking ~10–20 minutes. Trading carries on.
 
+## Other chains: the paper bot for BNB Chain, Base and Solana DEX coins
+
+A separate bot trades young coins on decentralized exchanges (DEXes), so the console isn't limited to pump.fun coins.
+- **Where:** Live tab → 🌐 Other chains. It shows its open positions with a Sell button, today's trades, and "What it's looking at": the top pools of the last scan and why each one passed or not.
+- **Chains:** BNB Chain, Base, and Solana coins that have left the pump.fun curve. Ethereum is available too, but its gas (about $1–3 a swap) eats small trades.
+- **Paper only:** it uses the same paper balance, daily loss limit, kill switch and Pause button as the pump.fun bots. There's no wallet for other chains, so in live mode it's off.
+- **What it buys:** pools between 15 minutes and a week old, with at least $20k liquidity and $20k of trading in the last hour. They must be up 5–150% in the hour, with more buys than sells, rising in the last 5 minutes and not selling off right then.
+- **Safety:** only coins that can be sold again.
+  - On BNB Chain and Base, honeypot.is must have simulated a buy and a sell at low risk. For coins it doesn't know, GoPlus must clear every check: not a honeypot, open source, not upgradeable, no blacklist or pausing.
+  - On Solana, the token's freeze and mint rights must be renounced.
+  - Taxes over 5% are refused.
+- **Exits:**
+  - a 15% stop loss;
+  - half sold at +40%;
+  - a 20% trailing stop once it's up 20%;
+  - out after 6 hours, or at once if most of the liquidity is pulled.
+- **Costs:** every paper fill pays the pool's swap fee, price impact from its liquidity, the token's tax, gas, and 0.5% extra slippage.
+- **Prices:** checked every 10 seconds (DexScreener), so this trades moves over minutes to hours, never launches.
+- **Trade size:** the risk dial's per-trade size, so $30 at Max.
+- **Turn it on or off:** Controls → "Other chains (paper)". Its rules are under Controls → Advanced → xchain.
+- **Results:** its closed trades show up in Recent trades with a 🌐 chain tag (click one to open it on DexScreener), and as the "chains" strategy in Analytics.
+
 ## Strategies on and off, and the risk dial
 
 - **Strategy buttons** (Live, under the top cards): Sniper, Copy, Graduation plays, Callouts. A click turns one on or off **and saves it**, so it stays that way after a restart.
-- **Risk dial** (Live or Controls): Cautious, Normal, Bold, Aggressive, Max. It scales trade size, open positions and the daily loss limit together.
+- **Risk dial** (Live or Controls): Cautious, Normal, Bold, Aggressive, Max. It scales trade size, open positions and the daily loss limit together. It doesn't change which coins the bots pick: the entry rules are the same at every level, so a lower dial means smaller trades and an earlier daily stop, not fewer picks.
 - **Pause:** ⏸ Pause or `p` stops new entries; open positions are still managed.
 
 ## HQ: everything running on this machine

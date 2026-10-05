@@ -4,6 +4,50 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #47: Other chains (paper), a steadier feed, and what the risk dial really does
+
+**Owner's requests:**
+- "Let's get the other chains on there so we're not bound to SOL coins."
+- "I have it set on max risk. I feel like there would be 0 trades taken if I had it any lower."
+
+**The risk dial doesn't pick coins.**
+- **What it changes:** size (×3 at Max vs Normal), open positions (15 vs 6) and the daily loss limit (3 vs 1 SOL).
+- **The replay:** the bots' last 250 paper trades re-run at each level gave the same trades at every level (249 at Cautious). The most positions ever open at once was 4, and the daily stops rarely bind.
+- **Today:** at Max the graduation bot lost about 2.78 SOL. At Normal it would have lost about 0.93.
+- **The halt:** since the book restarted at 5 SOL, the graduation bot lost 2.76 SOL over 29 trades (0.6–0.8 SOL each, ~15% of the book). Several dumps went straight through their stops: -69% on a -16% stop, and a -74% momentum exit. At 11:03 the book was 40% under its start and the kill switch halted it. The owner's own trades made +0.75 SOL over the same period. Lifting the halt is the owner's call.
+
+**Feed (PR #44):**
+- **The flapping:** with the Helius allowance spent, its refill (~0.8 MB a minute) made the backup look usable every 30 s. The bot switched to it, used the allowance up in seconds and switched back: 33 switches an hour, and 78 minutes paused today. Now it moves to the backup only with 100 MB left.
+- **The launch-feed pause:** being on the launch feed's backup (pumpdev.io, 27–47 new coins a minute) no longer pauses entries. Only a backup that's gone quiet for a minute does.
+- **Result:** 2 switches in the first 5 minutes after deploying, against ~2 a minute before.
+
+**Other chains, paper** (`sniper/xchain.py`, Live tab → 🌐 Other chains):
+- **What it trades:** young DEX coins on BNB Chain, Base and Solana (off the pump.fun curve).
+  - Candidates come from GeckoTerminal (24 h and last-hour trending, and new pools); prices come from DexScreener every 10 s.
+  - Rules: 15 min to 7 days old; at least $20k liquidity and $20k traded in the last hour; up 5–150% in the hour; more buys than sells; rising and not selling off in the last 5 minutes.
+- **Only coins that can be sold again:**
+  - honeypot.is must call it low risk with tax ≤ 5%;
+  - for coins honeypot.is doesn't know, GoPlus must clear every check (not upgradeable, open source, no blacklist or pausing);
+  - on Solana, freeze and mint rights must be renounced.
+  - Measured: 3 of 8 trending BNB Chain pools and 1 of 8 on Base were honeypots.
+- **Costs:** every fill pays swap fee, price impact, tax, gas and 0.5% slippage. A real-data round trip on a $36k-liquidity Solana pool cost ~2%.
+- **Exits:** 15% stop, half at +40%, a 20% trail after +20%, 6 h max, or out if the liquidity is pulled.
+- **Shared with the main bot:** the paper balance, daily loss limit, kill switch, Pause and trade log. It's not counted for defense mode, and it's off in live mode (no EVM wallet) and in the demo.
+- **GeckoTerminal's free allowance** ran out after a burst (429s after 6 calls 6 s apart). The fetcher now:
+  - calls one list at a time, 2 s apart;
+  - waits 2 minutes after a 429, keeping the old lists;
+  - fetches only the lists in use;
+  - never makes the Charts view wait.
+- **Coverage gaps:** some BNB Chain coins trade in newer pools DexScreener doesn't list at all, so they're skipped: no live price, no trade.
+- **Research:** each new scan is kept in `data/xchain/` (what was offered and why each was passed over).
+
+**Checks:**
+- 342 tests pass (6 new for the trader, plus fetcher and feed regressions).
+- Browser QA round 8 passed 54 of 54 checks.
+- On real data: a scan, the safety checks, and a forced paper round trip on a throwaway bot.
+
+---
+
 ## 2026-10-05 — Entry #46: The team's lab, Claude leads, the AI sets stops, a chat bar everywhere, other chains, HQ
 
 **Owner's requests:**

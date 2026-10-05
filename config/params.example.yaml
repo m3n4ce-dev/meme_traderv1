@@ -314,6 +314,33 @@ sniper:
     detach: true                 # run each test as its own short-lived user service (survives bot restarts)
     memory_max_mb: 6000          # ... capped at this much memory
 
+  xchain:                        # paper trading on other chains: young DEX coins (sniper/xchain.py). Paper only.
+    enabled: true
+    chains: [bsc, base, solana]  # bsc, base, eth, solana (Solana DEX coins outside the pump.fun curve)
+    poll_s: 10                   # live prices for held coins this often (DexScreener)
+    scan_s: 90                   # look for new candidates this often (GeckoTerminal trending + new pools)
+    max_open: 4                  # other-chain positions at once
+    size_usd: 0                  # per trade; 0 = the risk dial's sizing.base_usd
+    min_liq_usd: 20000           # pool liquidity (smaller pools: big price impact, easy to pull)
+    min_vol_h1_usd: 20000        # traded in the last hour
+    min_age_min: 15              # pool at least this old ...
+    max_age_h: 168               # ... and at most this old (a week: still a young memecoin)
+    min_mcap_usd: 50000          # market cap at least this ...
+    max_mcap_usd: 20000000       # ... and at most this (memecoins, not majors)
+    min_buy_ratio: 1.0           # buys / sells in the last hour (1 = more buys than sells)
+    min_chg_h1: 5                # up at least this much in the last hour ...
+    max_chg_h1: 150              # ... but not already gone vertical
+    max_tax_pct: 5               # token buy/sell tax (honeypot.is; Solana transfer fee)
+    stop_loss_pct: 15            # sell everything this far under the entry price
+    take_profit_pct: 40          # sell take_profit_fraction here
+    take_profit_fraction: 0.5    # share of the coins sold at the take profit
+    trail_after_pct: 20          # once up this much, a trailing stop ...
+    trail_pct: 20                # ... this far under the peak sells the rest
+    max_hold_h: 6                # sell whatever is left after this long
+    cooldown_h: 6                # don't buy the same coin again for this long
+    extra_slip_pct: 0.5          # per fill, on top of fee, price impact and tax (quote-to-fill delay)
+    gas_usd: {bsc: 0.05, base: 0.02, eth: 1.5, solana: 0.01}   # network fee per swap, in dollars
+
   risk_adapt:                    # defensive mode after a bad run (equity-curve risk control)
     enabled: true
     lookback_trades: 10          # how many recent trades defense mode looks at
