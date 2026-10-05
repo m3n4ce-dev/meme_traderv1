@@ -822,6 +822,8 @@ a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: 
 .lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; padding: 4px 0 16px; }
 .lc-card { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lc-viewbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 10px; }
+.lc-views > *, .lc-grid > * { min-width: 0; } .lc-view .tablewrap { overflow-x: auto; } .kt-row { overflow-wrap: anywhere; }
+[data-view="charts"] .toolbar { flex-wrap: wrap; row-gap: 6px; }
 .lc-views { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; margin-bottom: 12px; }
 .lc-views:empty { display: none; } .lc-view { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lc-view.wide { grid-column: 1 / -1; } .lc-views { align-items: start; } .lc-view td svg { width: 90px; height: 24px; display: block; } .lc-view table { width: 100%; } .lc-view .lc-h { margin-bottom: 6px; }
@@ -3986,7 +3988,7 @@ function ppBall() {                                              // the ball, wh
   ents.appendChild(g); sortDepth();
 }
 function labLine(b, k) {
-  const w = S.wallets, e = S.analytics && S.analytics.edge, late = e && (e.strategies || []).find(s => s.source === "late");
+  const w = S.wallets, e = S.analytics && S.analytics.edge_check, late = e && (e.strategies || []).find(s => s.source === "late");
   const lines = [
     k === "wallets" && w && !w.pending ? `Wallet study: day ${fx(w.days, 1)} of ${w.period_days}, ${w.qualified} wallets qualify, about ${(w.wallets || []).filter(x => !x.cluster).length + (w.clusters || []).length} real traders.` : "",
     k === "edge" && late && late.n ? `Graduation plays: ${pct(late.ret_pct, 1)} per SOL over ${late.n} trades. ${late.level === "promising" ? "Promising, not proven." : ""}` : "",
@@ -4004,7 +4006,7 @@ function renderHouseBoards() {
       ${rows.map((r, i) => { const bh = r[1] / top * 34, bw = (w - 12) / 30; return `<rect x="${(6 + i * bw).toFixed(1)}" y="${(h - 4 - bh).toFixed(1)}" width="${Math.max(bw - 1.5, 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#3e8bd8"/>${r[5] ? `<circle cx="${(6 + i * bw + bw / 2).toFixed(1)}" cy="${(h - 8 - bh).toFixed(1)}" r="2" fill="#f5b83c"/>` : ""}`; }).join("")}`);
   } else if (IO.room === "lab") {
     if (Date.now() - houseDataAt > 60000) { houseDataAt = Date.now(); loadWallets(); if (!S.analytics) fetch("/api/analytics", {cache: "no-store"}).then(r => r.json()).then(a => { S.analytics = a; }).catch(() => {}); }
-    const w = S.wallets, e = S.analytics && S.analytics.edge, W = 5.4 * UNIT;
+    const w = S.wallets, e = S.analytics && S.analytics.edge_check, W = 5.4 * UNIT;
     const b1 = $("iso-wb1"), b2 = $("iso-wb2"); if (!b1 || !b2) return;
     const groups = w && !w.pending ? (w.clusters || []).length : 0, indep = w && !w.pending ? (w.wallets || []).filter(x => !x.cluster).length + groups : 0;
     setHTML(b1, `<text x="8" y="14" class="pb-t">WALLET STUDY</text>${w && !w.pending ? `
@@ -4024,7 +4026,7 @@ function renderHouseBoards() {
   }
 }
 
-function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat = []; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
+function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat.forEach(m => m.el.remove()); IO.chat = []; if ($("hchat")) $("hchat").innerHTML = ""; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
 
 // ---------------------------------------------------------------- arrange: every page is a 12-column board you can rearrange
 // Saved per page in the bot's UI store: {board: true, order: [pid], span: {pid: 1-12}, height: {pid: s|m|l}, hidden: [pid]}.
@@ -5456,7 +5458,7 @@ document.addEventListener("pointerdown", e => { if (!$("ctx").hidden && !e.targe
 const EDGE_LV = {good: ["ok", "looks real"], promising: ["ok", "promising"], fragile: ["warn", "fragile"], unclear: ["", "can't tell yet"],
                  bad: ["bad", "losing"], early: ["", "too early"], none: ["", "no trades"]};
 function renderEdge() {
-  const e = S.analytics && S.analytics.edge; if (!e || !$("an-edge")) return;
+  const e = S.analytics && S.analytics.edge_check; if (!e || !$("an-edge")) return;
   if (!e.strategies.length) { setHTML($("an-edge"), `<div class="empty">No closed trades in the last 14 days yet.</div>`); return; }
   const rows = e.strategies.map(s => {
     const [k, l] = EDGE_LV[s.level] || ["", s.level];
