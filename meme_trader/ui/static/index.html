@@ -570,7 +570,9 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wood1: #6e4b2a; --wood2: #3f2a17; --woodtop: #8a6238;
   --glass1: #2d4562; --glass2: #182a3e; --glasstop: #46688f; } }
 .floor-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-@media (max-width: 1150px) { .floor-wrap { grid-template-columns: 1fr; } }
+@media (max-width: 1150px) { .floor-wrap { grid-template-columns: minmax(0, 1fr); } }
+.floor-wrap > *, .desk-side > * { min-width: 0; }      /* phones: a wide panel never stretches the whole Desk tab */
+#dk-sum { overflow-wrap: anywhere; }
 .c-chair { fill: var(--axis); opacity: .55; }
 .c-skull { fill: var(--surface-2); stroke-width: 3; }
 .c-face { fill: #141821; }
@@ -667,7 +669,7 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .iso-door { fill: #5a3d2b; } .iso-doorframe { fill: #2d2018; } .iso-knob { fill: #e8c25a; } .iso-doorsign { font: 800 6.5px ui-monospace, monospace; fill: #e8e4da; letter-spacing: .04em; } .iso-doorsign.on { font-size: 6px; fill: #f3e2c4; }
 .iso-tvscr { fill: #071018; } .iso-led { fill: #3ef08a; animation: led 1.6s steps(2) infinite; } @keyframes led { 50% { fill: #1c5a36; } }
 @media (prefers-reduced-motion: reduce) { .iso-led { animation: none; } }
-.iso-tools { position: absolute; right: 10px; top: 10px; z-index: 6; display: flex; gap: 6px; }
+.iso-tools { position: absolute; right: 10px; top: 10px; z-index: 6; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 20px); }
 .iso-tools button { background: color-mix(in srgb, var(--surface) 80%, transparent); }
 .iso-tools button[aria-pressed="true"] { background: var(--series); color: #fff; border-color: transparent; }
 .room-edit-bar { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 70%;

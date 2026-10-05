@@ -16,7 +16,6 @@ import json
 import math
 import random
 import secrets
-import time
 from pathlib import Path
 
 # what the team may test: the graduation play's own entry and exit rules (keys under sniper.late)
