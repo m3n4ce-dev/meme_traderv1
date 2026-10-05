@@ -4,6 +4,69 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #43: Market cap first; a lived-in house; give to the bots from Manual trade
+
+**Owner's request:** "Show what market cap we got into each coin at… market cap is a main metric to track."
+
+**Market cap in and out of every trade:**
+- **Recorded on every trade:** each closed trade records `entry_mcap_sol/usd` and `exit_mcap_sol/usd`, and positions carry their entry and current market cap.
+- **Where it shows:**
+  - position cards (`MC $7.3K → $21K`);
+  - the trade panel ("in at $X MC, now $Y");
+  - the Charts tab;
+  - a `MC in → out` column in Closed trades;
+  - Analytics → **By entry market cap** (All / You / Bots; buckets from <$5K to $160K+).
+- **The live charts' scale** is now market cap in dollars, not a tiny per-token price. The entry line reads "in at $X", and markers say the market cap they happened at.
+- **Older trades:** `python -m meme_trader.sniper mcap-backfill` rebuilt the market caps of trades from before this was logged, from the recorded feed (each trade line carries the curve's reserves). 294 of 328 were filled; the rest had no feed coverage. They're stored in `data/mcap_backfill.json`, applied at startup, and their dollars use today's SOL price.
+
+**The house is lived in** ("make some tasks in other parts of the buildings so it's not stale"):
+- **Multi-step tasks:**
+  - **Lab:** run a backtest (bench → rack → edge board), read the wallet study, service the rack, compare exits.
+  - **Lounge:** ping-pong for two (with a ball), the arcade, a fridge run then the TV, a nap, watching the pulse.
+- **More visits:** trips are 2–3x more frequent, and a quiet house gets a visitor now and then. A character set to "Stays put" never goes.
+- **The room tabs** say who's doing what.
+
+**Give to bots from Manual trade:** "🤖 Give to bots" (or "✋ Take back") on a coin you hold. On one you don't, "🤖 Buy & give to bots" buys the amount picked and the bots take it over once it fills; `hand_after` remembers it until then.
+
+**The chat and how-to questions:** a question that reads like "how do I / where is / turn off / hide…" now gets the matching manual sections attached automatically. It once answered "I don't have a tool" about a button.
+
+---
+
+## 2026-10-05 — Entry #42: The chat knows the console; characters, corkboard and pinned charts
+
+**Owner's requests:**
+- "Make sure I can ask the main chat bot how to do anything and everything on the console." (It couldn't answer "change the theme to white".)
+- "Turn their dialog on and off, move the characters around and change how they act."
+- "Delete or hide the notes on the bulletin board, or add one there."
+
+**The console for the chat:**
+- **The manual:** `docs/CONSOLE.md`, a task-by-task manual.
+- **`console_help(question)`:** searches the manual and the Guide tab's own sections (`meme_trader/ui/manual.py`, keyword match with synonyms such as white → light theme, dialog → speech, bulletin → corkboard).
+- **`ui_action`:** changes only what the owner's open dashboards show: theme, tab, $/SOL, opening a coin, pinning a chart, the room's speech, pop-ups, and a character's behaviour or spot.
+  - The bot broadcasts it to every open page (`type: "ui"`), and the page applies it and says what it did.
+  - It can't trade or touch a setting, so the chat may use both tools without an approval prompt.
+- **Chat instructions:** call `console_help` before any "how do I…" answer and reply with the exact clicks or keys; do screen changes directly.
+- **Tests** check that the manual names every tab, key and terminal command, so it can't silently fall behind the page.
+
+**Characters** (Desk → 👕 Characters, formerly Wardrobe):
+- **Speech:** 💬 Speech on/off for the bubbles (per browser; the Room chat panel keeps the record).
+- **Placing:** drag any character to a free spot. It stays there and stops wandering; only real hand-offs move it.
+- **Behaviour per character:** Talks (silent, quiet, normal, chatty), Wanders (stays put, calm, normal, restless) and Walks (slow, normal, fast). Saved on the bot with their looks.
+
+**Corkboard:** clicking it opens a view where notes can be pinned there, or hidden from the board (the desk still reads them; `off_board` on the memory item) or deleted (click twice).
+
+**Charts tab:** any coin can be pinned to watch it live, from its details or by right-clicking it, with Buy buttons and the change since pinning.
+
+**OG vs copies, measured** on three recorded days with history carried across them:
+- **Setup:** the graduation setup, bought 2.5 s late, trailing exit.
+- **Results:** OGs −5.6% a trade [−10.9, +0.9] (306); copies +3.4% [−1.7, +9.1] (456); crowded names (4th copy on) +6.1%.
+- **Conclusion:** being first isn't an edge, so the bot doesn't prefer OGs, and the buy tip says so. A crowded name may mean a hot theme; that's a lead for a future frozen test, not a tuning.
+
+**An incident:** a JavaScript syntax error in the page (a `? :` left without its `:`) was served from the live checkout for about 10 minutes, because the page is read from disk on each load.
+- **Fix:** page work now happens in a separate git worktree, with a browser syntax check before anything reaches the live checkout.
+
+---
+
 ## 2026-10-05 — Entry #41: The OG among copies
 
 **Owner's request:** "If there is a bunch of coins, would be good to mark the OG."

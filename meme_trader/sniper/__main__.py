@@ -564,6 +564,7 @@ def main() -> None:
     rv.add_argument("--days", type=int, default=3)
     rv.add_argument("--validate", action="store_true", help="backtest the proposed changes on recorded data")
     sub.add_parser("doctor", help="check setup")
+    sub.add_parser("mcap-backfill", help="market caps in/out for trades closed before they were recorded (from the feed files)")
     sub.add_parser("kols", help="fetch kolscan.io's KOL wallet list once (data/kols.json): the live charts name them")
     ed = sub.add_parser("edge", help="is each strategy's edge real? margin of error, big-winner dependence, day by day")
     ed.add_argument("--days", type=int, default=14, help="the last N days of trade files (default 14)")
@@ -582,6 +583,12 @@ def main() -> None:
     args = ap.parse_args()
     if args.cmd == "calls":                        # reads the ledger only: no config needed
         _calls(args)
+        return
+    if args.cmd == "mcap-backfill":
+        from .mcapfill import run as fill
+
+        r = fill(DATA)
+        print(f"{r['filled']} of {r['trades_missing']} older trades got their market caps -> {r['path']} (restart the bot to show them)")
         return
     if args.cmd == "kols":
         from .kols import refresh

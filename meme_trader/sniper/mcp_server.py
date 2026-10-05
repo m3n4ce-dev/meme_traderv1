@@ -216,6 +216,24 @@ async def add_paper_funds(sol: float, reason: str, keep_after_restart: bool = Fa
     return await _call("deposit", sol=sol, reason=reason, keep=keep_after_restart)
 
 
+@tool(READ)
+async def console_help(question: str) -> str:
+    """How to do something in the dashboard (the console): every tab, button, key, setting and the terminal's
+    commands. Returns the best-matching sections of the console manual. Call it for any 'how do I / where is'
+    question before answering, and answer with the exact clicks or keys."""
+    return await _call("console_help", question=question)
+
+
+@tool(CHANGE)
+async def ui_action(action: str, value: str = "", bot: str = "") -> str:
+    """Change how the owner's open dashboard looks, right away. Never trades or changes a bot setting.
+    action: theme (light|dark|auto; 'white' = light), tab (live|charts|pulse|desk|chat|portfolio|analytics|controls|guide),
+    unit (sol|usd), open_coin / pin_chart / unpin_chart (value = contract address), speech (on|off: the room's speech
+    bubbles), mute (on|off: pop-up notifications), character (bot = its name, value = talk=silent|quiet|normal|chatty,
+    move=still|calm|normal|restless, speed=slow|normal|fast, or spot=home to send it back to its place)."""
+    return await _call("ui", action=action, value=value, bot=bot)
+
+
 @tool(CHANGE)
 async def add_note(text: str) -> str:
     """Write an observation or decision rationale to the bot's journal and dashboard log."""
