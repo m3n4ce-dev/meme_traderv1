@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import heapq
 import json
+import secrets
 import re
 import time
 from collections import Counter, defaultdict, deque
@@ -228,6 +229,16 @@ class Engine:
         self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
+        self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
+        self._last_huddle, self._huddling, self.huddle_error = 0.0, False, ""
+        if self.persist and (DATA / "huddles.jsonl").exists():
+            try:
+                for line in (DATA / "huddles.jsonl").read_text().splitlines()[-20:]:
+                    self.huddles.append(json.loads(line))
+                if self.huddles:
+                    self._last_huddle = self.huddles[-1]["ts"]
+            except (OSError, ValueError):
+                pass
         self._load_funders()
         self._last_price_refresh = -1e12
         # probability model (python -m meme_trader.sniper train), gate audit, defensive mode
@@ -1460,6 +1471,7 @@ class Engine:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
         await self._price_fallback()
+        self._maybe_huddle()
         cleanup = self.now - self._last_cleanup >= 10       # deletions only need a 10 s cadence
         if cleanup:
             self._last_cleanup = self.now
@@ -1832,6 +1844,8 @@ class Engine:
                          "tracked": len(self.tokens)},
                 "holding": holding, "thoughts": list(self.thoughts)[-80:], "log": agent_log,
                 "rejects": self.rejects.most_common(5),
+                "huddles": list(self.huddles)[::-1][:5], "huddle_minutes": float(self.p.desk.get("huddle_minutes", 30) or 0),
+                "huddle_error": self.huddle_error, "huddling": self._huddling,
                 "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled), "brain": self.desk_brain(),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
@@ -2359,6 +2373,58 @@ class Engine:
             self.note_waiting.pop(item_id, None)
         self.say("desk", f"the desk replied to “{it.get('title', '')[:60]}”")
         return ""
+
+    async def huddle(self, reason: str = "scheduled") -> str:
+        """The team meets: one model call writes a discussion between the bots from the bot's real state, which the
+        room plays out at the AI table. Measurement and talk only: a suggestion is for the owner, never applied.
+        '' or why not."""
+        from . import desk as deskmod
+        from ..config import Params
+
+        pd = self.p.desk
+        why = deskmod.provider_ready(pd)
+        if why:
+            return why + " so the desk can meet"
+        if self._huddling:
+            return "the team is already meeting"
+        self._huddling = True
+        try:
+            brief = await self.desk_brief("")
+            brain = deskmod.Desk(Params({**pd, "enabled": True}))
+            r = await deskmod.run_huddle(brain, pd, brief, [h.get("takeaway", "") for h in self.huddles], reason)
+            pin, pout = brain.prices()
+            cost = r.get("input_tokens", 0) / 1e6 * pin + r.get("output_tokens", 0) / 1e6 * pout
+            self.note_stats["calls"] += 1
+            self.note_stats["input_tokens"] += r.get("input_tokens", 0)
+            self.note_stats["output_tokens"] += r.get("output_tokens", 0)
+            self._last_huddle = self.now
+            if r.get("error"):
+                self.huddle_error = deskmod.friendly_error(r["error"])
+                self.say("error", f"desk huddle failed: {self.huddle_error}")
+                return self.huddle_error
+            self.huddle_error = ""
+            h = {"id": secrets.token_hex(4), "ts": self.now, "wall": time.time(), "reason": reason, "lines": r["lines"],
+                 "takeaway": r["takeaway"], "suggestion": r["suggestion"], "model": deskmod.model_of(pd), "cost_usd": round(cost, 4)}
+            self.huddles.append(h)
+            if self.persist:
+                try:
+                    with open(DATA / "huddles.jsonl", "a") as f:
+                        f.write(json.dumps(h) + "\n")
+                except OSError:
+                    pass
+            self.say("desk", f"desk huddle: {h['takeaway'][:160]}")
+            return ""
+        finally:
+            self._huddling = False
+
+    def _maybe_huddle(self) -> None:
+        """Every desk.huddle_minutes while the AI desk is awake (0 = only when the owner calls one)."""
+        mins = float(self.p.desk.get("huddle_minutes", 30) or 0)
+        if mins <= 0 or not self.feed.realtime or self._huddling or not (self.desk and self.desk.enabled):
+            return
+        if self.now - self._last_huddle >= mins * 60:
+            self._last_huddle = self.now                         # (also on failure: no retry storm)
+            asyncio.ensure_future(self.huddle("scheduled"))
 
     async def desk_brief(self, item_id: str = "") -> dict:
         """The bot's real state, compact, so the personas can answer questions about it ("what's holding us
