@@ -1055,6 +1055,11 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
           <h2>Open positions <small id="pos-sub"></small></h2>
           <div id="positions" class="positions"></div>
         </section>
+        <section class="panel" id="xc-panel">
+          <h2>🌐 Other chains <small id="xc-sub"></small> <button class="small ghost" data-tab-link="controls" title="Turn it on or off; its rules are under Advanced → xchain">Settings</button></h2>
+          <div id="xc-pos"></div>
+          <details class="xc-scan"><summary>What it's looking at <small id="xc-scansub"></small></summary><div id="xc-scan"></div></details>
+        </section>
         <section class="panel">
           <h2>Equity <small>SOL, marked to curve price</small></h2>
           <canvas id="equity" height="180"></canvas>
@@ -1589,11 +1594,38 @@ function renderChrome(s) {
 }
 
 // ---------------------------------------------------------------- live view
+const XURL = {};                                   // other-chain coins open on DexScreener, not the pump.fun drawer
+const openCoin = m => XURL[m] ? window.open(XURL[m], "_blank", "noopener") : openDrawer(m);
+const usdS = v => v == null ? "–" : (v >= 0 ? "+" : "−") + "$" + Math.abs(v).toFixed(2);
+function renderXchain(s) {
+  const x = s.xchain; if (!x || !$("xc-panel")) return;
+  (s.closed || []).forEach(c => { if (c.chain && c.url) XURL[c.mint] = c.url; });
+  const names = {bsc: "BNB Chain", base: "Base", eth: "Ethereum", solana: "Solana"}, sc = x.scan || [], now = Date.now() / 1000;
+  $("xc-sub").textContent = !x.enabled ? "off" : x.mode_note ? x.mode_note
+    : `paper · ${x.chains.map(c => names[c] || c).join(", ")} · $${x.size_usd} a trade · today ${x.today.trades} trade${x.today.trades === 1 ? "" : "s"} ${usdS(x.today.pnl_usd)}${x.blocked ? " · " + x.blocked : ""}`;
+  $("xc-scansub").textContent = x.last_scan ? `${sc.filter(r => !r.why).length} passing of the top ${sc.length} · ${dur(now - x.last_scan)} ago` : "";
+  const k = JSON.stringify([x.positions.map(p => [p.key, p.pnl_usd, p.stale_s > 120]), x.last_scan, x.active]);
+  if ($("xc-pos").dataset.k === k) return;
+  $("xc-pos").dataset.k = k;
+  $("xc-pos").innerHTML = x.positions.length ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Chain</th><th class="r">Held</th><th class="r">In</th><th class="r">Market cap in → now</th><th class="r">P&amp;L</th><th></th></tr></thead><tbody>${x.positions.map(p => `<tr>
+      <td><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(p.symbol)}</b></a> <span class="note">${esc(p.why)}</span></td>
+      <td><span class="tag">${esc(p.chain_name)}</span></td><td class="r">${dur(now - p.opened)}</td><td class="r">$${p.size_usd.toFixed(0)}</td>
+      <td class="r">${p.mcap0 ? "$" + fmtUsd(p.mcap0) : "–"} → ${p.mcap ? "$" + fmtUsd(p.mcap) : "–"}</td>
+      <td class="r ${cls(p.pnl_usd)}">${usdS(p.pnl_usd)} (${pct(p.pnl_pct, 1)})${p.stale_s > 120 ? ` <span class="note">price ${dur(p.stale_s)} old</span>` : ""}</td>
+      <td><button class="small" data-xsell="${esc(p.key)}">Sell</button></td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">${x.mode_note ? esc(x.mode_note) + "." : x.active ? "No other-chain positions. It scans BNB Chain, Base and Solana DEX coins every 90 seconds and buys only coins that pass every rule and can be sold again." : "Off. Turn on “Other chains (paper)” in Controls."}</div>`;
+  $("xc-scan").innerHTML = sc.length ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Chain</th><th class="r">Market cap</th><th class="r">Liquidity</th><th class="r">Vol 1h</th><th class="r">1h</th><th>Verdict</th></tr></thead><tbody>${sc.map(r => `<tr>
+      <td><a href="${esc(r.dex || "")}" target="_blank" rel="noopener noreferrer"><b>${esc(r.symbol)}</b></a></td><td><span class="tag">${esc(r.chain_name || r.chain)}</span></td>
+      <td class="r">${r.mcap_usd ? "$" + fmtUsd(r.mcap_usd) : "–"}</td><td class="r">${r.liq_usd ? "$" + fmtUsd(r.liq_usd) : "–"}</td><td class="r">${r.vol_h1 ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
+      <td class="r ${cls(r.chg_h1)}">${r.chg_h1 != null ? pct(r.chg_h1) : "–"}</td><td class="note">${r.why ? esc(r.why) : "<b>passes</b>"}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">No scan yet.</div>`;
+}
 function render(s) {
   snap = s;
   if (TM.waiters.length) { const w = TM.waiters; TM.waiters = []; w.forEach(f => f()); }
   renderChrome(s);
   renderRisk(s);
+  renderXchain(s);
   logToasts(s);
   if (S.tab === "chat") renderChatSide(s);
   if (S.tab === "portfolio" && PF.data) renderPortfolio();
@@ -1710,8 +1742,8 @@ function render(s) {
   if ($("closed").dataset.keys !== ck) {
     $("closed").dataset.keys = ck;
     $("closed").innerHTML = s.closed.map((c, i) => `<tr class="click ${i < newClosed ? "flash" : ""}" data-open="${esc(c.mint)}" tabindex="0">
-      <td title="${esc(c.mint)}">${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b></td>
-      <td><span class="tag ${(c.source || "").startsWith("copy") ? "copy" : c.source === "late" ? "late" : ""}">${esc(c.source)}</span></td>
+      <td title="${esc(c.mint)}">${logo(c.chain ? "" : c.mint, c.symbol)}<b>${esc(c.symbol)}</b></td>
+      <td><span class="tag ${(c.source || "").startsWith("copy") ? "copy" : c.source === "late" ? "late" : ""}">${esc(c.chain ? "🌐 " + c.chain : c.source)}</span></td>
       <td class="r">${dur(c.closed - c.opened)}</td><td class="r">${c.cost.toFixed(3)}</td>
       <td class="r ${cls(c.pnl)}">${signed(c.pnl)} (${pct(c.pnl_pct)})</td><td class="r">${pct(c.peak_gain_pct)}</td>
       <td class="r num" title="${c.mcap_approx ? "from the recorded feed (dollars at today's SOL price)" : ""}">${c.entry_mcap_sol ? `${mcUsd(c.entry_mcap_sol)} → ${mcUsd(c.exit_mcap_sol)}` : "–"}</td><td class="why" title="${esc(c.exit)}">${esc(c.exit)}</td></tr>`).join("")
@@ -2048,7 +2080,7 @@ async function loadViews() {
     if (LV.on.has("kol")) LV.data.kol = await get("/api/kols") || LV.data.kol;
     if (LV.on.has("hot")) LV.data.hot = ((await get("/api/hot")) || {}).names || LV.data.hot;
     if (LV.on.has("grad")) LV.data.grad = ((await get("/api/desk")) || {}).late || LV.data.grad;
-    if (LV.on.has("chains") && Date.now() - (LV.chainsAt || 0) > 30000) { LV.chainsAt = Date.now(); LV.data.chains = await get("/api/chains") || LV.data.chains; }
+    if (LV.on.has("chains") && Date.now() - (LV.chainsAt || 0) > (LV.data.chains && LV.data.chains.loading ? 4000 : 30000)) { LV.chainsAt = Date.now(); LV.data.chains = await get("/api/chains") || LV.data.chains; }
     renderViews();
   }
   LV.timer = setTimeout(loadViews, 3000);
@@ -2101,7 +2133,7 @@ function viewBody(k) {
         <td class="r num">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r num">${r.vol_h1 != null ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
         <td class="r num">${pc(r.chg_m5)}</td><td class="r num">${pc(r.chg_h1)}</td><td class="r num">${pc(r.chg_h24)}</td>
         <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${ageShort(r.age_s)}</td>
-        <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${LV.fresh ? "Nothing under a week old here right now: turn off Fresh only, or try New." : "Nothing listed right now."}</div>`}
+        <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${d.loading ? "Loading other chains from GeckoTerminal…" : LV.fresh ? "Nothing under a week old here right now: turn off Fresh only, or try New." : "Nothing listed right now."}</div>`}
       <p class="note">Read-only, from GeckoTerminal (refreshed every 90 s). The bot trades pump.fun only: other chains are watched, not traded, until the Solana bot proves an edge (docs/MULTICHAIN.md).${d.error ? ` · ${esc(d.error)}` : ""}</p>`;
   }
   if (k === "pulse") return svgPulse(s.pulse || [], s.pulse_since || 0, 150);
@@ -6007,13 +6039,14 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-hqref],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
   if (d.hqref) { loadHQ(); return; }
+  if (d.xsell) { if (confirm("Sell this other-chain position now (paper)?")) send({action: "xchain_sell", key: d.xsell}); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
   if (d.lvchain) { const [key, v] = d.lvchain.split(":");
     if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
@@ -6112,7 +6145,7 @@ document.addEventListener("click", e => {
   if (d.apply) { const v = $("in-" + d.apply).value; send({action: "set", key: d.apply, value: v}); return; }
   if (d.enum) { send({action: "set", key: d.key, value: d.enum}); return; }
   if (d.tabLink) { setTab(d.tabLink); return; }
-  if (d.open) openDrawer(d.open);
+  if (d.open) openCoin(d.open);
 });
 document.addEventListener("change", e => { const t = e.target; if (t.matches('.ctl input[type="checkbox"]')) send({action: "set", key: t.dataset.key, value: t.checked});
   if (t.matches("input[data-advkey]")) send({action: "set", key: t.dataset.advkey, value: t.checked}); });
@@ -6137,7 +6170,7 @@ addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.target.id === "pf-addr" || e.target.id === "pf-label")) $("pf-add").click();
     return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openDrawer(e.target.dataset.open); return; }
+  if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openCoin(e.target.dataset.open); return; }
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.bot) { e.target.click(); return; }
   if (e.key === "Escape") { if (!$("term").hidden) termOpen(false); else if (!$("ctx").hidden) $("ctx").hidden = true; else if (!$("help").hidden) $("help").hidden = true; else if (!$("wardrobe").hidden) $("wardrobe").hidden = true;
     else if (!$("zscreen")?.hidden && $("zscreen")) zoomOut(); else if (RE.on) setRoomEdit(false); else if (AR.on) setArrange(false); else closeDrawer(); }
