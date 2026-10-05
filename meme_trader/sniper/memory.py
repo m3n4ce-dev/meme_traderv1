@@ -175,6 +175,18 @@ class Memory:
         self._save()
         return True
 
+    def set_board(self, item_id: str, on: bool) -> bool:
+        """Show or hide a note on the room's corkboard. Hidden notes stay in memory: the desk still reads them."""
+        it = next((i for i in self.items_ if i.get("id") == item_id), None)
+        if it is None:
+            return False
+        if on:
+            it.pop("off_board", None)
+        else:
+            it["off_board"] = True
+        self._save()
+        return True
+
     def remove(self, item_id: str) -> bool:
         n = len(self.items_)
         self.items_ = [i for i in self.items_ if i.get("id") != item_id]

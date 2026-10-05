@@ -141,6 +141,17 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
 
     app = web.Application(middlewares=[local_only])
     cache = {"snap": None, "text": ""}
+    ui_subs: set[asyncio.Queue] = set()                # every open dashboard: screen actions from the chat
+
+    def ui_broadcast(msg: dict) -> int:
+        n = 0
+        for q in list(ui_subs):
+            try:
+                q.put_nowait(msg)
+                n += 1
+            except asyncio.QueueFull:
+                ui_subs.discard(q)
+        return n
 
     def snapshot_text() -> str:
         snap = engine.snapshot()                     # cached per tick inside the engine
@@ -362,6 +373,14 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     await send(jsonsafe.dumps({"type": "ticks", "charts": out}))
 
         chart_task = asyncio.create_task(chart_pump())
+        ui_q: asyncio.Queue = asyncio.Queue(maxsize=50)
+        ui_subs.add(ui_q)
+
+        async def ui_pump():
+            while not sock.closed:
+                await send(jsonsafe.dumps(await ui_q.get()))
+
+        ui_task = asyncio.create_task(ui_pump())
         chat_q = chat.subscribe() if chat else None
 
         async def chat_pump():
@@ -394,6 +413,8 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         finally:
             task.cancel()
             chart_task.cancel()
+            ui_task.cancel()
+            ui_subs.discard(ui_q)
             if chat_task:
                 chat_task.cancel()
                 chat.unsubscribe(chat_q)
@@ -630,6 +651,10 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             else:
                 spawn(engine.discuss_note(iid))
             return {"ok": True, "memory": memory_view(), "text": "The desk is reading it"}
+        if action == "mem_board":                         # the corkboard: hide a note from it, or put it back
+            ok = engine.memory.set_board(str(cmd.get("id") or ""), bool(cmd.get("on")))
+            return {"ok": ok, "memory": memory_view(), "text": ("Back on the board" if cmd.get("on") else
+                    "Hidden from the board: the desk still remembers it") if ok else "that note is gone"}
         if action == "mem_del":
             engine.memory.remove(str(cmd.get("id") or ""))
             return {"ok": True, "memory": memory_view(), "text": "Removed from memory"}
@@ -698,13 +723,15 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             mint = str(cmd.get("mint") or "").strip()
             held = engine.positions.get(mint)
             err = await engine.manual_buy(mint, sol)
+            if not err and cmd.get("hand"):                # "Buy & give to bots": the bots ride it from the fill
+                engine.hand_after[mint] = engine.now
             if not err and held is not None:
-                return {"ok": True, "text": f"Adding {float(sol):g} SOL to {held.symbol}"}
+                return {"ok": True, "text": f"Adding {float(sol):g} SOL to {held.symbol}" + (" · the bots ride it" if cmd.get("hand") else "")}
             if err:
                 return {"ok": False, "text": err}
             if mint in engine.manual_queue:
                 return {"ok": True, "text": f"Queued {float(sol):g} SOL: buying at its first trade on the curve"}
-            return {"ok": True, "text": f"Buy {float(sol):g} SOL sent"}
+            return {"ok": True, "text": f"Buy {float(sol):g} SOL sent" + (": the bots ride it once it fills" if cmd.get("hand") else "")}
         if action == "m_sell":
             err = await engine.manual_sell(str(cmd.get("mint") or ""), cmd.get("fraction"))
             return {"ok": not err, "text": err or "Sell sent"}
@@ -771,6 +798,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         from ..sniper.agent_api import AgentAPI, AgentError
 
         api = AgentAPI(engine)
+        api.ui_sink = ui_broadcast
 
         async def agent(request):
             # a secret header, not a cookie: a web page can't send it (custom headers need a CORS

@@ -179,6 +179,7 @@ class Engine:
         self.desk_reviews: deque = deque(maxlen=20)
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
+        self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
         from .memory import Memory
 
         self.memory = Memory(DATA / "memory.json" if feed.realtime else None)   # what you've fed the desk
@@ -1428,7 +1429,12 @@ class Engine:
             self.book.day_pnl -= pos.cost_sol      # once, and today, so the daily loss limit sees all of it
             pos.cost_sol = 0.0
         pnl = pos.proceeds_sol - pos.initial_cost_sol
+        usd = self.sol_price.usd
+        mc_in = self._mc_at(s, pos.entry_price)
+        mc_out = s.market_cap_sol if s.price_known else None
         row = {
+            "entry_mcap_sol": round(mc_in, 2) if mc_in else None, "exit_mcap_sol": round(mc_out, 2) if mc_out else None,
+            "entry_mcap_usd": round(mc_in * usd) if mc_in and usd else None, "exit_mcap_usd": round(mc_out * usd) if mc_out and usd else None,
             "mint": pos.mint, "symbol": pos.symbol, "opened": pos.opened_at, "closed": self.now,
             "cost": pos.initial_cost_sol, "proceeds": pos.proceeds_sol, "pnl": pnl,
             "pnl_pct": pnl / max(pos.initial_cost_sol, 1e-12) * 100, "peak_gain_pct": pos.gain_pct(pos.peak_price),
@@ -1462,6 +1468,13 @@ class Engine:
     async def _tick(self) -> None:
         if self.deferred:
             await self._settle_deferred()
+        for m, t in list(self.hand_after.items()):       # a "Buy & give to bots" whose buy has filled
+            pos = self.positions.get(m)
+            if pos is not None and pos.source == "manual":
+                del self.hand_after[m]
+                self.hand_over(m, True)
+            elif self.now - t > 900 and m not in self.pending and m not in self.manual_queue:
+                del self.hand_after[m]                   # the buy never happened
         if self.persist and self.now - self._last_state_save >= 10:
             self.save_state()
         if self.feed.realtime and self.p.sizing.enabled and self.now - self._last_price_refresh >= 300:
@@ -1658,6 +1671,8 @@ class Engine:
         b = d["book"]
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
         self.book.day_pnl, self.book.halted, self.book.closed = b["day_pnl"], b["halted"], b["closed"]
+        from .mcapfill import apply as fill_mcaps
+        fill_mcaps(self.book.closed, DATA, self.sol_price.usd)          # market caps for trades from before they were logged
         # cash stays reserved only for buys that are still unresolved; anything else was in flight when the
         # process died and is accounted for by the wallet reconcile below
         open_buys = {o["mint"] for o in (d.get("unresolved") or {}).values() if o.get("side") == "buy"}
@@ -2885,6 +2900,11 @@ class Engine:
 
     WHALE_SOL = 2.0          # a single trade this big gets a marker on the live chart
 
+    @staticmethod
+    def _mc_at(s: TokenState, price: float) -> float | None:
+        """The coin's market cap (SOL) at a given price: market cap scales with price (Mayhem coins included)."""
+        return s.market_cap_sol * price / s.curve.price if s is not None and s.price_known and s.curve.price > 0 and price else None
+
     def _study_wallets(self) -> dict[str, str]:
         """Wallets the wallet study qualified (data/wallets/view.json), re-read at most every 5 minutes."""
         c = getattr(self, "_study_cache", None)
@@ -2966,6 +2986,9 @@ class Engine:
                 marks.append({"t": round(t, 2), "p": at(t), "side": "sell", "who": k, "label": f"{lab} sold part for {sol:.3f} SOL ({why[:40]})"})
         marks.sort(key=lambda m: m["t"])
         return {"mint": mint, "symbol": s.symbol, "pts": pts, "marks": marks, "now": round(self.now, 2), "fam": self.family(mint),
+                "mcap_usd": round(s.market_cap_sol * self.sol_price.usd), "curve_pct": round(s.curve.progress * 100, 1),
+                "mc_per_px": s.market_cap_sol / s.curve.price if s.price_known and s.curve.price > 0 else None,
+                "age_s": round(s.age(self.now)), "migrated": s.migrated,
                 "price": s.curve.price, "entry": pos.entry_price if pos else None,
                 "position": None if pos is None else {"source": pos.source, "bot": pos.bot or "",
                                                        "gain_pct": round(pos.gain_pct(s.curve.price), 1),
@@ -3153,7 +3176,8 @@ class Engine:
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
                 "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual, "bot": pos.bot,
-                "adds": len(pos.adds or []), "ride_tp": pos.ride_tp, "fam": self.family(m), "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
+                "adds": len(pos.adds or []), "ride_tp": pos.ride_tp, "fam": self.family(m),
+                "entry_mcap_sol": self._mc_at(s, pos.entry_price), "mcap_sol": s.market_cap_sol if s.price_known else None, "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
