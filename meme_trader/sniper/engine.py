@@ -36,9 +36,12 @@ from .predictor import LogisticModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry, evaluate_late_exit,
-                       evaluate_manual_exit, exit_watch, gate_checklist, initials_fraction, late_checklist)
+                       evaluate_manual_exit, evaluate_ride_exit, exit_watch, gate_checklist, initials_fraction,
+                       late_checklist)
 from .tracker import TokenState
 
+# handed-over positions: half out at 2x, trail the rest 30% off its peak once it's run 30%, stop 40% down
+RIDE_DEFAULTS = {"take_x": 2.0, "take_frac": 0.5, "trail_pct": 30.0, "trail_arm_pct": 30.0, "stop_pct": 40.0}
 DUST_SOL = 0.0005
 TOKEN_ACCOUNT_RENT = 0.00203928       # refundable SOL locked in each new token account (live)
 UNRESOLVED_EXPIRY_S = 150             # a Solana tx can't land once its blockhash expires (~60-90 s)
@@ -247,6 +250,7 @@ class Engine:
         self.last_event = 0.0                              # feed health: time of the last real event
         # per minute: [ts, launches, trades, SOL bought, SOL sold, graduations] (dashboard "market pulse")
         self.pulse: deque = deque(maxlen=90)
+        self.pulse_since = 0.0
         self._last_health = 0.0
         self.recorded_degraded = ""                        # replays: the recording says the live feed was bad here
         self.deferred: list = []                           # paper orders still "in flight" (execution.paper_delay_s)
@@ -270,6 +274,8 @@ class Engine:
         return self.book.sol + sum(pos.tokens * self._mark(m, pos) for m, pos in self.positions.items())
 
     def _pulse_row(self) -> list:
+        if not self.pulse_since:
+            self.pulse_since = self.now                       # this run's first minute is only part of one
         minute = int(self.now // 60) * 60
         if not self.pulse or self.pulse[-1][0] != minute:
             self.pulse.append([minute, 0, 0, 0.0, 0.0, 0])
@@ -1198,7 +1204,7 @@ class Engine:
             entry_quote=(meta or {}).get("quote", 0.0),
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
             failed_fees_sol=fill.fees_lost,
-            bot=self._bot_rules_for(s) if source == "manual" and self.away else "")
+            bot="ride" if source == "manual" and self.away else "")
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
@@ -1227,12 +1233,18 @@ class Engine:
         px = s.curve.price
         pos.peak_price = max(pos.peak_price, px)
         pos.trough_price = min(pos.trough_price or px, px)
-        rules = pos.bot or pos.source       # a position you handed over runs on the bots' rules
-        if rules == "manual":              # yours: only the exits you set, plus leaving the curve
+        rules = "ride" if pos.source == "manual" and pos.bot else pos.source    # handed over: the bots ride it
+        if rules == "ride":
+            if not pos.handed_price:                   # handed over before these rules existed
+                pos.handed_price = pos.handed_peak = px
+            r = evaluate_ride_exit(pos, s, self._ride_cfg(), self.mode.startswith("live"))
+        elif rules == "manual":            # yours: only the exits you set, plus leaving the curve
             mc = self._manual_cfg()
+            # a graduated coin keeps a price on paper (DexScreener's pool); live orders only reach the curve
             r = evaluate_manual_exit(pos, s, {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
                                               "tp_frac": mc.take_profit_frac, "trail": mc.trail_pct,
-                                              "sell_on_graduation": mc.sell_on_graduation, **(pos.manual or {})})
+                                              "sell_on_graduation": mc.sell_on_graduation and self.mode.startswith("live"),
+                                              **(pos.manual or {})})
             if r and r[1].startswith("manual take profit"):
                 pos.manual = {**(pos.manual or {}), "tp_done": True}      # once per position
         elif rules == "callout":              # hold the $1 callout bag; never trade it against followers
@@ -1589,7 +1601,7 @@ class Engine:
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
-                 "called": sorted(self.callouts.called)[-2000:]}
+                 "called": sorted(self.callouts.called)[-2000:], "pulse": [list(r) for r in self.pulse]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, default=str))
@@ -1614,6 +1626,8 @@ class Engine:
         self.defense_until = (d.get("defense") or {}).get("until", 0.0)
         self.defense_reason = (d.get("defense") or {}).get("reason", "")
         self.callouts.called.update(d.get("called", []))
+        cut = time.time() - 90 * 60                          # the Market Pulse chart keeps its last hour across a restart
+        self.pulse.extend(r for r in d.get("pulse") or [] if isinstance(r, list) and len(r) == 6 and r[0] >= cut)
         self.unresolved = dict(d.get("unresolved") or {})
         saved_tokens = d.get("tokens") or {}
         now = self.feed.now()
@@ -1937,8 +1951,13 @@ class Engine:
         from ..config import Params
 
         d = {"max_sol": 2.0, "presets_sol": [0.05, 0.1, 0.25, 0.5, 1.0], "stop_loss_pct": 0,
-             "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_graduation": True, "queue_s": 60}
+             "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_graduation": True, "queue_s": 60,
+             "handover": RIDE_DEFAULTS}
         return Params({**d, **(self.p.get("manual") or {})})
+
+    def _ride_cfg(self) -> dict:
+        """How the bots ride a position you hand them (manual.handover in the config)."""
+        return {**RIDE_DEFAULTS, **dict((self.p.get("manual") or {}).get("handover") or {})}
 
     async def manual_buy(self, mint: str, sol: float) -> str:
         """Your buy: '' when sent (or queued for the coin's first priced trade), else why not."""
@@ -2373,9 +2392,6 @@ class Engine:
         }
 
     # ------------------------------------------------------------------ hand your positions to the bots
-    def _bot_rules_for(self, s: TokenState | None) -> str:
-        """Graduation-play exits for a coin already past half its curve, the general sniper exits below that."""
-        return "late" if s is not None and s.curve.progress >= 0.5 else "sniper"
 
     def hand_over(self, mint: str = "", on: bool = True, who: str = "dashboard") -> tuple[int, str]:
         """Give your positions (one, or all with mint='') to the bots, or take them back. (count, message)."""
@@ -2386,7 +2402,10 @@ class Engine:
             if pos is None or pos.source != "manual":
                 continue
             if on and not pos.bot:
-                pos.bot = self._bot_rules_for(self.tokens.get(m))
+                s = self.tokens.get(m)
+                pos.bot = "ride"
+                pos.handed_price = pos.handed_peak = s.curve.price if s is not None and s.price_known else pos.entry_price
+                pos.ride_tp = False
                 n += 1
             elif not on and pos.bot:
                 pos.bot = ""
@@ -2399,7 +2418,7 @@ class Engine:
         if n:
             self.save_state()
             self.say("agent" if who == "agent" else "info",
-                     f"{n} of your position(s) {'handed to the bots: their exit rules apply now' if on else 'back to you: only your exits apply'}")
+                     f"{n} of your position(s) {'handed to the bots: they ride it for a runner' if on else 'back to you: only your exits apply'}")
         return n, ""
 
     def set_away(self, on: bool, who: str = "dashboard") -> str:
@@ -2830,7 +2849,7 @@ class Engine:
                 "value_sol": pos.tokens * price, "cost_sol": pos.initial_cost_sol, "proceeds_sol": pos.proceeds_sol,
                 "initials": pos.initials_taken, "progress": s.curve.progress, "score": pos.score,
                 "source": pos.source, "desk": pos.desk, "p": pos.p, "manual": pos.manual, "bot": pos.bot,
-                "adds": len(pos.adds or []), "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
+                "adds": len(pos.adds or []), "ride_tp": pos.ride_tp, "last_trade_s": round(self.now - s.last_trade_ts) if s.last_trade_ts else None,
                 "spark": [p for t, p, *_ in s.trades if t >= pos.opened_at - 30][-120:],
                 "entry_idx": sum(1 for t, *_ in s.trades if pos.opened_at - 30 <= t < pos.opened_at),
             })
@@ -2861,7 +2880,7 @@ class Engine:
             "strategies": {"sniper": self.p.entry.enabled, "copy": self.p.copy.enabled,
                            "callouts": self.p.callouts.enabled, "late": self.p.late.enabled},
             "tracked_tokens": len(self.tokens),
-            "pulse": [list(r) for r in self.pulse][-60:], "deposits": self.book.deposits[-20:],
+            "pulse": [list(r) for r in self.pulse][-60:], "pulse_since": self.pulse_since, "deposits": self.book.deposits[-20:],
             "risk": self.risk_info(),
             "limits": {"daily_loss_sol": self.p.capital.daily_loss_limit_sol,
                        "kill_dd_pct": self.p.capital.max_drawdown_pct, "kill_base": self.book.kill_base,

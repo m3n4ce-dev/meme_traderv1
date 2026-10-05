@@ -143,7 +143,10 @@ class SniperPosition:
     failed_fees_sol: float = 0.0
     manual: dict | None = None   # manual positions: {"sl", "tp", "tp_frac", "trail", "tp_done"} (0 = off)
     adds: list | None = None     # buys added to the position later: [(ts, sol, tokens, price)]
-    bot: str = ""                # your position handed to the bots: the exit rules they run on it ("late", "sniper")
+    bot: str = ""                # your position handed to the bots ("ride"; older saves say "late"/"sniper")
+    handed_price: float = 0.0    # the price when you handed it over, and its peak since
+    handed_peak: float = 0.0
+    ride_tp: bool = False        # the bots already took their partial profit
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
@@ -317,6 +320,30 @@ def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
         return min(max(float(m.get("tp_frac") or 0.5), 0.05), 1.0), f"manual take profit {gain:+.0f}%"
     if m.get("trail") and gain > 0 and pos.peak_price and price <= pos.peak_price * (1 - m["trail"] / 100):
         return 1.0, f"manual trail -{m['trail']:.0f}% off peak"
+    return None
+
+
+def evaluate_ride_exit(pos: SniperPosition, s: TokenState, r: dict, live: bool = False):
+    """A position you handed to the bots: ride it for a runner. Part out at take_x times the entry (half, at 2x
+    by default), the rest trails trail_pct off its peak once it has run trail_arm_pct past the hand-over price
+    (or after the partial), and a stop stop_pct below the lower of the entry and the hand-over price. No time,
+    stall, momentum or dev-sold exits: those suit the bots' own quick scalps, and on a coin you'd held for a
+    while they fired at once. (fraction, reason) or None."""
+    price = s.curve.price
+    pos.peak_price = max(pos.peak_price, price)
+    handed = pos.handed_price or pos.entry_price
+    pos.handed_peak = max(pos.handed_peak or handed, price)
+    if s.migrated and live:
+        return 1.0, "bots: graduated (live orders work on the curve only)"
+    if price <= min(pos.entry_price, handed) * (1 - r["stop_pct"] / 100):
+        return 1.0, f"bots: stop {pos.gain_pct(price):.0f}%"
+    if not pos.ride_tp and r.get("take_x") and price >= pos.entry_price * r["take_x"]:
+        pos.ride_tp = True
+        frac = min(max(float(r.get("take_frac") or 0.5), 0.05), 1.0)
+        return frac, f"bots: {frac:.0%} out at {r['take_x']:g}x"
+    armed = pos.ride_tp or pos.handed_peak >= handed * (1 + r["trail_arm_pct"] / 100)
+    if armed and price <= pos.handed_peak * (1 - r["trail_pct"] / 100):
+        return 1.0, f"bots: trail -{r['trail_pct']:g}% off its peak"
     return None
 
 
