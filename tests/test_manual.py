@@ -242,3 +242,44 @@ def test_restart_button_saves_and_restarts(tmp_path):
             return m
     m = asyncio.run(go())
     assert m["ok"] and m["restarting"] and called == [e]
+
+
+def test_the_owner_can_lift_the_kill_switch_and_it_counts_from_there(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from meme_trader.ui.server import make_app
+
+    e = market()
+    start = e.book.start_sol
+    e.book.sol = start * 0.55                                   # 45% down, nothing open
+    asyncio.run(e._tick())
+    assert e.book.halted.startswith("drawdown")
+    assert e.clear_halt("agent") and e.book.halted                # never the agent's call
+    assert e.clear_halt("dashboard") == "" and not e.book.halted
+    assert e.book.kill_base == pytest.approx(start * 0.55)       # re-measured from today's equity...
+    assert e.kill_at() == pytest.approx(start * 0.55 * (1 - e.p.capital.max_drawdown_pct / 100))
+    asyncio.run(e._tick())
+    assert not e.book.halted                                     # ...so it doesn't trip again at once
+    e.deposit_paper(1.0)
+    assert e.book.kill_base == pytest.approx(start * 0.55 + 1)   # a top-up moves the line with the cash
+    e.book.sol = e.kill_at() - 0.01
+    asyncio.run(e._tick())
+    assert e.book.halted                                          # and it still trips past the new line
+    e.persist = True
+    e.save_state()
+    e2 = market(launches=1)
+    asyncio.run(e2.restore_state())
+    assert e2.book.kill_base == pytest.approx(e.book.kill_base)
+
+    async def go():
+        async with TestClient(TestServer(make_app(e, data_dir=tmp_path))) as c:
+            host = f"127.0.0.1:{c.port}"
+            ws = await c.ws_connect("/ws", headers={"Origin": f"http://{host}", "Host": host})
+            await ws.receive_json()
+            await ws.send_json({"action": "unhalt"})
+            while (m := await ws.receive_json())["type"] != "ack":
+                pass
+            await ws.close()
+            return m
+    m = asyncio.run(go())
+    assert m["ok"] and "trips again at" in m["text"] and not e.book.halted

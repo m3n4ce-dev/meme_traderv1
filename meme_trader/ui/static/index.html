@@ -810,6 +810,20 @@ tr.lab-base td { background: var(--series-soft); } tr.lab-best td:first-child { 
 .compose { width: min(640px, 100%); } .compose textarea { width: 100%; min-height: 120px; margin-top: 10px; font: 14px/1.45 system-ui; }
 .cp-card { margin-top: 8px; } .cp-card img { display: block; width: 100%; border-radius: 10px; margin-top: 6px; border: 1px solid var(--ring); }
 .warn-t { color: var(--warn); }
+.term { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 150; width: min(760px, calc(100vw - 32px)); height: min(380px, 70vh);
+  min-width: 300px; min-height: 180px; max-width: calc(100vw - 32px); resize: both; overflow: hidden; display: flex; flex-direction: column;
+  background: #0b0f14; color: #d6dde6; border: 1px solid #2a3442; border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  font: 13px/1.45 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+.term[hidden] { display: none; }
+.term-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; background: #121924; border-bottom: 1px solid #2a3442; }
+.term-head b { color: #7ee787; font-weight: 600; } .term-head span { color: #7d8896; font-size: 11px; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.term-head button { background: transparent; color: #d6dde6; border-color: #2a3442; }
+.term-out { flex: 1; overflow: auto; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; }
+.term-out .tl.cmd { color: #79c0ff; margin-top: 4px; } .term-out .tl.ok { color: #7ee787; } .term-out .tl.bad { color: #ff7b72; }
+.term-out .tl.warn { color: #e3b341; } .term-out .tl.dim { color: #7d8896; }
+.term-row { display: flex; align-items: center; gap: 8px; padding: 6px 12px 8px; border-top: 1px solid #1c2531; }
+.term-ps { color: #7ee787; } .term-row input { flex: 1; background: transparent; border: 0; color: #e6edf3; font: inherit; padding: 4px 0; outline: none; box-shadow: none; }
+@media (max-width: 520px) { .term { right: 16px; left: 16px; width: auto; height: 60vh; resize: none; } }
 .cmdk { position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,.35); display: grid; justify-items: center; align-items: start; padding: 12vh 16px 16px; }
 .ck-box { width: min(640px, 100%); background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .ck-box input { width: 100%; border: 0; border-bottom: 1px solid var(--ring); border-radius: 0; padding: 14px 16px; font-size: 15px; background: transparent; }
@@ -920,6 +934,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <button id="arrange" class="ghost small" title="Arrange this page: drag panels, hide some (a)" aria-pressed="false">✎ Arrange</button>
   <button id="theme" class="ghost small" title="Theme (t)" aria-label="Switch theme">◐</button>
   <button id="pause" title="Stop/start opening new positions (p). Open positions keep being managed.">Pause entries</button>
+  <button id="term-btn" title="Terminal: type commands to the bot (the ` key)" aria-label="Terminal">&gt;_</button>
   <button id="restart" title="Restart the bot: saves everything, reloads its code and settings, and picks up where it left off">↻ Restart</button>
   <button id="kill" class="kill" title="Sell everything and stop opening positions">KILL</button>
 </header>
@@ -1313,6 +1328,11 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
   <div class="note" id="cp-help"></div>
   <div class="toolbar" style="margin-top:10px"><span class="note">Posted under your name. Paper results are labelled as paper.</span><div class="spacer"></div><button id="cp-cancel">Cancel</button><button class="primary" id="cp-post">Post</button></div>
 </div></div>
+<div class="term" id="term" hidden role="dialog" aria-label="Bot terminal">
+  <div class="term-head"><b>&gt;_ terminal</b><span>help lists commands · ↑ history · Tab completes · Esc closes</span><button class="small" id="term-x" aria-label="Close the terminal">×</button></div>
+  <div class="term-out" id="term-out" aria-live="polite"></div>
+  <div class="term-row"><span class="term-ps">meme&gt;</span><input id="term-in" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Command"></div>
+</div>
 <div class="cmdk" id="cmdk" hidden><div class="ck-box" role="dialog" aria-label="Command palette">
   <input id="ck-in" type="text" placeholder="Search tabs, coins, settings, the guide… or paste a contract address" spellcheck="false" aria-label="Command">
   <div id="ck-list" class="ck-list"></div><div class="note ck-foot">↑↓ move · Enter run · Esc close</div></div></div>
@@ -1455,7 +1475,8 @@ function renderChrome(s) {
     fb.title = stale ? "No market data recently - entries can't trigger. Check the internet / API key." : "Seconds since the last market event";
   }
   const b = [];
-  if (s.halted) b.push(`<div class="banner bad">⛔ Halted: ${esc(s.halted)}. No new positions. Restart the bot to reset.</div>`);
+  if (s.halted) b.push(`<div class="banner bad">⛔ Halted: ${esc(s.halted)}. No new positions until you resume. <button class="small" data-unhalt="1">Resume trading…</button>${s.mode.startsWith("paper")
+    ? ` <button class="small" data-addpaper="1">Add paper SOL</button> <button class="small" data-startover="1">Start over…</button>` : ""}</div>`);
   if (s.away) b.push(`<div class="banner away">🚶 Away mode: the bots are managing your positions (and any your orders open). <button class="small" data-away="0">I'm back</button></div>`);
   if ($("away-btn")) { $("away-btn").textContent = s.away ? "🚶 Away: on" : "🚶 Away"; $("away-btn").setAttribute("aria-pressed", String(!!s.away)); }
   if (s.defense && s.defense.on) b.push(`<div class="banner warn">🛡 Defense mode for ${s.defense.minutes_left} more min (${esc(s.defense.reason)}): half size, higher entry bar.</div>`);
@@ -1466,6 +1487,7 @@ function renderChrome(s) {
 // ---------------------------------------------------------------- live view
 function render(s) {
   snap = s;
+  if (TM.waiters.length) { const w = TM.waiters; TM.waiters = []; w.forEach(f => f()); }
   renderChrome(s);
   renderRisk(s);
   logToasts(s);
@@ -3678,9 +3700,10 @@ function renderLiveVisuals(s) {
   const used = s.day_pnl < 0 && lim.daily_loss_sol ? Math.min(1, -s.day_pnl / lim.daily_loss_sol) : 0;
   $("k-day-meter").firstChild.style.cssText = `width:${(used * 100).toFixed(1)}%;background:${used > .7 ? "var(--bad)" : used > .4 ? "var(--warn-mark)" : "var(--good-mark)"}`;
   $("k-day-sub").textContent = lim.daily_loss_sol ? (used ? `${Math.round(used * 100)}% of the ${lim.daily_loss_sol} SOL daily loss limit used` : `loss limit ${lim.daily_loss_sol} SOL / day · resets 00:00 UTC`) : "UTC day, resets 00:00";
-  const dd = Math.max(0, (1 - s.equity / sm.start_sol) * 100), kill = lim.kill_dd_pct || 100, df = Math.min(1, dd / kill);
+  const dd = Math.max(0, (1 - s.equity / sm.start_sol) * 100), kill = lim.kill_dd_pct || 100;
+  const base = lim.kill_base || sm.start_sol, df = Math.min(1, Math.max(0, (1 - s.equity / base) * 100) / kill);   // how close the kill switch is
   $("k-dd").textContent = dd.toFixed(1) + "%";
-  $("k-dd-sub").textContent = `below start · kill switch at ${kill}%`;
+  $("k-dd-sub").textContent = lim.kill_base ? `below start · kill switch at ${(+lim.kill_at_sol).toFixed(3)} SOL (${kill}% below where you resumed)` : `below start · kill switch at ${kill}%`;
   $("k-dd-meter").firstChild.style.cssText = `width:${Math.max(df * 100, dd ? 2 : 0).toFixed(1)}%;background:${df > .6 ? "var(--bad)" : df > .3 ? "var(--warn-mark)" : "var(--good-mark)"}`;
   const rows = s.closed.slice(0, 60).reverse();
   const w = rows.filter(r => r.pnl > 0).length;
@@ -3917,6 +3940,7 @@ function onChat(m) {
     if (old) C.msgs[C.msgs.indexOf(old)] = m.msg; else C.msgs.push(m.msg);
     if (C.loaded) renderMsg(m.msg);
     if (m.msg.role === "assistant") { chatAttention(m.msg); if (m.msg.done && (!old || !old.done)) buddyOnDone(m.msg); }
+    if (TM.ask && m.msg.role === "assistant" && m.msg.done) { TM.ask = false; termPrint((m.msg.parts || []).filter(x => x.type === "text").map(x => x.text).join("\n").trim() || "(Claude answered in the Chat tab)"); }
     buddyRender();
   } else if (m.ev === "delta") {
     const msg = C.byId[m.id]; if (!msg) return;
@@ -4284,7 +4308,9 @@ const GUIDE = [
       <li><b>Always on:</b> the per-trade dollar cap, the daily loss limit, the drawdown kill switch, and defense mode (half size after a losing run). KILL sells everything and has no keyboard shortcut on purpose.</li>
       <li><b>Live money:</b> use a dedicated wallet holding only the bot's budget. Live needs <code>MEME_TRADER_CONFIRM_LIVE=yes</code>. Most pump.fun coins go to zero; nothing here is financial advice.</li>
       <li>The dashboard only answers on 127.0.0.1: reach it from another machine through an SSH tunnel.</li>
-      <li><b>↻ Restart</b> (next to KILL) saves everything, reloads the bot's code and settings, and picks up where it left off: open positions and orders resume.</li></ul>`},
+      <li><b>↻ Restart</b> (next to KILL) saves everything, reloads the bot's code and settings, and picks up where it left off: open positions and orders resume.</li>
+      <li><b>Halted?</b> Press <b>Resume trading…</b> in the red banner. A restart doesn't clear a halt. If the account is still past the drawdown limit, the kill switch counts from where you resumed.</li>
+      <li><b>&gt;_ Terminal</b> (or the <kbd>&#96;</kbd> key): type commands instead of clicking: <code>status</code>, <code>pos</code>, <code>buy BONK 0.1</code>, <code>sell all</code>, <code>alert BONK &gt;= 1m</code>, <code>hand all</code>, <code>unhalt</code>, <code>log 20</code>, <code>ask …</code>. <code>help</code> lists them all. Bot commands only, never system commands.</li></ul>`},
   {id: "arrange", icon: "✎", title: "Make it yours", html: `
     <ul><li><b>✎ Arrange</b> (${K("a")}): every page becomes a 12-column board. Drag panels by their bar, drag a panel's right edge to resize it, pick a width (⅓ ½ ⅔ Full) and a height, hide what you don't use and bring it back from the bar at the bottom. Saved on the bot, so it follows you to any browser.</li>
       <li><b>▾</b> on any panel's title collapses it, any time.</li>
@@ -4314,7 +4340,7 @@ const GUIDE = [
     ["Holdout", "data a strategy was never tuned on, used only to judge it."], ["Paper", "real market data, pretend money."]]
     .map(([t, d]) => `<dt>${t}</dt><dd>${d}</dd>`).join("")}</dl>`},
   {id: "faq", icon: "❓", title: "When something looks wrong", html: `
-    <details><summary>The bot isn't buying anything</summary><p>Check the header: "entries paused", "halted", or a degraded feed stop entries. Then Desk → Graduation scanner shows what each coin is still waiting for. If the AI desk is awake, its passes show under AI desk votes.</p></details>
+    <details><summary>The bot isn't buying anything</summary><p>Check the header: "entries paused", "halted", or a degraded feed stop entries. Halted means the kill switch tripped (or you pressed KILL): press <b>Resume trading…</b> in the red banner (a restart doesn't clear it). Then Desk → Graduation scanner shows what each coin is still waiting for. If the AI desk is awake, its passes show under AI desk votes.</p></details>
     <details><summary>The feed badge is amber or red</summary><p>The trade data is behind or missing trades; entries pause until it recovers, and the watchdog moves to a better endpoint. A paid websocket endpoint (Controls → API keys) is the lasting fix.</p></details>
     <details><summary>The AI desk says the key is invalid</summary><p>Press Test next to the key. A user key (sk-ant-usr-…) also needs the workspace ID. After three failed reviews the desk rests itself so trading isn't blocked.</p></details>
     <details><summary>X says 403 or "can't post"</summary><p>Set the app's permissions to Read and write, then <i>regenerate</i> the access token (old tokens keep the old permissions). 402 means the API credit ran out.</p></details>
@@ -4383,7 +4409,8 @@ function ckActions() {
     {label: "🔏 Publish the ledger proof", run: () => { setTab("calls"); setTimeout(() => $("cl-anchor").scrollIntoView({block: "center"}), 80); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
     {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
-    {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: "🧠 Wake / rest the AI desk", run: () => { setTab("desk"); }});
+    {label: "◐ Switch theme", hint: "t", run: cycleTheme}, {label: ">_ Open the terminal", hint: "`", run: () => termOpen(true)},
+    ...(s.halted ? [{label: "▶ Resume trading (lift the kill switch)", run: () => unhaltAsk((q, f) => { if (confirm(q)) f(); })}] : []), {label: "🧠 Wake / rest the AI desk", run: () => { setTab("desk"); }});
   for (const g of GUIDE) a.push({label: `${g.icon} Guide: ${g.title}`, hint: "help", run: () => openHelp(g.id)});
   for (const x of (S.adv || []).slice(0, 400)) a.push({label: `⚙ ${x.label || x.key}`, hint: x.key, run: () => { setTab("controls"); setTimeout(() => { $("adv-q").value = x.key; renderAdvanced(); $("adv-panel").scrollIntoView({block: "start"}); }, 120); }});
   const coins = new Map();
@@ -4498,6 +4525,7 @@ function connect() {
         if (m.lookup.now_tracking) S.drawerTimer = setTimeout(refreshDrawer, 4000);
       }
       if (m.text) toast(esc(m.text), m.ok ? "ok" : "bad");
+      if (m.text && !$("term").hidden) termPrint(m.text, m.ok ? "ok" : "bad");
       if (m.controls) { S.controls = m.controls; if (S.tab === "controls") renderControls(); }
       if (m.advanced) { S.adv = m.advanced; if (S.tab === "controls") renderAdvanced(); }
       if (m.keys) { S.keys = m.keys; renderKeys(); }
@@ -4517,6 +4545,155 @@ function connect() {
   ws.onclose = () => { $("state").textContent = "disconnected, retrying"; $("dot").className = "dot dead"; setTimeout(connect, 2000); };
 }
 const send = o => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } toast("Not connected", "bad"); return false; };
+// ---------------------------------------------------------------- terminal: type commands to the bot
+// Bot commands only (the same actions as the buttons), never a system shell: the page shows coin names
+// strangers chose, and a shell one bad string away from them isn't worth it.
+const TM = {hist: [], hi: -1, draft: "", confirm: null, ask: false, waiters: [], ranAt: 0};
+const termFresh = () => Date.now() - TM.ranAt > 2500 ? null : new Promise(r => { TM.waiters.push(r); setTimeout(r, 1500); });   // after a change, read the next snapshot
+try { TM.hist = JSON.parse(localStorage.getItem("term.hist") || "[]").slice(-100); } catch { /* private window */ }
+function termOpen(on = $("term").hidden) {
+  $("term").hidden = !on;
+  if (!on) return;
+  if (!$("term-out").childElementCount) { termPrint("Bot terminal: the same commands as the buttons, typed. Try help, status or pos.", "dim"); }
+  setTimeout(() => $("term-in").focus(), 0);
+}
+function termPrint(text, cls = "") {
+  const o = $("term-out");
+  for (const line of String(text).split("\n")) { const d = document.createElement("div"); d.className = "tl " + cls; d.textContent = line; o.appendChild(d); }
+  while (o.childElementCount > 500) o.firstChild.remove();
+  o.scrollTop = o.scrollHeight;
+}
+function termAsk(q, f) { termPrint(q + "  Type y to go ahead, anything else cancels.", "warn"); TM.confirm = f; }
+const tf3 = v => v == null || !isFinite(v) ? "–" : (+v).toFixed(3);
+const tsg = v => v == null || !isFinite(v) ? "–" : (v >= 0 ? "+" : "") + (+v).toFixed(3);
+const tpc = v => v == null || !isFinite(v) ? "–" : (v >= 0 ? "+" : "") + (+v).toFixed(1) + "%";
+function termMoney(v) {                       // 50k, 1.2m, $250000 -> dollars
+  const m = String(v || "").toLowerCase().replace(/[$,]/g, "").match(/^(\d+(?:\.\d+)?)([km]?)$/);
+  return m ? +m[1] * (m[2] === "k" ? 1e3 : m[2] === "m" ? 1e6 : 1) : NaN;
+}
+function termCoin(arg) {                      // a contract address, or a symbol the bot can see right now
+  if (!arg) return null;
+  if (isMint(arg)) return arg;
+  const q = arg.replace(/^\$/, "").toLowerCase();
+  const pools = [snap?.positions, snap?.orders, snap?.watching, PL.data && [...(PL.data.stretch || []), ...(PL.data.new || []), ...(PL.data.graduated || [])], snap?.closed];
+  for (const pool of pools) { const hit = (pool || []).find(x => (x.symbol || "").toLowerCase() === q); if (hit) return hit.mint; }
+  return null;
+}
+function termNeedCoin(arg) {
+  const m = termCoin(arg);
+  if (!m) throw new Error(arg ? `I can't find "${arg}": paste its contract address.` : "Which coin? Give a symbol or contract address.");
+  return m;
+}
+const termSym = m => (snap?.positions?.find(p => p.mint === m) || snap?.watching?.find(w => w.mint === m) || {}).symbol || m.slice(0, 6) + "…";
+function termStatus() {
+  const s = snap; if (!s) return termPrint("No data from the bot yet.", "bad");
+  const L = s.limits || {}, sm = s.summary || {}, start = L.start_sol ?? sm.start_sol;
+  const state = s.halted ? "HALTED: " + s.halted : s.paused ? "entries paused" : s.blocked ? "running · " + s.blocked : "running";
+  const on = Object.entries(s.strategies || {}).filter(([, v]) => v).map(([k]) => ({late: "graduation plays", sniper: "sniper", copy: "copy", callouts: "callouts"}[k] || k));
+  termPrint([`${s.mode.toUpperCase()} · ${state}`,
+    `Equity ${tf3(s.equity)} SOL (cash ${tf3(s.sol)}) · ${tpc(start ? (s.equity / start - 1) * 100 : null)} vs the ${tf3(start)} SOL start`,
+    `Today ${tsg(s.day_pnl)} SOL (daily limit ${L.daily_loss_sol} SOL) · kill switch at ${tf3(L.kill_at_sol)} SOL`,
+    `Closed ${sm.closed || 0} · won ${sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"} · realized ${tsg(sm.realized_pnl_sol)} SOL`,
+    `Risk ${s.risk?.name} (${s.risk?.level}/5) · ${s.positions.length} open · away ${s.away ? "on" : "off"} · bots: ${on.join(", ") || "none on"}`,
+    `Feed ${s.feed?.host || (s.mode.includes("synthetic") ? "simulated" : "?")}${s.feed?.lag_s != null ? ` · ${(+s.feed.lag_s).toFixed(1)} s behind` : ""}${s.feed?.degraded ? " · DEGRADED: " + (s.feed.degraded_reason || "") : ""}`].join("\n"), s.halted ? "bad" : "");
+}
+function termPos() {
+  const ps = snap?.positions || [];
+  if (!ps.length) return termPrint("No open positions.", "dim");
+  termPrint(ps.map(p => `${(p.symbol || "?").slice(0, 12).padEnd(12)} ${tpc(p.gain_pct).padStart(8)}  ${tf3(p.value_sol)} SOL  held ${dur(p.held_s)}  ${p.source === "manual" && !p.bot ? "yours" : p.source === "manual" ? "handed to the bots" : "bots"}  ${p.mint}`).join("\n"));
+}
+function termOrder(side, a) {                 // alert <coin> >= 1m · limit buy <coin> <= 50k 0.1 · limit sell <coin> >= 2m [50%]
+  const mint = termNeedCoin(a[0]), op = {">=": "ge", ">": "ge", "<=": "le", "<": "le"}[a[1]], mc = termMoney(a[2]);
+  if (!op || !(mc > 0)) throw new Error(`Usage: ${side === "alert" ? "alert <coin> >= 1m" : side === "buy" ? "limit buy <coin> <= 50k 0.1" : "limit sell <coin> >= 2m [50%]"}`);
+  const o = {action: "order_place", mint, side, op, mcap_usd: mc, ttl_h: 24};
+  if (side === "buy") { o.sol = +a[3]; if (!(o.sol > 0)) throw new Error("How much SOL? e.g. limit buy <coin> <= 50k 0.1"); }
+  if (side === "sell") o.frac = a[3] ? parseFloat(a[3]) / 100 : 1;
+  send(o);
+}
+const TCMD = {
+  help: ["", "this list", () => termPrint(Object.entries(TCMD).map(([k, [args, what]]) => `${(k + " " + args).padEnd(34)} ${what}`).join("\n"))],
+  status: ["", "account, P&L, limits, risk, feed", async () => { await termFresh(); termStatus(); }],
+  pos: ["", "open positions", async () => { await termFresh(); termPos(); }],
+  buy: ["<coin> <sol>", "buy, or add to one you hold (coin = symbol or address)", a => { const m = termNeedCoin(a[0]), sol = +a[1]; if (!(sol > 0)) throw new Error("How much SOL? e.g. buy " + (a[0] || "BONK") + " 0.1"); trBuy(m, sol); }],
+  sell: ["<coin|all> [pct]", "sell all or part (default 100%)", a => {
+    const f = a[1] ? parseFloat(a[1]) / 100 : 1; if (!(f > 0 && f <= 1)) throw new Error("Percent between 1 and 100");
+    if ((a[0] || "").toLowerCase() === "all") { const ps = snap?.positions || []; if (!ps.length) return termPrint("Nothing to sell.", "dim");
+      return termAsk(`Sell ${Math.round(f * 100)}% of all ${ps.length} position(s)?`, () => ps.forEach(p => send({action: "m_sell", mint: p.mint, fraction: f}))); }
+    trSell(termNeedCoin(a[0]), f); }],
+  hand: ["<coin|all>", "hand positions to the bots' exit rules", a => send({action: "m_hand", mint: (a[0] || "all").toLowerCase() === "all" ? "" : termNeedCoin(a[0]), on: true})],
+  take: ["<coin|all>", "take positions back from the bots", a => send({action: "m_hand", mint: (a[0] || "all").toLowerCase() === "all" ? "" : termNeedCoin(a[0]), on: false})],
+  away: ["on|off", "away mode: the bots manage everything while you're gone", a => send({action: "away", on: !/^(off|0|no)$/i.test(a[0] || "on")})],
+  alert: ["<coin> >=|<= <mcap>", "tell me when a coin hits a market cap (e.g. 1m, 50k)", a => termOrder("alert", a)],
+  limit: ["buy|sell <coin> >=|<= <mcap> ...", "limit order by market cap", a => { const side = (a[0] || "").toLowerCase(); if (!["buy", "sell"].includes(side)) throw new Error("limit buy … or limit sell …"); termOrder(side, a.slice(1)); }],
+  orders: ["", "open orders and alerts", async () => { await termFresh(); const os = (snap?.orders || []).filter(o => o.status === "open"); termPrint(os.length ? os.map(o => `${o.id}  ${o.side.padEnd(5)} ${(o.symbol || "").slice(0, 12).padEnd(12)} MC ${o.op === "ge" ? "≥" : "≤"} $${Math.round(o.mcap_usd).toLocaleString()}${o.sol ? `  ${o.sol} SOL` : ""}${o.frac && o.side === "sell" ? `  ${Math.round(o.frac * 100)}%` : ""}`).join("\n") : "No open orders.", os.length ? "" : "dim"); }],
+  cancel: ["<order id>", "cancel an order or alert", a => { const os = (snap?.orders || []).filter(o => o.status === "open" && a[0] && o.id.startsWith(a[0])); if (os.length !== 1) throw new Error("Give an order id from orders"); send({action: "order_cancel", id: os[0].id}); }],
+  pause: ["", "the bots stop opening positions", () => send({action: "pause"})],
+  resume: ["", "the bots open positions again", () => send({action: "resume"})],
+  unhalt: ["", "lift the kill switch (asks first)", () => unhaltAsk(termAsk)],
+  kill: ["", "sell everything and halt (asks first)", () => termAsk("Sell ALL positions and stop opening new ones?", () => send({action: "kill"}))],
+  deposit: ["<sol>", "add pretend SOL to the paper balance", a => { const v = +a[0]; if (!(v > 0)) throw new Error("e.g. deposit 5"); send({action: "deposit", sol: v}); }],
+  reset: ["", "start the paper account over (asks first)", () => termAsk("Start the paper account over at the starting balance? (Open positions must be closed first.)", () => send({action: "paper_reset"}))],
+  risk: ["[1-5|name]", "show or set the risk dial", a => {
+    const ls = snap?.risk?.levels || []; if (!a[0]) return termPrint(ls.map(l => `${l.level} ${l.name.padEnd(11)} $${l.base_usd}–$${l.max_usd} a trade · ${l.max_open_positions} open · ${l.daily_loss_limit_sol} SOL/day${l.level === snap.risk.level ? "   ← now" : ""}`).join("\n"));
+    const l = ls.find(x => String(x.level) === a[0] || x.name.toLowerCase() === a[0].toLowerCase()); if (!l) throw new Error("Pick 1-5 or a name: " + ls.map(x => x.name).join(", ")); setRisk(l.level); }],
+  desk: ["on|off|test|model <provider> [model]", "the AI desk", a => {
+    const sub = (a[0] || "").toLowerCase();
+    if (sub === "on" || sub === "off") return send({action: "desk_wake", on: sub === "on"});
+    if (sub === "test") { termPrint("Asking the model…", "dim"); return send({action: "desk_test"}); }
+    if (sub === "model") { if (!a[1]) throw new Error("desk model <anthropic|github|huggingface|openrouter|local> [model]"); return send({action: "desk_brain", provider: a[1], model: a[2] || "", base_url: ""}); }
+    const d = snap?.desk || {}; termPrint(`AI desk ${d.enabled ? "awake" : "resting"}${d.calls ? ` · ${d.calls} calls, $${(+d.cost_usd || 0).toFixed(3)}` : ""}. Use desk on|off|test|model.`); }],
+  set: ["<key> <value>", "change a setting (see settings); save keeps it", a => { if (a.length < 2) throw new Error("e.g. set capital.max_open_positions 4"); send({action: "set", key: a[0], value: a.slice(1).join(" ")}); }],
+  save: ["", "write the settings to config/params.yaml", () => send({action: "save"})],
+  settings: ["[filter]", "settings you can change", async a => {
+    const cs = await (await fetch("/api/controls", {cache: "no-store"})).json(), q = (a[0] || "").toLowerCase();
+    termPrint(cs.filter(c => !q || (c.key + c.label).toLowerCase().includes(q)).map(c => `${c.key.padEnd(34)} ${String(c.value).padEnd(8)} ${c.label}`).join("\n") || "No match."); }],
+  log: ["[n]", "the bot's last n log lines", a => { const n = Math.min(80, +a[0] || 15); termPrint((snap?.log || []).slice(0, n).reverse().map(l => `${l.level === "error" ? "!" : " "} ${l.text}`).join("\n") || "Empty.", "dim"); }],
+  coin: ["<coin>", "open a coin's details", a => openDrawer(termNeedCoin(a[0]))],
+  ask: ["<question>", "ask Claude (answer prints here too)", (a, rest) => { if (!rest) throw new Error("ask what?"); TM.ask = true; termPrint("Asking Claude…", "dim"); chatSend(rest); }],
+  go: ["<tab>", "open a tab: " + TABS.map(t => t[0]).join(", "), a => { const t = TABS.find(x => x[0].startsWith((a[0] || "").toLowerCase())); if (!t || !a[0]) throw new Error("Tabs: " + TABS.map(x => x[0]).join(", ")); setTab(t[0]); }],
+  restart: ["", "restart the bot (asks first)", () => termAsk("Restart the bot? It saves first; positions and orders resume.", () => send({action: "restart"}))],
+  history: ["", "commands you typed", () => termPrint(TM.hist.slice(-30).join("\n") || "None yet.", "dim")],
+  clear: ["", "clear this window", () => { $("term-out").innerHTML = ""; }],
+};
+const TALIAS = {"?": "help", h: "help", s: "status", st: "status", p: "pos", positions: "pos", b: "buy", add: "buy", o: "orders", stop: "pause", start: "resume", cls: "clear", tab: "go"};
+async function termRun(line) {
+  line = line.trim(); if (!line) return;
+  termPrint("› " + line, "cmd"); TM.hi = -1;
+  if (TM.confirm) { const f = TM.confirm; TM.confirm = null; if (/^y(es)?$/i.test(line)) { f(); TM.ranAt = Date.now(); } else termPrint("Cancelled.", "dim"); return; }
+  TM.hist = TM.hist.filter(h => h !== line).concat(line).slice(-100);                 // (answers to "y?" aren't commands)
+  try { localStorage.setItem("term.hist", JSON.stringify(TM.hist)); } catch { /* fine */ }
+  const [c0, ...a] = line.split(/\s+/), c = c0.toLowerCase(), cmd = TCMD[c] || TCMD[TALIAS[c]];
+  if (!cmd) {
+    if (isMint(c0)) { openDrawer(c0); return termPrint("Opened the coin. To buy: buy " + c0.slice(0, 6) + "… 0.1", "dim"); }
+    return termPrint(`Unknown command "${c0}". Type help.`, "bad");
+  }
+  try { await cmd[2](a, line.slice(c0.length).trim()); } catch (err) { termPrint(String(err.message || err), "bad"); }
+  if (!["status", "pos", "orders", "help", "log", "history", "settings", "clear"].includes(TCMD[c] ? c : TALIAS[c])) TM.ranAt = Date.now();
+}
+function unhaltAsk(ask) {                     // shared by the banner button and the terminal
+  const s = snap || {}, L = s.limits || {}, lim = L.kill_dd_pct || 40, base = L.kill_base || L.start_sol || 0;
+  const past = base && (1 - s.equity / base) * 100 >= lim - 1, at = (past ? s.equity : base) * (1 - lim / 100);
+  ask(`Resume trading? ${past ? `The account is still ${((1 - s.equity / base) * 100).toFixed(0)}% down, so from now on the ${lim}% kill switch counts from today's ${tf3(s.equity)} SOL: it` : "The kill switch"} trips again at ${tf3(at)} SOL.`,
+    () => send({action: "unhalt"}));
+}
+$("term-in").addEventListener("keydown", e => {
+  const inp = e.target;
+  if (e.key === "Enter") { e.preventDefault(); const v = inp.value; inp.value = ""; termRun(v); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); termOpen(false); }
+  else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    e.preventDefault(); if (!TM.hist.length) return;
+    if (TM.hi < 0) { TM.draft = inp.value; TM.hi = TM.hist.length; }
+    TM.hi = Math.max(0, Math.min(TM.hist.length, TM.hi + (e.key === "ArrowUp" ? -1 : 1)));
+    inp.value = TM.hi === TM.hist.length ? TM.draft : TM.hist[TM.hi];
+  } else if (e.key === "Tab") {
+    e.preventDefault(); const v = inp.value; if (v.includes(" ")) return;
+    const hits = Object.keys(TCMD).filter(k => k.startsWith(v.toLowerCase()));
+    if (hits.length === 1) inp.value = hits[0] + " "; else if (hits.length) termPrint(hits.join("  "), "dim");
+  }
+});
+$("term-x").onclick = () => termOpen(false);
+$("term-btn").onclick = () => termOpen();
+$("term-out").onclick = () => { if (!getSelection().toString()) $("term-in").focus(); };
 $("pause").onclick = () => send({action: snap && snap.paused ? "resume" : "pause"});
 $("kill").onclick = () => confirm("Sell ALL positions and stop opening new ones?") && send({action: "kill"});
 $("restart").onclick = () => {
@@ -4602,7 +4779,7 @@ function cycleTheme() { const cur = store.get("theme") || "auto", next = {auto: 
   store.set("theme", next); applyTheme(next === "auto" ? "" : next); if (snap) render(snap); if (S.tab === "analytics" && S.analytics) renderAnalytics(S.analytics); }
 $("theme").onclick = cycleTheme;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.bot) { S.dkSel = d.bot; renderDesk(); zoomIn(d.bot); return; }
@@ -4631,6 +4808,9 @@ document.addEventListener("click", e => {
   if (d.ordq) { const [side, op, mc] = d.ordq.split(":"); $("tr-ord-side").value = side; $("tr-ord-op").value = op; $("tr-ord-mc").value = mc; ordSide(); return; }
   if (d.ordx) { e.stopPropagation(); send({action: "order_cancel", id: d.ordx}); return; }
   if (d.compose) { openComposer(); return; }
+  if (d.unhalt) { unhaltAsk((q, f) => { if (confirm(q)) f(); }); return; }
+  if (d.addpaper) { setTab("controls"); setTimeout(() => { $("paper-panel").scrollIntoView({block: "center"}); $("dep-sol").focus(); $("dep-sol").select(); }, 80); return; }
+  if (d.startover) { setTab("controls"); setTimeout(() => { $("paper-panel").scrollIntoView({block: "center"}); $("paper-reset-confirm").hidden = false; }, 80); return; }
   if (d.desktest) { t.disabled = true; const old = t.textContent; t.textContent = "Asking…"; send({action: "desk_test"}); setTimeout(() => { t.disabled = false; t.textContent = old; }, 8000); return; }
   if (d.labkind) { S.labKind = d.labkind; $$("#lab-kind button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.labkind === d.labkind))); renderExitLab(); return; }
   if (d.roomedit !== undefined) { setRoomEdit(d.roomedit === "1" ? !RE.on : false); return; }
@@ -4698,8 +4878,9 @@ addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.open) { openDrawer(e.target.dataset.open); return; }
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.bot) { e.target.click(); return; }
-  if (e.key === "Escape") { if (!$("ctx").hidden) $("ctx").hidden = true; else if (!$("help").hidden) $("help").hidden = true; else if (!$("wardrobe").hidden) $("wardrobe").hidden = true;
+  if (e.key === "Escape") { if (!$("term").hidden) termOpen(false); else if (!$("ctx").hidden) $("ctx").hidden = true; else if (!$("help").hidden) $("help").hidden = true; else if (!$("wardrobe").hidden) $("wardrobe").hidden = true;
     else if (!$("zscreen")?.hidden && $("zscreen")) zoomOut(); else if (RE.on) setRoomEdit(false); else if (AR.on) setArrange(false); else closeDrawer(); }
+  else if (e.key === "`") { e.preventDefault(); termOpen(); }
   else if (e.key === "a") setArrange(!AR.on);
   else if (e.key === "n") { e.preventDefault(); openComposer(); }
   else if ("123456789".includes(e.key)) setTab(TABS[+e.key - 1][0]);
