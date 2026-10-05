@@ -1151,10 +1151,14 @@ def test_the_metered_backup_is_used_only_while_the_free_feeds_fail(monkeypatch, 
     for k in range(3):
         assert f._next_endpoint("connection closed (CLOSE)", now + k) == mb
     assert f._next_endpoint("connection closed (CLOSE)", now + 3) == b    # keeps hanging up: the backup
-    f.ws_idx = b                                                          # on the backup: back to free after a while
+    f.ws_idx = b                                    # on the backup: free endpoints are measured on the side first
     f.last_trade = now + f.BACKUP_RETRY_S + 1
     assert f._check_stream(now + 10, now) == ""
-    assert f._check_stream(now + f.BACKUP_RETRY_S + 1, now) == "retry free"
+    assert f._check_stream(now + f.BACKUP_RETRY_S + 1, now) == ""      # (no loop here: the probe can't start)
+    f.probe_log.append((now + 320, "api.mainnet-beta.solana.com", 6.5))   # measured: still behind -> stay
+    assert f._check_stream(now + 330, now) == ""
+    f.probe_log.append((now + 650, "api.mainnet-beta.solana.com", 1.4))   # measured good -> the stream goes back
+    assert f._check_stream(now + 660, now) == "retry free"
     assert f._next_endpoint("retry free", now + 400) == mb
     f.backup_used[time.strftime("%Y-%m-%d", time.gmtime(now))] = 100.0    # today's allowance spent
     assert f._check_stream(now + 20, now) == "backup budget used for today"
@@ -1178,3 +1182,25 @@ def test_the_metered_backup_is_used_only_while_the_free_feeds_fail(monkeypatch, 
     # with no Helius key there's no backup, and nothing changes
     monkeypatch.delenv("HELIUS_API_KEY")
     assert SolanaTradeFeed().backup_idx is None
+
+
+
+def test_backup_usage_survives_a_restart_and_probes_measure_on_the_side(monkeypatch, tmp_path):
+    import time
+    monkeypatch.delenv("SOLANA_WS_URL", raising=False)
+    monkeypatch.setenv("HELIUS_API_KEY", "k")
+    mem = tmp_path / "feed_endpoints.json"
+    f = SolanaTradeFeed(memory_path=mem, backup_mb_per_day=100)
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    f.backup_used[day] = 42.0
+    f._save_usage(time.time())
+    g = SolanaTradeFeed(memory_path=mem, backup_mb_per_day=100)          # the bot restarts
+    assert g.backup_used[day] == 42.0 and g._backup_left_mb(time.time()) == 58.0
+
+    async def fake_probe(i, secs=None):
+        return 1.6
+    g._probe = fake_probe
+    asyncio.run(g._probe_free())
+    when, host, lag = g.probe_log[-1]
+    assert lag == 1.6 and host in ("api.mainnet-beta.solana.com", "solana-rpc.publicnode.com")
+    assert any(v[0] == 1.6 for v in g.endpoint_lag.values())             # the measurement counts for choosing

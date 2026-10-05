@@ -299,7 +299,16 @@ class SolanaTradeFeed(Feed):
             self.ws_urls.append(backup)
             self.backup_idx = len(self.ws_urls) - 1
         self.backup_mb_per_day = float(backup_mb_per_day)
-        self.backup_used: dict[str, float] = {}      # UTC day -> MB streamed from the backup
+        self.backup_used: dict[str, float] = {}      # UTC day -> MB streamed from the backup (kept on disk: a
+        self._usage_path = str(memory_path).replace("feed_endpoints.json", "feed_backup_usage.json") if memory_path else ""
+        self._usage_saved = 0.0                      # restart must not reset today's count and overspend credits)
+        try:
+            if self._usage_path:
+                self.backup_used = {k: float(v) for k, v in json.loads(open(self._usage_path).read()).items()}
+        except (OSError, ValueError, AttributeError):
+            pass
+        self._probe_task: asyncio.Task | None = None # on the backup: a side connection measuring a free endpoint
+        self.probe_log: deque = deque(maxlen=50)     # (when, host, lag or None)
         raw = ws_url or os.environ.get("SOLANA_WS_URL", "")
         # endpoints you configured (SOLANA_WS_URL / feed.ws_url) are worth going back to; the free fallbacks aren't
         self.n_configured = len([u for u in (raw if isinstance(raw, list) else str(raw).split(",")) if u and u.strip()])
@@ -494,6 +503,55 @@ class SolanaTradeFeed(Feed):
             pass
 
     BACKUP_RETRY_S = 300    # on the backup, look at the free endpoints again this often
+    PROBE_S = 40            # ... for this long, on a side connection (trading carries on over the backup)
+    GOOD_LAG_S = 3.0        # a free endpoint measured this close behind the chain gets the stream back
+
+    def _save_usage(self, now: float) -> None:
+        if not self._usage_path or now - self._usage_saved < 30:
+            return
+        self._usage_saved = now
+        try:
+            tmp = self._usage_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({k: round(v, 2) for k, v in self.backup_used.items()}, f)
+            os.replace(tmp, self._usage_path)
+        except OSError:
+            pass
+
+    async def _probe(self, i: int, secs: float | None = None) -> float | None:
+        """Measure how far behind a free endpoint is, on its own connection, without using its trades.
+        The median lag, or None if it hung up or sent too little to judge."""
+        import aiohttp
+
+        q = FeedQuality(max_lag_s=self.quality.max_lag_s, min_lags=self.quality.min_lags)
+        try:
+            async with aiohttp.ClientSession() as session, \
+                    session.ws_connect(self.ws_urls[i], heartbeat=20, max_msg_size=0) as ws:
+                await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                                    "params": [{"mentions": [PUMP_PROGRAM]}, {"commitment": self.commitment}]})
+                end = time.time() + (secs or self.PROBE_S)
+                while time.time() < end:
+                    msg = await ws.receive(timeout=self.STALL_S)
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        return None
+                    try:
+                        r = json.loads(msg.data)["params"]["result"]
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                    for t in self.parse_logs(r["value"], time.time(), (r.get("context") or {}).get("slot", 0)):
+                        q.observe(t)
+        except Exception:                           # refused, timed out, dropped: not ready
+            return None
+        return q.lag_s if len(q.lags) >= q.min_lags else None
+
+    async def _probe_free(self) -> None:
+        now = time.time()
+        i = self._best_known(now)
+        i = i if i is not None else self._free_order()[0]
+        lag = await self._probe(i)
+        if lag is not None:
+            self.endpoint_lag[i] = (lag, time.time())
+        self.probe_log.append((time.time(), self._hostname(self.ws_urls[i]), lag))
 
     def _backup_left_mb(self, now: float) -> float:
         if self.backup_idx is None:
@@ -533,15 +591,24 @@ class SolanaTradeFeed(Feed):
                 "up_for_s": round(now - self.connected_since) if self.trades_up and self.connected_since else 0,
                 "backup": None if self.backup_idx is None else {
                     "host": self._hostname(self.ws_urls[self.backup_idx]), "on": self.ws_idx == self.backup_idx,
-                    "mb_today": round(self.backup_mb_per_day - self._backup_left_mb(now), 1), "mb_per_day": self.backup_mb_per_day}}
+                    "mb_today": round(self.backup_mb_per_day - self._backup_left_mb(now), 1), "mb_per_day": self.backup_mb_per_day,
+                    "last_probe": None if not self.probe_log else {"ago_s": round(now - self.probe_log[-1][0]),
+                                                                    "host": self.probe_log[-1][1], "lag_s": self.probe_log[-1][2]}}}
 
     def _check_stream(self, now: float, connected: float) -> str:
         """Why the current endpoint should be dropped, or ''."""
         if self.backup_idx is not None and self.ws_idx == self.backup_idx:   # on the metered backup
             if self._backup_left_mb(now) <= 0:
                 return "backup budget used for today"
-            if now - connected > self.BACKUP_RETRY_S:
-                return "retry free"
+            last = self.probe_log[-1] if self.probe_log else None
+            if last and last[0] >= connected and last[2] is not None and last[2] <= self.GOOD_LAG_S:
+                return "retry free"                      # a free endpoint measured good: hand the stream back
+            busy = self._probe_task is not None and not self._probe_task.done()
+            if not busy and now - max(connected, last[0] if last else 0) > self.BACKUP_RETRY_S:
+                try:
+                    self._probe_task = asyncio.get_running_loop().create_task(self._probe_free())
+                except RuntimeError:                    # (no loop: called outside the feed, e.g. a test)
+                    pass
         if now - self.last_trade > self.stall_s:
             return f"no pump.fun trades for {now - self.last_trade:.0f}s"
         if self.quality.bad:
@@ -626,6 +693,7 @@ class SolanaTradeFeed(Feed):
                             self.backup_used[day] = self.backup_used.get(day, 0.0) + len(msg.data) / 1e6
                             if len(self.backup_used) > 3:
                                 self.backup_used.pop(min(self.backup_used))
+                            self._save_usage(now)
                         if self.bytes_in and self.bytes_in[-1][0] == minute:
                             self.bytes_in[-1][1] += len(msg.data)
                         else:
