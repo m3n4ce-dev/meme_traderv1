@@ -4,6 +4,40 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #40: Health check: why the bot stopped trading, and three other bugs
+
+**Owner's request:** "Analyze and debug the project."
+
+**Checked and fine:**
+- **Services:** all three are up.
+- **Disk:** 713 GB free. data/ is 0.9 GB; the wallet recorder keeps 75 MB.
+- **The bot's books reconcile:** cash 6.1516 SOL = equity, with no positions open.
+- **Main loop:** 591 probes over 60 s had a median of 1.4 ms and a worst case of 10 ms.
+- **Dashboard:** the full browser pass (every tab, three widths, both themes, every trading flow) had no script errors.
+- **Static analysis:** pyflakes found only unused imports and variables.
+- **Helius:** the wallet recorder streams through PublicNode (43.7 GB on Oct 4), not Helius. The bot's funding lookups now go through the owner's Helius address at 1 credit a call, ~80 an hour, so about 6k credits a day against the free 1M a month.
+- **Block-zero bundles** (raised in a trader interview): already counted. Any wallet buying within 2 s of create is in `bundle_pct`.
+
+**Found and fixed:**
+
+1. **The AI desk blocked nearly every entry from 2026-10-04 14:23** (the desk was woken then):
+   - **The cause:** `aggregate` computed the buy share as weight × conviction / 100. Models report conviction around 55–65, so 3 of 4 personas voting buy came to 44% against the 45% quorum, and the trade was passed. Logged example: "cyber: veteran:buy62 narrative:buy58 skeptic:pass62 quant:buy58 | buy share 44% vs quorum 45%".
+   - **The fix:** the share now counts votes (a buy under 50 conviction is half a vote), and conviction still sets the size. The skeptic's veto (pass at ≥ 75) is unchanged.
+   - **Effect, recounted from the journal (14:00 to 23:13):** the reviews would have gone from 2 approved of 33 to 18 of 33.
+   - **What the market offered meanwhile:** 70–120 coins an hour reached the graduation window, while graduation trades fell from 14–23 an hour (11:00–13:00) to 0 after 16:00.
+   - **The exit lab's desk-pass shadows:** 9 so far, mean +68%. Most are one coin (Gizmo, passed six times; the rules would have made +234% and +241% on two of those passes). Thin, but in the same direction.
+2. **Strategy buttons didn't save:**
+   - **The problem:** the Live page's Sniper/Copy/Graduation/Callouts buttons only applied the change ("press Save to keep it"). The owner had turned the sniper off; the deploy restart at 23:13 reloaded `entry.enabled: true` from params.yaml, and the sniper traded from 23:14.
+   - **The fix:** the buttons now save at once, like the risk dial. The sniper was set back to off (saved), matching the owner's last screen.
+3. **The demo wrote into the real data and spent real AI credit:**
+   - **The problem:** `run --synthetic` journaled its fake trades into data/trades-*.jsonl and journal-*.jsonl (labelled paper-synthetic, so the stats kept them apart, but mixed into the files). Its AI desk voted on fake coins with the real API key.
+   - **The fix:** a synthetic run now writes no trade or journal files, and its desk stays asleep unless `--desk` is passed.
+4. **Coin logos could stall the bot:**
+   - **The problem:** a 0.23 MB PNG under the 4 MB download cap held 73 M pixels. Decoding it took 1.4 s and ~300 MB on the event loop, freezing trading, exits and the dashboard. It happened twice on Oct 4.
+   - **The fix:** an image over 16 M pixels is refused from its header before decoding, JPEGs decode at reduced size, and thumbnailing runs in a worker thread.
+
+---
+
 ## 2026-10-05 — Entry #39: Live charts, the owner's picks vs a volume rule, and what KOLs are worth
 
 **Owner's request:** "I bought these and took profit and defense mode turned on still. Look at what I did and also figure out an algo for volume and transaction counts", then "show previous entries and important wallet entries on a chart, or one chart page for all held coins; it still seems super slow", then "check out KOL scans".

@@ -62,6 +62,19 @@ def test_desk_aggregate_quorum_and_veto():
     assert not aggregate([Vote("veteran", "pass", 0, error="timeout")], w, 0.45, 75).approve
 
 
+def test_desk_three_of_four_buys_is_a_buy():
+    """Seen live: veteran buy62, narrative buy58, skeptic pass62, quant buy58 came to 'buy share 44% vs quorum 45%'
+    and the trade was passed, because conviction multiplied the share. Votes count; conviction sizes."""
+    w = {"veteran": 1.0, "narrative": 0.8, "skeptic": 1.0, "quant": 1.0}
+    three = [Vote("veteran", "buy", 62), Vote("narrative", "buy", 58), Vote("skeptic", "pass", 62), Vote("quant", "buy", 58)]
+    v = aggregate(three, w, 0.45, 75)
+    assert v.approve and "APPROVED" in v.summary and v.size_mult < 1.0     # modest conviction, modest size
+    one = [Vote("veteran", "buy", 90), Vote("narrative", "pass", 60), Vote("skeptic", "pass", 60), Vote("quant", "pass", 60)]
+    assert not aggregate(one, w, 0.45, 75).approve                           # one voice isn't a desk
+    weak = [Vote("veteran", "buy", 30), Vote("narrative", "pass", 60), Vote("skeptic", "pass", 60), Vote("quant", "buy", 40)]
+    assert not aggregate(weak, w, 0.45, 75).approve                          # two half-hearted buys aren't either
+
+
 class FakeClient:
     """Stands in for anthropic.AsyncAnthropic: every persona votes buy at 80."""
 

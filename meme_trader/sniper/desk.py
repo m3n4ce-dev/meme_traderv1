@@ -245,8 +245,12 @@ def aggregate(votes: list[Vote], weights: dict, quorum: float, veto_conviction: 
         return Verdict(False, 0.0, votes, f"desk unavailable ({failed or 'no votes'} failed)")
     if any(v.persona == "skeptic" and v.error for v in votes):
         return Verdict(False, 0.0, votes, "PASSED | risk reviewer (skeptic) unavailable")
+    # The share counts votes, not conviction. It used to be weight x conviction / 100, and models report conviction
+    # around 55-65, so 3 of 4 personas voting buy came to 44% against a 45% quorum and the trade was passed: from
+    # 2026-10-04 14:23 the desk blocked nearly every entry that way (BUILD_LOG #40). Conviction sets the size below;
+    # a "buy" under 50 conviction is half a vote.
     total = configured
-    buy_w = sum(weights.get(v.persona, 1.0) * v.conviction / 100 for v in ok if v.vote == "buy")
+    buy_w = sum(weights.get(v.persona, 1.0) * (1.0 if v.conviction >= 50 else 0.5) for v in ok if v.vote == "buy")
     share = buy_w / total if total else 0.0
     veto = next((v for v in ok if v.persona == "skeptic" and v.vote == "pass" and v.conviction >= veto_conviction),
                 None)
