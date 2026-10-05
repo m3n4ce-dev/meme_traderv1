@@ -1160,13 +1160,13 @@ def test_the_metered_backup_is_used_only_while_the_free_feeds_fail(monkeypatch, 
     f.probe_log.append((now + 650, "api.mainnet-beta.solana.com", 1.4))   # measured good -> the stream goes back
     assert f._check_stream(now + 660, now) == "retry free"
     assert f._next_endpoint("retry free", now + 400) == mb
-    f.backup_used[time.strftime("%Y-%m-%d", time.gmtime(now))] = 100.0    # today's allowance spent
-    assert f._check_stream(now + 20, now) == "backup budget used for today"
+    f.backup_bank, f.backup_bank_ts = 0.0, now + 20                      # the allowance is spent
+    assert f._check_stream(now + 20, now) == "backup allowance used up"
     f.ws_idx = mb                                                         # a slow free feed: no backup left, stay
     f.closes.clear()
     assert not f._backup_ok(now) and f._next_endpoint("connection closed (CLOSE)", now + 500) == mb
     st = f.stream_stats(now)
-    assert st["backup"]["host"] == "mainnet.helius-rpc.com" and st["backup"]["mb_today"] == 100.0
+    assert st["backup"]["host"] == "mainnet.helius-rpc.com" and st["backup"]["mb_left"] < 1
     # a slow free feed with allowance left goes to the backup instead of waiting it out
     g = SolanaTradeFeed(backup_mb_per_day=100)
     g.ws_idx = g.ws_urls.index("wss://api.mainnet-beta.solana.com")
@@ -1191,11 +1191,13 @@ def test_backup_usage_survives_a_restart_and_probes_measure_on_the_side(monkeypa
     monkeypatch.setenv("HELIUS_API_KEY", "k")
     mem = tmp_path / "feed_endpoints.json"
     f = SolanaTradeFeed(memory_path=mem, backup_mb_per_day=100)
-    day = time.strftime("%Y-%m-%d", time.gmtime())
-    f.backup_used[day] = 42.0
-    f._save_usage(time.time())
-    g = SolanaTradeFeed(memory_path=mem, backup_mb_per_day=100)          # the bot restarts
-    assert g.backup_used[day] == 42.0 and g._backup_left_mb(time.time()) == 58.0
+    t = time.time()
+    f.backup_bank, f.backup_bank_ts = 58.0, t
+    f._save_usage(t)
+    g = SolanaTradeFeed(memory_path=mem, backup_mb_per_day=100)          # the bot restarts: no free refill
+    assert abs(g._backup_left_mb(t + 1) - 58.0) < 0.01
+    assert abs(g._backup_left_mb(t + 86400 / 2) - 108.0) < 0.01         # half a day later: +50 MB
+    assert g._backup_left_mb(t + 86400 * 60) == g.backup_bank_cap == 4800.0   # saved up to the bank's size, no further
 
     async def fake_probe(i, secs=None):
         return 1.6

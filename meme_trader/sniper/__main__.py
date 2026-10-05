@@ -83,7 +83,8 @@ async def _run(args, params) -> None:
     else:
         feed = SolanaTradeFeed(f.ws_url, f.fallback_ws_urls, f.commitment, f.max_gap_pct, f.stall_s, f.max_lag_s,
                                memory_path=DATA / "feed_endpoints.json", backup_ws_url=f.get("backup_ws_url", ""),
-                               backup_mb_per_day=float(f.get("backup_mb_per_day", 1200)))
+                               backup_mb_per_day=float(f.get("backup_mb_per_day", 1200)),
+                               backup_bank_mb=float(f.get("backup_bank_mb", 4800)))
     if args.synthetic:
         _sim_leaders(params, feed)
     mode = "paper"
