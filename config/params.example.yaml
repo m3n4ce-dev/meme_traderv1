@@ -152,7 +152,8 @@ sniper:
     slippage_pct: 15             # live: max buy slippage sent to PumpPortal (buys are never blindly retried)
     sell_slippage_steps: [15, 25, 40]   # live sells: re-quote with these slippages until one lands
     urgent_sell_slippage_steps: [15, 25, 40]   # ... for exits on a falling price (dev sold, stops, momentum decay, insider
-                                 #   cluster, trailing stops, kill switch): a failed first try costs another landing delay
+                                 #   cluster, trailing stops, kill switch). Replayed 2026-10-05 (24 h, 136 graduation trades):
+                                 #   [30,60,95] -0.94 and [50,80,95] -0.92 vs [15,25,40] -0.79 SOL: wider didn't help
     close_empty_accounts: true   # live: close emptied token accounts after a full exit (reclaims rent)
     verify_tx: true              # live: simulate each PumpPortal-built transaction before signing and refuse it
                                  # if it would move more of our SOL than the order allows (adds ~2 RPC calls)
