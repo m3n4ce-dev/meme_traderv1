@@ -180,6 +180,8 @@ class Engine:
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
+        self.kol_tape: deque = deque(maxlen=600)     # trades by KOLs and the wallet study's wallets, any coin (Charts tab)
+        self._kol_first: dict[tuple[str, str], float] = {}   # (wallet, mint) -> its first buy: how long they held
         from .memory import Memory
 
         self.memory = Memory(DATA / "memory.json" if feed.realtime else None)   # what you've fed the desk
@@ -665,6 +667,9 @@ class Engine:
                 s.curve = Curve(e.v_sol, e.v_tokens)
             await self._watch(e.mint)
         s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
+        kw = self._known_wallets().get(e.trader)        # a KOL or a study wallet: the Charts tab's tracker
+        if kw:
+            self._note_known(e, s, *kw)
         if s.unpriced_calls and s.price_known:            # calls on a CA we hadn't priced yet
             for caller, ts in s.unpriced_calls:
                 self.callers.on_call(caller, e.mint, ts, s.curve.price)
@@ -2921,6 +2926,80 @@ class Engine:
         self._study_cache = (time.time(), out)
         return out
 
+    def _known_wallets(self) -> dict[str, tuple[str, str]]:
+        """wallet -> (kind, name) for the KOL list and the wallet study's qualified wallets, rebuilt every 5 min."""
+        c = getattr(self, "_known_cache", None)
+        if c and time.time() - c[0] < 300:
+            return c[1]
+        out = {w: ("smart", lab) for w, lab in self._study_wallets().items()}
+        out.update({w: ("kol", n) for w, n in (self.kols.get("kols") or {}).items()})
+        self._known_cache = (time.time(), out)
+        return out
+
+    def _note_known(self, e, s: TokenState, kind: str, name: str) -> None:
+        held = None
+        k = (e.trader, e.mint)
+        if e.side == "buy":
+            self._kol_first.setdefault(k, e.ts)
+            if len(self._kol_first) > 20000:
+                for x in list(self._kol_first)[:5000]:
+                    del self._kol_first[x]
+        elif k in self._kol_first:
+            held = round(e.ts - self._kol_first.pop(k))
+        self.kol_tape.append({"t": round(e.ts, 1), "wallet": e.trader, "kind": kind, "name": name, "mint": e.mint,
+                              "symbol": s.symbol, "side": e.side, "sol": round(e.sol, 3),
+                              "mc": round(s.market_cap_sol, 1) if s.price_known else None, "held_s": held})
+
+    def kol_view(self, minutes: float = 60) -> dict:
+        """The Charts tab's KOL tracker: their latest trades on any coin the bot sees, and the coins they're in."""
+        cut = self.now - minutes * 60
+        recent = [x for x in self.kol_tape if x["t"] >= cut]
+        coins: dict[str, dict] = {}
+        for x in recent:
+            c = coins.setdefault(x["mint"], {"mint": x["mint"], "symbol": x["symbol"], "names": [], "buys": 0, "sells": 0,
+                                              "net_sol": 0.0, "first_t": x["t"], "first_mc": x["mc"], "kols": 0})
+            if x["name"] not in c["names"]:
+                c["names"].append(x["name"])
+                c["kols"] += x["kind"] == "kol"
+            c["buys" if x["side"] == "buy" else "sells"] += 1
+            c["net_sol"] = round(c["net_sol"] + (x["sol"] if x["side"] == "buy" else -x["sol"]), 3)
+        for c in coins.values():
+            s = self.tokens.get(c["mint"])
+            c["mc_now"] = round(s.market_cap_sol, 1) if s is not None and s.price_known else None
+            c["migrated"] = bool(s and s.migrated)
+            f = self.family(c["mint"])
+            c["fam"] = f and {k: f.get(k) for k in ("n", "rank", "og", "og_symbol", "after_og_s", "og_known")}
+        held = [x["held_s"] for x in recent if x["held_s"] is not None]
+        return {"tape": [x for x in reversed(recent)][:80],
+                "coins": sorted(coins.values(), key=lambda c: (-len(c["names"]), -c["buys"]))[:15],
+                "active": len({x["wallet"] for x in recent}), "known": len(self._known_wallets()),
+                "kols_loaded": len(self.kols.get("kols") or {}), "median_hold_s": sorted(held)[len(held) // 2] if held else None,
+                "minutes": minutes}
+
+    def hot_names(self, minutes: float = 60, limit: int = 12) -> list[dict]:
+        """Names and tickers launched most in the last hour (the copycat waves), with the OG and the biggest now."""
+        cut, usd = self.now - minutes * 60, self.sol_price.usd
+        seen: set[str] = set()
+        out = []
+        for k, q in self.families.items():
+            members = [(ts, m) for ts, m in q if ts >= cut]
+            if len(members) < 3:
+                continue
+            ms = frozenset(m for _, m in members)
+            og = min(q, key=lambda x: x[0])[1]
+            if og in seen:
+                continue
+            seen.add(og)
+            def mc(m):
+                s = self.tokens.get(m)
+                return s.market_cap_sol if s is not None and s.price_known else 0.0
+            lead = max(ms, key=mc)
+            out.append({"key": k, "n": len(members), "og_mint": og, "og_symbol": self.fam_meta.get(og, (0, "?"))[1],
+                        "lead_mint": lead if mc(lead) else None, "lead_symbol": self.fam_meta.get(lead, (0, "?"))[1],
+                        "lead_mc": round(mc(lead), 1) if mc(lead) else None, "lead_mc_usd": round(mc(lead) * usd) if mc(lead) and usd else None,
+                        "newest_s": round(self.now - max(ts for ts, _ in members))})
+        return sorted(out, key=lambda r: -r["n"])[:limit]
+
     def chart_data(self, mint: str, since: float = 0.0) -> dict | None:
         """A coin's live chart: every trade the bot has seen on it (price in SOL per token, newest last), and
         markers: your and the bots' entries and exits on it (this run's ledger), and trades by wallets worth
@@ -2998,6 +3077,7 @@ class Engine:
         """The owner asked for the KOL list: fetch kolscan.io's leaderboard once. '' or why not."""
         from . import kols as kolmod
         self.kols, err = await kolmod.refresh(DATA / "kols.json")
+        self._known_cache = None                                   # the tracker picks up the new list now
         return err
 
     def _audit_view(self, mint: str) -> dict | None:

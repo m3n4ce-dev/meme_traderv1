@@ -513,3 +513,28 @@ def test_market_cap_in_and_out_is_recorded_and_backfilled(tmp_path):
     rows = [dict(old)]
     assert mcapfill.apply(rows, tmp_path, 100.0) == 1
     assert rows[0]["entry_mcap_sol"] == 50.0 and rows[0]["exit_mcap_sol"] == 100.0 and rows[0]["entry_mcap_usd"] == 5000
+
+
+def test_kol_tracker_and_hot_names():
+    from meme_trader.sniper.events import Launch, Trade
+
+    e = market()
+    k = "K" * 44
+    e.kols = {"kols": {k: "Cooker"}}
+    e._known_cache = None
+    s = live_coin(e)
+    t0 = s.trades[-1][0]
+
+    async def go():
+        for i, side in enumerate(("buy", "sell")):
+            await e.handle(Trade(mint=s.mint, ts=t0 + 10 + 30 * i, trader=k, side=side, sol=1.5, tokens=1e6,
+                                 v_sol=s.curve.v_sol, v_tokens=s.curve.v_tokens, new_balance=-1.0))
+        for i in range(4):                                       # a copycat wave: 4 coins named PEPE
+            await e.handle(Launch(mint=f"P{i}" + "z" * 42, ts=e.now + i, creator=f"C{i}" + "q" * 42, symbol="PEPE", name="Pepe"))
+    asyncio.run(go())
+    v = e.kol_view()
+    assert [x["side"] for x in v["tape"]] == ["sell", "buy"] and v["tape"][0]["held_s"] == 30   # sold after 30 s
+    c = v["coins"][0]
+    assert c["mint"] == s.mint and c["names"] == ["Cooker"] and c["kols"] == 1 and c["buys"] == 1 and c["sells"] == 1
+    hot = e.hot_names()
+    assert hot and hot[0]["n"] >= 4 and hot[0]["og_symbol"] == "PEPE"

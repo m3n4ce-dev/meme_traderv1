@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #44: KOL tracker and optional views on the Charts tab
+
+**Owner's request:** "An optional KOL known wallet tracker on the charts page, plus other optional charts and visualizations."
+
+**The tape:** the engine notes every trade by a known wallet (kolscan.io KOLs, and the wallet study's qualified wallets) on any coin it sees, in `kol_tape`. It records the hold time on sells, from their first buy.
+
+**Endpoints:**
+- `/api/kols`: the last hour's tape, and the coins they're in (who, buys/sells, net SOL, first-buy market cap → now, OG badge).
+- `/api/hot`: copycat waves, meaning names launched 3+ times in an hour, with the OG and the biggest one now.
+
+**The Charts tab's optional views** (chips, remembered per browser; refreshed every 3 s while the tab is open): 👑 KOL tracker, 🔥 Copycat waves, 🎓 Graduation watch (the scanner's coins), ⚡ Market pulse, 💼 Equity.
+
+**Caught by the new test:** the first version reused the name `known` in the trade handler, which already meant "a copy-trade leader". Every KOL trade would have been routed to the leader handler and raised a KeyError. It was renamed before deploying.
+
+---
+
 ## 2026-10-05 — Entry #43: Market cap first; a lived-in house; give to the bots from Manual trade
 
 **Owner's request:** "Show what market cap we got into each coin at… market cap is a main metric to track."

@@ -811,6 +811,12 @@ a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: 
 .cl-scroll { max-height: 460px; overflow: auto; } .cl-edge-why { margin: 6px 0; } .cl-edge-why ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }
 .lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; padding: 4px 0 16px; }
 .lc-card { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.lc-viewbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 10px; }
+.lc-views { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.lc-views:empty { display: none; } .lc-view { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.lc-view.wide { grid-column: 1 / -1; } .lc-views { align-items: start; } .lc-view td svg { width: 90px; height: 24px; display: block; } .lc-view table { width: 100%; } .lc-view .lc-h { margin-bottom: 6px; }
+.kt-tape { display: grid; gap: 3px; margin-top: 8px; max-height: 260px; overflow: auto; font-size: 13px; } .kt-row { padding: 2px 4px; border-radius: 6px; }
+.kt-row:hover { background: var(--surface-2); } .kt-kol { color: #f472b6; } .kt-smart { color: #f59e0b; }
 .lc-card.you { border-color: #22d3ee66; } .lc-card.pin { border-style: dashed; } .lc-card canvas { width: 100%; display: block; margin-top: 6px; }
 .lc-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .lc-h .spacer { flex: 1; } .lc-g { font-weight: 700; font-size: 15px; }
 .lc-legend { display: inline-flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -1101,6 +1107,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <span class="note" id="lc-kols" title="KOLs hold a median 34 s; copying them 1-2.5 s late lost ~13% a trade in our recordings"></span>
       <button class="small ghost" data-kolref="1" title="Fetch kolscan.io's KOL wallet list once, so the charts name them">👑 Refresh KOL list</button>
       <div class="seg" id="lc-win" role="group" aria-label="Time window"><button data-lcwin="60" aria-pressed="false">1m</button><button data-lcwin="300" aria-pressed="false">5m</button><button data-lcwin="900" aria-pressed="false">15m</button><button data-lcwin="0" aria-pressed="false">All</button></div></div>
+    <div class="lc-viewbar" id="lc-viewbar"></div>
+    <div id="lc-views" class="lc-views"></div>
     <div id="lc-grid" class="lc-grid"><div class="empty">Loading…</div></div>
   </section>
   <section class="view" data-view="pulse" hidden>
@@ -1994,6 +2002,77 @@ function tickChart(cv, c, o = {}) {
     cv.addEventListener("mouseleave", hideTip);
   }
 }
+// ---------------------------------------------------------------- Charts tab: optional views (remembered here)
+const LV = {on: new Set((() => { try { return JSON.parse(store.get("lc-views") || "[]"); } catch { return []; } })()), data: {}, timer: 0, keys: {}};
+const VIEWS = [["kol", "👑 KOL tracker"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
+function renderViewBar() {
+  setHTML($("lc-viewbar"), `<span class="note">Optional views:</span>` + VIEWS.map(([k, l]) => `<button class="chip ${LV.on.has(k) ? "on" : ""}" data-lcview="${k}" aria-pressed="${LV.on.has(k)}"><i></i>${l}</button>`).join(""));
+}
+function toggleView(k) { LV.on.has(k) ? LV.on.delete(k) : LV.on.add(k); store.set("lc-views", JSON.stringify([...LV.on])); renderViewBar(); renderViews(); loadViews(); }
+async function loadViews() {
+  clearTimeout(LV.timer);
+  if (S.tab !== "charts") return;
+  if (!document.hidden) {
+    const get = async u => { try { const r = await fetch(u, {cache: "no-store"}); return r.ok ? await r.json() : null; } catch { return null; } };
+    if (LV.on.has("kol")) LV.data.kol = await get("/api/kols") || LV.data.kol;
+    if (LV.on.has("hot")) LV.data.hot = ((await get("/api/hot")) || {}).names || LV.data.hot;
+    if (LV.on.has("grad")) LV.data.grad = ((await get("/api/desk")) || {}).late || LV.data.grad;
+    renderViews();
+  }
+  LV.timer = setTimeout(loadViews, 3000);
+}
+function viewBody(k) {
+  const s = snap || {};
+  if (k === "kol") {
+    const d = LV.data.kol; if (!d) return `<div class="empty">Loading…</div>`;
+    const coins = (d.coins || []).slice(0, 8).map(c => { const ch = c.first_mc && c.mc_now ? (c.mc_now / c.first_mc - 1) * 100 : null;
+      return `<tr class="click" data-open="${esc(c.mint)}"><td>${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b> ${famBadge(c.fam)}</td>
+        <td title="${esc(c.names.join(", "))}">${esc(c.names.slice(0, 2).join(", "))}${c.names.length > 2 ? ` +${c.names.length - 2}` : ""}</td>
+        <td class="r num"><span class="up">${c.buys}</span>/<span class="down">${c.sells}</span></td><td class="r num ${cls(c.net_sol)}">${c.net_sol > 0 ? "+" : ""}${fx(c.net_sol, 2)}</td>
+        <td class="r num">${mcUsd(c.first_mc)} → ${mcUsd(c.mc_now)}${ch != null ? ` <span class="${cls(ch)}">${pct(ch, 0)}</span>` : ""}${c.migrated ? ' <span class="pf good">graduated</span>' : ""}</td>
+        <td><button class="small ghost" data-lcpin="${esc(c.mint)}" title="Pin its chart">📈</button></td></tr>`; }).join("");
+    const tape = (d.tape || []).slice(0, 18).map(x => `<div class="kt-row click" data-open="${esc(x.mint)}"><span class="note">${ago(x.t)}</span>
+      <b class="${x.kind === "kol" ? "kt-kol" : "kt-smart"}">${esc(x.name)}</b> <span class="${x.side === "buy" ? "up" : "down"}">${x.side === "buy" ? "▲ bought" : "▼ sold"} ${fx(x.sol, 2)} SOL</span>
+      of <b>${esc(x.symbol)}</b> at ${mcUsd(x.mc)} MC${x.held_s != null ? ` <span class="note">after ${dur(x.held_s)}</span>` : ""}</div>`).join("");
+    return `<div class="note">${d.active} known wallet${d.active === 1 ? "" : "s"} active in the last hour${d.median_hold_s != null ? ` · median hold ${dur(d.median_hold_s)}` : ""}
+        ${d.kols_loaded ? ` · ${d.kols_loaded} KOLs on the list` : ` · <b>no KOL list yet</b>: 👑 Refresh KOL list (above) loads it; the wallet study's wallets show either way`}</div>
+      ${coins ? `<div class="tablewrap"><table><thead><tr><th>Coin they're in</th><th>Who</th><th class="r">Buys/sells</th><th class="r">Net SOL</th><th class="r">MC first buy → now</th><th></th></tr></thead><tbody>${coins}</tbody></table></div>` : `<div class="empty">No KOL or study-wallet trades in the last hour.</div>`}
+      ${tape ? `<div class="kt-tape">${tape}</div>` : ""}
+      <p class="note">Who's in, not who to follow: copying KOLs 1–2.5 s late lost ~13% a trade in our recordings.</p>`;
+  }
+  if (k === "hot") {
+    const rows = LV.data.hot; if (!rows) return `<div class="empty">Loading…</div>`;
+    return rows.length ? `<div class="tablewrap"><table><thead><tr><th>Name</th><th class="r">Launches (1 h)</th><th>OG</th><th>Biggest now</th></tr></thead><tbody>${rows.map(r => `
+      <tr class="click" data-open="${esc(r.lead_mint || r.og_mint)}"><td><b>${esc(r.key)}</b></td><td class="r num">${r.n}</td><td>${esc(r.og_symbol)}</td>
+      <td>${r.lead_mint ? `${esc(r.lead_symbol)} <span class="num">${mcUsd(r.lead_mc)}</span>` : '<span class="note">none tracked</span>'}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">Names launched 3+ times in the last hour. Being the OG isn't an edge; momentum picks the winner.</p>` : `<div class="empty">No copycat waves in the last hour.</div>`;
+  }
+  if (k === "grad") {
+    const L = LV.data.grad; if (!L) return `<div class="empty">Loading…</div>`;
+    const rows = (L.candidates || []).slice(0, 10).map(c => `<tr class="click" data-open="${esc(c.mint)}"><td>${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b></td>
+      <td class="r num">${fx(c.progress, 0)}%</td><td class="r num">${mcUsd(c.mcap_sol)}</td><td class="r note">${dur(c.age || 0)}</td>
+      <td>${c.spark && c.spark.length > 2 ? svgSpark(c.spark, c.spark[c.spark.length - 1] >= c.spark[0] ? "var(--good)" : "var(--bad)", 22, 80) : ""}</td>
+      <td class="why" title="${esc(c.why || "")}">${esc(c.verdict || "")}${c.why ? ": " + esc(String(c.why).slice(0, 40)) : ""}</td></tr>`).join("");
+    return `<div class="note">The graduation scanner: coins filling their curve, the window is ${L.window ? L.window.join("–") : "55–85"}% · ${L.in_window || 0} in it now · ${L.tracked || 0} tracked</div>
+      ${rows ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th class="r">Curve</th><th class="r">MC</th><th class="r">Age</th><th></th><th>Scanner</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Nothing near the window right now.</div>`}`;
+  }
+  if (k === "pulse") return svgPulse(s.pulse || [], s.pulse_since || 0, 150);
+  if (k === "equity") { const eh = (s.equity_hist || []).slice(-300).map(e => e[1]);
+    return eh.length > 1 ? `<div class="note">${sol(eh[eh.length - 1])}${U()} now · ${signed(eh[eh.length - 1] - eh[0])}${U()} over this chart</div>${svgSpark(eh, eh[eh.length - 1] >= eh[0] ? "var(--good)" : "var(--bad)", 110, 600)}` : `<div class="empty">Collecting…</div>`; }
+  return "";
+}
+function renderViews() {
+  const box = $("lc-views"); if (!box) return;
+  const on = VIEWS.filter(([k]) => LV.on.has(k));
+  if (box.dataset.k !== on.map(v => v[0]).join()) {
+    box.dataset.k = on.map(v => v[0]).join(); LV.keys = {};
+    box.innerHTML = on.map(([k, l]) => `<section class="lc-view${k === "kol" ? " wide" : ""}" data-view-k="${k}"><div class="lc-h"><b>${l}</b><span class="spacer"></span><button class="small ghost" data-lcview="${k}" title="Hide this view">✕</button></div><div class="lv-body"></div></section>`).join("");
+  }
+  for (const [k] of on) {
+    const body = box.querySelector(`[data-view-k="${k}"] .lv-body`); if (!body || body.matches(":hover") && k !== "pulse" && k !== "equity") continue;   // (lists don't jump under the mouse)
+    const html = viewBody(k); if (LV.keys[k] !== html) { LV.keys[k] = html; body.innerHTML = html; }
+  }
+}
 // ---------------------------------------------------------------- Charts tab: every coin you hold, live
 function lcCardNums() {
   for (const x of LC.pins) {
@@ -2040,6 +2119,8 @@ function renderCharts(s) {
     card.querySelector(".lc-legend").innerHTML = lcLegend(LC.data[p.mint]);
   }
   lcCardNums();
+  if (!$("lc-viewbar").innerHTML) renderViewBar();
+  renderViews();
   $$("#lc-win button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.lcwin === LC.win)));
   $("lc-kols").textContent = s.kols && s.kols.n ? `${s.kols.n} KOLs named${s.kols.fetched ? " · list " + ago(s.kols.fetched) + " old" : ""}` : "no KOL list yet";
   if (!LC.raf) LC.raf = requestAnimationFrame(lcDraw);
@@ -5358,6 +5439,7 @@ function setTab(t) {
   if (t === "live") trChart();
   lcSync();
   if (t === "charts" && snap) renderCharts(snap);
+  if (t === "charts") loadViews();
   if (t === "chat") { $$(".tabs button").find(b => b.dataset.tab === "chat")?.classList.remove("dotted");
     if (!C.loaded) loadChat(); else renderChat(true);
     if (snap) renderChatSide(snap); setTimeout(() => $("ch-in").focus(), 30); }
@@ -5713,12 +5795,13 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
   if (d.lctrade) { setTab("live"); setTradeMint(d.lctrade); $("tr-ca").scrollIntoView({block: "center"}); return; }
   if (d.lcopen) { openDrawer(d.lcopen); return; }
+  if (d.lcview) { toggleView(d.lcview); return; }
   if (d.anmc) { S.anMc = d.anmc; if (S.analytics) renderAnalytics(S.analytics); return; }
   if (d.lcpin) { lcPin(d.lcpin); if (S.drawer === d.lcpin) t.textContent = `📈 ${lcPinned(d.lcpin) ? "Unpin" : "Pin"}`; return; }
   if (d.kolref) { t.disabled = true; send({action: "kols_refresh"}); setTimeout(() => t.disabled = false, 8000); return; }
