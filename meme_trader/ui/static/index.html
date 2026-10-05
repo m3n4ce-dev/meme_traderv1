@@ -4474,7 +4474,7 @@ function ckActions() {
     ...((s.risk && s.risk.levels) || []).map(l => ({label: `Risk dial: ${l.name}`, hint: `level ${l.level}`, run: () => setRisk(l.level)})),
     {label: "✎ Arrange this page", hint: "a", run: () => setArrange(true)},
     {label: s.away ? "🚶 I'm back: take my positions back" : "🚶 Away: the bots take over my positions", run: () => $("away-btn").click()}, {label: "↺ Reset this page's layout", run: () => resetLayout(false)},
-    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Make a call", run: () => { openCalls(); setTimeout(() => $("clf-ca").focus(), 50); }},
+    {label: "✎ New post (X / Telegram)", hint: "n", run: () => openComposer()}, {label: "📣 Calls & track record", hint: "analytics", run: () => openCalls()}, {label: "📣 Make a call", run: () => { openCalls(); setTimeout(() => $("clf-ca").focus(), 50); }},
     {label: "🔏 Publish the ledger proof", run: () => { openCalls("cl-anchor"); }},
     {label: "👕 Wardrobe", run: () => { setTab("desk"); setTimeout(openWardrobe, 120); }}, {label: "▶ Take the tour", run: tourStart},
     {label: `${store.get("notify") === "1" ? "🔕 Turn off" : "🔔 Turn on"} desktop notifications`, run: toggleNotify},
