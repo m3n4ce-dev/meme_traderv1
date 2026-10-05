@@ -122,6 +122,7 @@ class AgentAPI:
             "by_strategy": {k: {"closed": v["closed"], "win_rate": v["win_rate"], "pnl_sol": v["realized_pnl_sol"]}
                             for k, v in s.get("by_source", {}).items()},
             "risk_dial": {k: v for k, v in self.e.risk_info().items() if k != "levels"},
+            "other_chains_paper_bot": self.e.xchain.brief(),     # BNB Chain / Base / Solana DEX coins (Live tab panel)
             "agent_limits": {"buys_left_this_hour": max(self.max_buys_per_hour - len(self.buys), 0),
                              "can_buy": self.can_buy, "max_buy_usd": self.max_buy_usd},
         }
@@ -131,7 +132,9 @@ class AgentAPI:
         keep = ("mint", "symbol", "source", "held_s", "gain_pct", "peak_gain_pct", "value_sol", "cost_sol",
                 "proceeds_sol", "progress", "score", "initials")
         return {"positions": [{k: p[k] for k in keep if k in p} for p in snap["positions"]],
-                "callout_bags": snap["callout_bags"]}
+                "callout_bags": snap["callout_bags"],
+                "other_chain_positions": [{k: p[k] for k in ("symbol", "chain_name", "size_usd", "pnl_usd", "pnl_pct", "mcap0", "mcap", "why")}
+                                          for p in self.e.xchain.view()["positions"]]}
 
     def read_radar(self, limit: int = 20, status: str = "") -> dict:
         rows = []
