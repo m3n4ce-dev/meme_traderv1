@@ -43,7 +43,20 @@ A running record of decisions, research, parameters and status. Newest entries a
   |---|---|---|
   | No sell in the last 20 s | +0.54 SOL (42 of 205 skipped) | +0.29 SOL (15 of 117 skipped) |
   | Coin under 30 s old | +1.00 SOL | +0.32 SOL (drops most trades) |
-- **Now settings, off by default:** `late.min_recent_sells` and `late.min_age_s`, both testable in the lab. Full-bot replays of all 3 days follow below.
+- **Now settings, off by default:** `late.min_recent_sells` and `late.min_age_s`, both testable in the lab.
+- **Full-bot replays of all 3 days:**
+  - **First version:** re-checked every few seconds, it waited for a first sell or an older coin and then bought. That was worse on Oct 4 and on the unseen Oct 5, so waiting isn't avoiding.
+  - **Second version:** skip a coin for good once it qualifies but matches the profile.
+  - **A confound:** replays use the research policy's 1 SOL daily loss limit. On Oct 3 the baseline hit it at 14:53 UTC and stopped trading, so that day is compared only up to then.
+
+  | Skip for good | Oct 3 (to 14:53) | Oct 4 | Oct 5 (unseen) | Total |
+  |---|---|---|---|---|
+  | None (now) | −0.82 | +0.56 | −0.85 | −1.10 SOL |
+  | No sells in 20 s | +0.11 | +0.27 | −0.78 | −0.40 |
+  | **Under 30 s old** | −0.37 | +0.98 | −0.77 | **−0.16** |
+
+  "Under 30 s" was better on all 3 days, with about half the trades. Each day alone is still "no clear difference", and the strategy stays slightly negative. It's queued in the lab (`late.min_age_s` 0 → 30), and the findings are on the team's corkboard. It's still off until the owner applies it.
+- **Lab fixes along the way:** a queued test is compared with the settings of the moment it starts, landing like the bot. Two tests queued before today's fix would otherwise have run with instant fills.
 
 ---
 
