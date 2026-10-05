@@ -519,7 +519,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             return {"ok": True, "text": "Restarting… this page reconnects by itself", "restarting": True}
         if action == "m_hand":
             n, err = engine.hand_over(str(cmd.get("mint") or ""), bool(cmd.get("on")))
-            return {"ok": not err, "text": err or (("🤖 The bots manage it now: their exit rules apply" if cmd.get("on")
+            return {"ok": not err, "text": err or (("🤖 The bots ride it now: half out at 2x, then a trailing stop" if cmd.get("on")
                                                     else "✋ It's yours again: only your exits apply") if cmd.get("mint")
                                                    else f"{n} position(s) {'handed to the bots' if cmd.get('on') else 'back to you'}")}
         if action == "away":
