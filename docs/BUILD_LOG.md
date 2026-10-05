@@ -4,6 +4,41 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #42: The chat knows the console; characters, corkboard and pinned charts
+
+**Owner's requests:**
+- "Make sure I can ask the main chat bot how to do anything and everything on the console." (It couldn't answer "change the theme to white".)
+- "Turn their dialog on and off, move the characters around and change how they act."
+- "Delete or hide the notes on the bulletin board, or add one there."
+
+**The console for the chat:**
+- **The manual:** `docs/CONSOLE.md`, a task-by-task manual.
+- **`console_help(question)`:** searches the manual and the Guide tab's own sections (`meme_trader/ui/manual.py`, keyword match with synonyms such as white → light theme, dialog → speech, bulletin → corkboard).
+- **`ui_action`:** changes only what the owner's open dashboards show: theme, tab, $/SOL, opening a coin, pinning a chart, the room's speech, pop-ups, and a character's behaviour or spot.
+  - The bot broadcasts it to every open page (`type: "ui"`), and the page applies it and says what it did.
+  - It can't trade or touch a setting, so the chat may use both tools without an approval prompt.
+- **Chat instructions:** call `console_help` before any "how do I…" answer and reply with the exact clicks or keys; do screen changes directly.
+- **Tests** check that the manual names every tab, key and terminal command, so it can't silently fall behind the page.
+
+**Characters** (Desk → 👕 Characters, formerly Wardrobe):
+- **Speech:** 💬 Speech on/off for the bubbles (per browser; the Room chat panel keeps the record).
+- **Placing:** drag any character to a free spot. It stays there and stops wandering; only real hand-offs move it.
+- **Behaviour per character:** Talks (silent, quiet, normal, chatty), Wanders (stays put, calm, normal, restless) and Walks (slow, normal, fast). Saved on the bot with their looks.
+
+**Corkboard:** clicking it opens a view where notes can be pinned there, or hidden from the board (the desk still reads them; `off_board` on the memory item) or deleted (click twice).
+
+**Charts tab:** any coin can be pinned to watch it live, from its details or by right-clicking it, with Buy buttons and the change since pinning.
+
+**OG vs copies, measured** on three recorded days with history carried across them:
+- **Setup:** the graduation setup, bought 2.5 s late, trailing exit.
+- **Results:** OGs −5.6% a trade [−10.9, +0.9] (306); copies +3.4% [−1.7, +9.1] (456); crowded names (4th copy on) +6.1%.
+- **Conclusion:** being first isn't an edge, so the bot doesn't prefer OGs, and the buy tip says so. A crowded name may mean a hot theme; that's a lead for a future frozen test, not a tuning.
+
+**An incident:** a JavaScript syntax error in the page (a `? :` left without its `:`) was served from the live checkout for about 10 minutes, because the page is read from disk on each load.
+- **Fix:** page work now happens in a separate git worktree, with a browser syntax check before anything reaches the live checkout.
+
+---
+
 ## 2026-10-05 — Entry #41: The OG among copies
 
 **Owner's request:** "If there is a bunch of coins, would be good to mark the OG."

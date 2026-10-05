@@ -674,6 +674,12 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
   padding: 6px 10px; border-radius: 10px; background: color-mix(in srgb, var(--surface) 90%, transparent); border: 1px solid var(--series); font-size: 12.5px; }
 .office.editing #iso-ents g[data-item] { cursor: grab; } .office.editing #iso-ents g[data-item]:hover { filter: drop-shadow(0 0 4px var(--series)); }
 .office.editing .av { pointer-events: none; opacity: .55; }
+#iso g.av { touch-action: none; } #iso g.av.re-drag { cursor: grabbing; opacity: .85; }
+.cork-add { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; } .cork-add input { flex: 1 1 200px; }
+.cork-list { display: grid; gap: 6px; } .cork-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--ring); border-radius: 8px; }
+.cork-row.off { opacity: .55; } .cork-t { flex: 1; min-width: 0; } .cork-ic { font-size: 18px; }
+.wd-act { padding: 10px 14px; border-top: 1px solid var(--ring); display: grid; gap: 6px; }
+.wd-actrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } .wd-actrow > .note:first-child { width: 64px; }
 #iso-ents g.re-drag { cursor: grabbing; filter: drop-shadow(0 0 6px #4ee08a); opacity: .9; } #iso-ents g.re-bad { filter: drop-shadow(0 0 6px #ff6b6b); opacity: .6; }
 .wx-cloud ellipse { fill: #eef2f7; } .wx-cloud { opacity: 0; transition: opacity 2s; animation: wx-drift 24s ease-in-out infinite alternate; }
 .office[data-weather="cloudy"] .wx-cloud, .office[data-weather="rain"] .wx-cloud, .office[data-weather="storm"] .wx-cloud { opacity: .95; }
@@ -1353,7 +1359,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
 <div id="tipbox" class="tipbox" hidden role="status" aria-live="polite"><div class="tip-h">💡 Tip <span class="note">about your trade, which went through</span></div><div id="tip-body"></div>
   <div class="tip-btns"><button class="small primary" id="tip-ok">Got it</button><button class="small" id="tip-never">Don't show this one again</button><button class="small" id="tip-off">Turn tips off</button></div></div>
 <div class="modal" id="wardrobe" hidden><div class="modal-box wd2" role="dialog" aria-label="Change your looks">
-  <div class="wd2-head"><b>👕 Change your looks</b><span class="note">Pick a bot, then its hair, hat, glasses, clothes and skin. Saved on the bot: every browser sees the same team.</span>
+  <div class="wd2-head"><b>👕 Characters</b><span class="note">Pick a bot: its looks (Save changes), and how it acts (saved as you click). Drag a character in the room to move it.</span>
     <div class="spacer"></div><button class="small ghost" id="wd-cancel" aria-label="Close">×</button></div>
   <div class="wd-bots" id="wd-bots"></div>
   <div class="wd2-body">
@@ -1363,6 +1369,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div class="wd-stage-btns"><button class="small" id="wd-rot" title="Turn around">↻ Turn</button><button class="small" id="wd-rand" title="A random look">🎲 Random</button><button class="small ghost" id="wd-reset" title="Back to this bot's original look">Reset</button></div>
       <input id="wd-name" maxlength="18" aria-label="Name" placeholder="Name"><div class="note" id="wd-role"></div></div>
   </div>
+  <div class="wd-act" id="wd-act"></div>
   <div class="wd2-foot"><div class="spacer"></div><button id="wd-cancel2">Cancel</button><button class="wd-save" id="wd-save">Save changes</button></div>
 </div></div>
 <div class="modal" id="composer" hidden><div class="modal-box compose" role="dialog" aria-label="New post">
@@ -1892,6 +1899,26 @@ function famOf(mint) {
   const c = LC.data[mint]; if (c && c.fam !== undefined) return c.fam;
   for (const col of ["new", "stretch"]) { const r = ((PL.data || {})[col] || []).find(x => x.mint === mint); if (r) return r.fam; }
   const p = ((snap || {}).positions || []).find(x => x.mint === mint); return p ? p.fam : null;
+}
+// screen actions from the chat assistant (ui_action): how the page looks, never trades or settings
+function uiDo(m) {
+  const v = String(m.value || ""), bot = Object.keys(LOOK).find(id => id === m.bot || botLook(id).name.toLowerCase() === String(m.bot || "").toLowerCase());
+  let said = "";
+  if (m.do === "theme") { const t = ["light", "dark"].includes(v) ? v : "auto"; store.set("theme", t); applyTheme(t === "auto" ? "" : t); if (snap) render(snap); said = `theme: ${t} (the t key cycles it)`; }
+  else if (m.do === "tab") { setTab(v); said = `opened ${v}`; }
+  else if (m.do === "unit") { setUnit(v); said = `amounts in ${v === "usd" ? "dollars" : "SOL"} (the u key)`; }
+  else if (m.do === "open_coin" && isMint(v)) openDrawer(v);
+  else if (m.do === "pin_chart" && isMint(v)) { if (!lcPinned(v)) lcPin(v); }
+  else if (m.do === "unpin_chart" && isMint(v)) { if (lcPinned(v)) lcPin(v); }
+  else if (m.do === "speech") { setDialog(v !== "off"); said = `speech bubbles ${v === "off" ? "off" : "on"}`; }
+  else if (m.do === "mute") { S.quiet = v === "on"; store.set("quiet", S.quiet ? "1" : "0"); said = S.quiet ? "pop-ups muted (m)" : "pop-ups on (m)"; }
+  else if (m.do === "character" && bot) {
+    const [k, val] = v.split("=");
+    if (k === "spot") setAct(bot, {spot: null}); else if (ACT_OPTS[k] && ACT_OPTS[k].some(o => o[0] === val)) setAct(bot, {[k]: val});
+    said = `${botLook(bot).name}: ${k === "spot" ? "back to its place" : `${k} ${val}`}`;
+    if (!$("wardrobe").hidden) renderWardrobe();
+  }
+  if (said) toast("✦ " + esc(said), "ok");
 }
 function lcLegend(c) {
   const kinds = new Set((c && c.marks || []).map(m => m.who));
@@ -2813,6 +2840,32 @@ function saveRoom() {
   const room = {desks: Object.fromEntries(Object.entries(DESK_AT).map(([k, v]) => [k, [...v]])), table: [...TABLE_AT], couch: [...COUCH_AT], plants: PLANTS.map(x => [...x])};
   IO.ui.room = room; send({action: "ui_set", key: "room", value: room});
 }
+// drag a character to put it somewhere: it stays there (Characters → Send back undoes it). A click still zooms in.
+const BD = {drag: null, done: 0};
+document.addEventListener("pointerdown", e => {
+  if (RE.on || e.button !== 0) return;
+  const g = e.target.closest && e.target.closest("#iso g.av"); if (!g || !IO.bots[g.dataset.bot]) return;
+  BD.drag = {b: IO.bots[g.dataset.bot], x0: e.clientX, y0: e.clientY, moving: false};
+});
+document.addEventListener("pointermove", e => {
+  const d = BD.drag; if (!d) return;
+  if (!d.moving && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return;
+  if (!d.moving) { d.moving = true; d.b.path = []; d.b.then = null; d.b.busy = "held"; d.b.sit = false; setProp(d.b, ""); d.b.g.classList.add("re-drag"); }
+  const [x, y] = tileAt(e); d.b.x = Math.max(.3, Math.min(GX - .3, x)); d.b.y = Math.max(.3, Math.min(GY - .3, y));
+  drawBot(d.b); sortDepth();
+});
+document.addEventListener("pointerup", () => {
+  const d = BD.drag; BD.drag = null; if (!d || !d.moving) return;
+  BD.done = Date.now(); d.b.g.classList.remove("re-drag"); d.b.busy = null;
+  const room = IO.room || "floor", blk = (IO.rooms && IO.rooms[room] && IO.rooms[room].block) || IO.block;
+  const f = walkable(Math.floor(d.b.x), Math.floor(d.b.y), blk) ? [d.b.x, d.b.y] : (nearestFree(d.b.x, d.b.y, blk) || [1, 1]).map(v => v + .5);
+  d.b.x = f[0]; d.b.y = f[1]; d.b.room = room; drawBot(d.b);
+  setAct(d.b.id, {spot: [+f[0].toFixed(2), +f[1].toFixed(2), room], move: "still"});    // placed = stays put
+  toast(`${botLook(d.b.id).name} stays there now (only real work moves it). 👕 Characters → Send back undoes it`, "ok");
+});
+document.addEventListener("click", e => {      // the click that ends a drag isn't a zoom
+  if (Date.now() - BD.done < 350 && e.target.closest && e.target.closest("#iso g.av")) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 document.addEventListener("pointerdown", e => {
   if (!RE.on) return;
   const g = e.target.closest && e.target.closest("#iso-ents g[data-item]"); if (!g) return;
@@ -2926,6 +2979,7 @@ function seatOf(id) {
   return null;
 }
 function homeOf2(id, mood) {
+  const sp = actOf(id).spot; if (sp) return [sp[0], sp[1]];       // where the owner put it
   if (DESK_AT[id]) return seatOf(id);
   if (mood === "sleep") return ((IO.phase || lightPhase()) === "night" ? LOUNGE_BED[id] : LOUNGE_SEAT[id]) || NAP[id];   // resting: the lounge
   return SEAT[id];
@@ -2999,7 +3053,7 @@ function officeBuild() {
   $("office").innerHTML = `<svg class="iso" id="iso" viewBox="0 0 ${VBW} ${VBH}" aria-hidden="false" role="img" aria-label="The trading room">
       <g id="iso-back">${roomBackSVG()}</g><g id="iso-ents"></g>${night}</svg>
     <div class="hchat" id="hchat" aria-live="polite"></div><div class="iso-tag" id="iso-tag"></div>
-    <div class="iso-tools"><button class="small ghost" data-roomedit="1" title="Move desks, the AI table, the couch and plants">🛠 Edit room</button><button class="small ghost" data-wardrobe="1" title="Change the bots">👕 Wardrobe</button></div>
+    <div class="iso-tools"><button class="small ghost" data-roomedit="1" title="Move desks, the AI table, the couch and plants">🛠 Edit room</button><button class="small ghost" data-wardrobe="1" title="Each character's looks and how it acts">👕 Characters</button><button class="small ghost" data-dialog="1" aria-pressed="true" title="Speech bubbles on or off (the Room chat panel keeps everything they say)">💬 Speech on</button></div>
     <div class="room-edit-bar" id="room-edit-bar" hidden>🛠 Drag furniture to move it. It snaps to the floor and can't overlap. <button class="small" data-roomreset="1">Reset room</button> <button class="small primary" data-roomedit="0">Done</button></div>
     <div class="zscreen" id="zscreen" hidden><div class="zs-bezel"><div class="zs-head"><b id="zs-title"></b><button class="small" data-zoomout="1">← Back to the room (Esc)</button></div><div class="zs-body" id="zs-body"></div></div></div>`;
   const ents = $("iso-ents");
@@ -3020,6 +3074,7 @@ function officeBuild() {
   }
   IO.built = true;
   houseInit();
+  syncDialogBtn();
   sortDepth();
   cancelAnimationFrame(IO.raf); IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame);
 }
@@ -3064,12 +3119,12 @@ function goTo(b, dest, then = null, speed = 2.2, room = "floor") {
   if ((b.room || "floor") !== room) return travel(b, room, () => goTo(b, dest, then, speed, room));   // through the door first
   b.sit = false;
   b.path = findPath([b.x, b.y], dest, room).concat([dest]);
-  b.speed = speed; b.then = then;
+  b.speed = speed * (SPEED_F[actOf(b.id).speed] || 1); b.then = then;
 }
 function goHome(b, speed = 2.2) {
   const room = homeRoom(b.id, b.mood), h = homeOf2(b.id, b.mood);
   b.busy = null; b.spot = null; setProp(b, "");
-  const settle = () => { b.sit = true; b.view = room === "lounge" && (IO.phase || lightPhase()) !== "night" ? "back" : "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; };
+  const settle = () => { b.sit = !actOf(b.id).spot; b.view = room === "lounge" && (IO.phase || lightPhase()) !== "night" ? "back" : "front"; if (!DESK_AT[b.id] && b.mood === "sleep") b.face = -1; };
   if ((b.room || "floor") === room && Math.hypot(b.x - h[0], b.y - h[1]) < .05) { settle(); drawBot(b); return; }
   goTo(b, h, settle, speed, room);
 }
@@ -3092,9 +3147,35 @@ function isoFrame(now) {
   if (IO.zoom) zoomStep(now);
   if (S.tab === "desk" && !document.hidden) IO.raf = requestAnimationFrame(isoFrame); else IO.raf = 0;
 }
+// ---- the owner's say over the characters: speech on or off, where each one stands, how chatty and busy it is.
+// Saved on the bot with their looks (ui.json "bots"), except the speech switch, which is per browser.
+const ACT_DEF = {talk: "normal", move: "normal", speed: "normal", spot: null};
+const ACT_OPTS = {talk: [["silent", "Silent"], ["quiet", "Quiet"], ["normal", "Normal"], ["chatty", "Chatty"]],
+  move: [["still", "Stays put"], ["calm", "Calm"], ["normal", "Normal"], ["restless", "Restless"]],
+  speed: [["slow", "Slow"], ["normal", "Normal"], ["fast", "Fast"]]};
+const MOVE_F = {still: 0, calm: .4, normal: 1, restless: 2.5}, SPEED_F = {slow: .6, normal: 1, fast: 1.7};
+function actOf(id) { return {...ACT_DEF, ...(((IO.ui.bots || {})[id] || {}).act || {})}; }
+function dialogOn() { return store.get("room-dialog") !== "off"; }
+function syncDialogBtn() { $$("[data-dialog]").forEach(b => { b.setAttribute("aria-pressed", String(dialogOn())); b.textContent = dialogOn() ? "💬 Speech on" : "🔇 Speech off"; }); }
+function setDialog(on) {
+  store.set("room-dialog", on ? "on" : "off");
+  if (!on) { IO.chat.forEach(m => m.el.remove()); IO.chat = []; }
+  syncDialogBtn();
+}
+function setAct(id, patch) {
+  if (!LOOK[id]) return false;
+  const all = IO.ui.bots ||= {}, cur = all[id] ||= {name: botLook(id).name, look: {...botLook(id).look}};
+  cur.act = {...actOf(id), ...patch};
+  send({action: "ui_set", key: "bots", value: all});
+  const b = IO.bots[id];
+  if (b && "spot" in patch && !b.busy) { b.path = []; b.then = null; goHome(b); }
+  return true;
+}
 // ---- Habbo-style chat: every line gets its own row at the speaker's x, older lines float up
 function hsay(id, html, opts = {}) {
   const b = IO.bots[id]; if (!b || !html) return;
+  const act = actOf(id);
+  if (act.talk === "silent" || (act.talk === "quiet" && !opts.kind && Math.random() < .65)) return;
   if (!opts.force && b.said === html && Date.now() - b.lastSaid < 60000) return;
   const plain = html.replace(/<[^>]+>/g, ""), said = (RL.last ||= new Map()).get(plain);
   if (said && Date.now() - said < 300000) return;                   // nobody repeats a line within 5 minutes
@@ -3103,6 +3184,11 @@ function hsay(id, html, opts = {}) {
   const {color, name, look} = botLook(id);
   if ((b.room || "floor") !== (IO.room || "floor")) {
     (IO.history ||= []).push({id, name, look, html: html + ` <span class="note">(${HOUSE[b.room].name.toLowerCase()})</span>`, at: Date.now(), kind: opts.kind || ""});
+    if (IO.history.length > 300) IO.history.shift();
+    renderRoomLog(); return;
+  }
+  if (!dialogOn()) {                       // speech off: no bubbles, but the Room chat panel keeps the record
+    (IO.history ||= []).push({id, name, look, html, at: Date.now(), kind: opts.kind || ""});
     if (IO.history.length > 300) IO.history.shift();
     renderRoomLog(); return;
   }
@@ -3188,7 +3274,7 @@ function renderBoards() {
 function renderCork(items) {
   const g = $("iso-notes"); if (!g) return;
   const colors = ["#fff6a8", "#bfe8ff", "#ffc8de", "#c9f2c7"];
-  setHTML(g, items.slice(0, 6).map((it, i) => { const x = 8 + (i % 3) * 40, y = 6 + Math.floor(i / 3) * 34;
+  setHTML(g, items.filter(it => !it.off_board).slice(0, 6).map((it, i) => { const x = 8 + (i % 3) * 40, y = 6 + Math.floor(i / 3) * 34;
     return `<g transform="translate(${x} ${y}) rotate(${[-3, 2, -1, 3, -2, 1][i]})"><rect width="34" height="28" fill="${colors[i % 4]}" class="pb-note"/>
       <text x="3" y="9" class="pb-n">${{ca: "🪙", x: "𝕏", web: "📰", note: "📝"}[it.kind] || "📌"}</text>
       <text x="3" y="18" class="pb-n">${esc(it.title.slice(0, 8))}</text><text x="3" y="25" class="pb-n">${esc(it.title.slice(8, 16))}</text></g>`; }).join("")
@@ -3276,8 +3362,9 @@ setInterval(() => {
   if (busyCount() >= 3 || IO.zoom) return;
   for (const b of Object.values(IO.bots)) {
     if (b.busy || b.path.length || !DESK_AT[b.id] && b.mood === "sleep") continue;
-    const p = b.mood === "idle" ? 1 / 24 : b.mood === "work" ? 1 / 70 : 0;
+    const act = actOf(b.id), p = (b.mood === "idle" ? 1 / 24 : b.mood === "work" ? 1 / 70 : 0) * (MOVE_F[act.move] ?? 1);
     if (Math.random() < p && busyCount() < 3) errand2(b);
+    else if (act.talk === "chatty" && Math.random() < 1 / 40) { const line = nextLine(b.id, pick(["coffee", "board", "window", "cooler"])); if (line) hsay(b.id, esc(line), {force: true}); }
   }
 }, 1000);
 // ---- real hand-offs between the bots
@@ -3376,9 +3463,28 @@ function screenHTML(kind) {
       return `<div class="kpis">${[["Equity", sol(s.equity) + U()], ["Today", signed(s.day_pnl)], ["Realized", signed(sm.realized_pnl_sol)], ["Won", sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–"], ["Profit factor", sm.closed ? fx(sm.profit_factor) : "–"]].map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value num">${v}</div></div>`).join("")}</div>
         <div style="margin:10px 0">${svgSpark((s.equity_hist || []).slice(-200).map(e => e[1]), "var(--series)", 70, 600)}</div>
         <table><thead><tr><th>Coin</th><th>Source</th><th class="r">P&amp;L</th><th>Exit</th></tr></thead><tbody>${(s.closed || []).slice(0, 10).map(c => `<tr><td>${tok(c.mint, c.symbol)}</td><td>${esc(c.source)}</td><td class="r ${cls(c.pnl)}">${signed(c.pnl)}</td><td class="why">${esc(c.exit)}</td></tr>`).join("")}</tbody></table>`; }
-    case "cork": return `<div class="mem-list" style="max-height:none">${$("mem-list").innerHTML}</div>`;
+    case "cork": return corkScreen();
     default: return ["veteran", "narrative", "skeptic", "quant"].includes(kind) ? personaCard(kind, d) : "";
   }
+}
+// the corkboard up close: pin a note, hide one from the board (the desk still remembers it), or delete it
+function corkScreen() {
+  const icon = k => ({ca: "🪙", x: "𝕏", web: "📰", note: "📝"}[k] || "📌");
+  const rows = MEM.items.map(it => `<div class="cork-row${it.off_board ? " off" : ""}"><span class="cork-ic">${icon(it.kind)}</span>
+    <div class="cork-t"><b>${esc(it.title || "")}</b>${it.note ? `<div class="note">${esc(it.note.slice(0, 160))}</div>` : ""}
+      <div class="note">${ago(it.ts)} ago · ${(it.thread || []).length} repl${(it.thread || []).length === 1 ? "y" : "ies"}${it.off_board ? " · hidden from the board" : ""}</div></div>
+    <button class="small ghost" data-corkboard="${esc(it.id)}" data-on="${it.off_board ? 1 : 0}">${it.off_board ? "👁 Show on board" : "🙈 Hide from board"}</button>
+    <button class="small ghost" data-corkdel="${esc(it.id)}">🗑 Delete</button></div>`).join("");
+  return `<div class="cork-add"><input id="cork-in" placeholder="A note, an X or article link, or a contract address" maxlength="2000" aria-label="New note">
+      <input id="cork-note" placeholder="Your comment (optional)" maxlength="600" aria-label="Comment"><button class="small primary" data-corkadd="1">📌 Pin it</button></div>
+    <div class="cork-list">${rows || `<div class="empty">Nothing pinned yet: add the first note above.</div>`}</div>
+    <p class="note">The board shows the newest 6 that aren't hidden. Hidden notes stay in the desk's memory (the personas still read them); Delete removes a note for good.</p>`;
+}
+function corkAdd() {
+  const t = ($("cork-in") || {}).value || ""; if (!t.trim()) { $("cork-in") && $("cork-in").focus(); return; }
+  send({action: "mem_add", text: t.trim(), note: ($("cork-note").value || "").trim()});
+  $("cork-in").value = ""; $("cork-note").value = ""; document.activeElement.blur();
+  toast("Pinning it: the desk will read it and reply", "ok"); setTimeout(loadMemory, 1500);
 }
 function showScreen(kind) {
   const title = IO.bots[kind] ? `${AGENT[kind][0]} ${botLook(kind).name}'s screen` : kind === "board" ? "📊 P&L board" : "📌 Corkboard: the desk's memory";
@@ -3415,6 +3521,11 @@ function renderWardrobe() {
   $("wd-big").src = figURL(L, "stand", 0, v, fl);
   if (document.activeElement !== $("wd-name")) $("wd-name").value = WD.names[id];
   $("wd-role").textContent = AGENT[id] ? AGENT[id][2] : "";
+  const a = actOf(id), lab = {talk: "Talks", move: "Wanders", speed: "Walks"};
+  $("wd-act").innerHTML = `<b>How ${esc(WD.names[id])} acts</b><span class="note"> · saved as you click</span>` + Object.entries(ACT_OPTS).map(([k, opts]) =>
+    `<div class="wd-actrow"><span class="note">${lab[k]}</span><div class="seg">${opts.map(([v, l]) => `<button class="small" data-wdact="${k}" data-v="${v}" aria-pressed="${a[k] === v}">${l}</button>`).join("")}</div></div>`).join("")
+    + `<div class="wd-actrow"><span class="note">Spot</span><span>${a.spot ? `where you put it, in the ${esc(HOUSE[a.spot[2] || "floor"].name.toLowerCase())}` : "its usual place"}</span>
+      ${a.spot ? `<button class="small" data-wdact="spot" data-v="">Send back</button>` : `<span class="note">drag it in the room to move it</span>`}</div>`;
 }
 function wdRandom() {
   const pick = a => a[Math.floor(Math.random() * a.length)];
@@ -3424,6 +3535,7 @@ function wdRandom() {
   renderWardrobe();
 }
 function wdClick(d) {
+  if (d.wdact) { setAct(WD.bot, d.wdact === "spot" ? {spot: null, move: "normal"} : {[d.wdact]: d.v}); renderWardrobe(); return true; }
   if (d.wdbot) { WD.bot = d.wdbot; renderWardrobe(); return true; }
   if (d.wdcat) { WD.cat = d.wdcat; renderWardrobe(); return true; }
   if (d.wdset) { WD.looks[WD.bot][d.wdset] = d.v; renderWardrobe(); return true; }
@@ -3431,7 +3543,7 @@ function wdClick(d) {
 }
 function saveWardrobe() {
   const bots = {};
-  for (const id of Object.keys(LOOK)) bots[id] = {name: (WD.names[id] || "").trim().slice(0, 18), look: WD.looks[id]};
+  for (const id of Object.keys(LOOK)) bots[id] = {name: (WD.names[id] || "").trim().slice(0, 18), look: WD.looks[id], act: ((IO.ui.bots || {})[id] || {}).act};
   IO.ui.bots = bots; send({action: "ui_set", key: "bots", value: bots});
   $("wardrobe").hidden = true; rebuildOffice();
 }
@@ -3580,11 +3692,11 @@ function houseTabs() {
   }
 }
 // where a bot lives: the AI personas rest in the lounge (in bed at night, on the sofa by day); everyone else on the floor
-function homeRoom(id, mood) { return !DESK_AT[id] && mood === "sleep" ? "lounge" : "floor"; }
+function homeRoom(id, mood) { const sp = actOf(id).spot; if (sp) return sp[2] || "floor"; return !DESK_AT[id] && mood === "sleep" ? "lounge" : "floor"; }
 function travel(b, room, then) {
   if ((b.room || "floor") === room) return then();
   b.sit = false; b.busy = b.busy || "walking";
-  b.path = findPath([b.x, b.y], DOOR, b.room || "floor").concat([DOOR]); b.speed = 2.6;
+  b.path = findPath([b.x, b.y], DOOR, b.room || "floor").concat([DOOR]); b.speed = 2.6 * (SPEED_F[actOf(b.id).speed] || 1);
   b.then = () => {
     b.room = room; b.x = DOOR[0] + .4; b.y = DOOR[1]; if (b.busy === "walking") b.busy = null;
     syncRoomVis(); houseTabs(); drawBot(b); then();
@@ -3952,6 +4064,7 @@ function threadHTML(it) {
 }
 function renderMemory() {
   renderCork(MEM.items);
+  if ($("zscreen") && !$("zscreen").hidden && $("zscreen").dataset.kind === "cork") refreshScreen();
   const newest = MEM.items[0] && MEM.items[0].id;
   if (IO.memSeen && newest && newest !== IO.memSeen) IO.events.push({kind: "memory", title: MEM.items[0].title});
   IO.memSeen = newest || IO.memSeen || "-";
@@ -4802,7 +4915,7 @@ const GUIDE = [
       <li><b>👕 Wardrobe</b> ("Change your looks"): hair, hats, glasses, clothes and skin for every bot. <b>🛠 Edit room</b>: drag the desks, the AI table, the couch and the plants; seats follow their furniture.</li></ul>`},
   {id: "aidesk", icon: "🧠", title: "The AI desk", html: `
     <ul><li>Four Claude personas (veteran, narrative, skeptic, quant) review each entry the rules pick, in parallel, in a few seconds. Billed to your Anthropic key; asleep until you wake it on the Desk tab (it stays awake after a restart).</li>
-      <li><b>How the vote works:</b> each buy vote counts its conviction (0–100) times the persona's weight; pass votes count zero. The total, divided by the desk's full weight, must reach the quorum (45% by default). So three buys at ~58 conviction (≈44%) still pass on the coin. The skeptic can veto with a pass at 75+.</li>
+      <li><b>How the vote works:</b> buy votes, weighted by persona (narrative 0.8, the others 1), must reach the quorum: 45% of the desk's voting weight by default, so three of four is a buy. A buy under 50 conviction counts half. Conviction sets the size. The skeptic can veto with a pass at 75+.</li>
       <li>Analytics → Gate audit follows every coin the desk passes ("AI desk passed: 3 of 4 said buy", …) so you can judge the quorum on data before changing <code>desk.quorum</code>.</li>
       <li>The personas also <b>read every note you save</b> and reply (see the next section).</li>
       <li><b>Pick their model</b> (Desk → AI desk model): Claude Opus, Sonnet or Haiku, or a cheaper or free service that speaks the standard chat API: GitHub Models (free with a GitHub token), Hugging Face, OpenRouter (":free" models), or a model running on this machine (Ollama, LM Studio). The panel shows what a review costs and has a Test button. Local models on this mini PC's CPU are too slow for trade votes (they time out after 12 s) but fine for note replies.</li></ul>`},
@@ -4845,11 +4958,11 @@ const GUIDE = [
       <li>Paper fills land 2.5 s late at the price then, with failed orders modelled, so paper results are closer to what live would get.</li>
       <li><b>Exit lab</b> (Analytics): every time the bot buys, other exit rules (tighter or looser stops, a longer stall, holding closer to graduation, a 2x take profit, a trailing stop) follow the same coin on the same prices, with fees. Same entries, so a better row means a better exit. It's measurement only: a better exit becomes a new strategy version with its own test.</li></ul>`},
   {id: "keys", icon: "⌨", title: "Keyboard", html: `<div class="tablewrap"><table><tbody>
-    <tr><td>${K("1")} … ${K("9")}</td><td>Live · Pulse · Desk · Calls · Chat · Portfolio · Analytics · Controls · Guide</td></tr>
+    <tr><td>${K("1")} … ${K("9")}</td><td>Live · Pulse · Desk · Chat · Portfolio · Analytics · Controls · Guide · Charts</td></tr>
     <tr><td>${K("Ctrl")}+${K("K")}</td><td>Command palette</td></tr><tr><td>${K("c")}</td><td>Chat with Claude</td></tr>
     <tr><td>${K("/")}</td><td>Filter the launch radar</td></tr><tr><td>${K("p")}</td><td>Pause / resume new entries</td></tr>
     <tr><td>${K("a")}</td><td>Arrange this page</td></tr><tr><td>${K("n")}</td><td>New post</td></tr><tr><td>${K("Esc")}</td><td>Close whatever is open</td></tr>
-    <tr><td>${K("m")}</td><td>Mute pop-ups</td></tr><tr><td>${K("t")}</td><td>Theme</td></tr><tr><td>${K("?")}</td><td>This guide</td></tr></tbody></table></div>`},
+    <tr><td>${K("u")}</td><td>SOL or $</td></tr><tr><td>${K("&#96;")}</td><td>Terminal</td></tr><tr><td>${K("m")}</td><td>Mute pop-ups</td></tr><tr><td>${K("t")}</td><td>Theme</td></tr><tr><td>${K("?")}</td><td>This guide</td></tr></tbody></table></div>`},
   {id: "glossary", icon: "📖", title: "Glossary", html: `<dl class="gloss">${[
     ["Bonding curve", "pump.fun's built-in market: price rises as SOL comes in. At about 85 SOL the coin graduates to PumpSwap."],
     ["Graduation", "the moment a coin fills its curve and moves to a real pool. Graduation plays buy late on the curve and sell before it."],
@@ -5166,6 +5279,7 @@ function connect() {
     const m = JSON.parse(e.data);
     if (m.type === "chat") { onChat(m); return; }
     if (m.type === "ticks") { onTicks(m); return; }
+    if (m.type === "ui") { uiDo(m); return; }
     if (m.type === "hello") {                 // the bot restarted with a different page: load it
       const mine = document.querySelector('meta[name="ui-version"]').content;
       if (m.ui && /^[0-9a-f]{10}$/.test(mine) && m.ui !== mine) location.reload();   // (unstamped page: never)
@@ -5497,7 +5611,7 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
@@ -5511,6 +5625,7 @@ document.addEventListener("click", e => {
   if (d.zoomout) { zoomOut(); return; }
   if (d.wardrobe) { openWardrobe(); return; }
   if (wdClick(d)) return;
+  if (d.dialog) { setDialog(!dialogOn()); toast(dialogOn() ? "Speech bubbles on" : "Speech bubbles off: the Room chat panel still keeps what they say", "ok"); return; }
   if (arClick(d, t)) { e.stopPropagation(); return; }
   if (d.help) { e.preventDefault(); e.stopPropagation(); openHelp(d.help); return; }
   if (d.gdjump) { e.preventDefault(); $("gd-" + d.gdjump)?.scrollIntoView({behavior: "smooth", block: "start"}); return; }
@@ -5556,6 +5671,12 @@ document.addEventListener("click", e => {
   if (d.msave) { e.stopPropagation(); const f = document.querySelector(`[data-mexits="${d.msave}"]`), v = k => f.querySelector(`[data-k="${k}"]`).value;
     send({action: "m_exits", mint: d.msave, sl: v("sl"), tp: v("tp"), trail: v("trail")}); return; }
   if (d.memdel) { send({action: "mem_del", id: d.memdel}); return; }
+  if (d.corkadd) { corkAdd(); return; }
+  if (d.corkboard) { send({action: "mem_board", id: d.corkboard, on: d.on === "1"}); t.blur(); return; }
+  if (d.corkdel) {                                         // two clicks: no confirm() in this page
+    if (t.dataset.armed) { send({action: "mem_del", id: d.corkdel}); t.blur(); return; }
+    t.dataset.armed = "1"; t.textContent = "Delete for good? Click again"; t.classList.add("bad");
+    setTimeout(() => { if (t.isConnected) { delete t.dataset.armed; t.textContent = "🗑 Delete"; t.classList.remove("bad"); } }, 4000); return; }
   if (d.tramt) { TR.amt = +d.tramt; $("tr-amt").value = ""; if (snap) renderTradePanel(snap); return; }
   if (d.trade) { closeDrawer(); setTab("live"); setTradeMint(d.trade); $("trade-panel").scrollIntoView({behavior: "smooth", block: "center"}); return; }
   if (d.keytest) { const old = t.textContent; t.disabled = true; t.textContent = "Testing…"; send({action: "key_test", name: d.keytest === "1" ? "ANTHROPIC_API_KEY" : d.keytest});
@@ -5602,6 +5723,7 @@ addEventListener("keydown", e => {
     if (e.key === "Enter" && e.target.id === "xf-in") addX();
     if (e.key === "Enter" && (e.target.id === "mem-note" || (e.target.id === "mem-in" && !e.shiftKey))) { e.preventDefault(); memAdd(); }
     if (e.key === "Enter" && e.target.id === "tr-amt") $("tr-buy").click();
+  if (e.key === "Enter" && (e.target.id === "cork-in" || e.target.id === "cork-note")) { e.preventDefault(); corkAdd(); }
     if (e.key === "Enter" && (e.target.id === "pf-addr" || e.target.id === "pf-label")) $("pf-add").click();
     return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
