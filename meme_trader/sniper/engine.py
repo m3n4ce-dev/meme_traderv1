@@ -1095,6 +1095,8 @@ class Engine:
         self.pending.add(s.mint)
         s.decided = "entered"
         meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add), "amm": bool(s.migrated)}
+        if not add and source != "callout":
+            meta["feat"] = self._entry_features(s, source)
         if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
             self._defer({"side": "buy", "mint": s.mint, "score": score, "sol": sol, "notes": list(notes),
                          "source": source, "leader": leader, "then": then, **meta})
@@ -1263,7 +1265,7 @@ class Engine:
             entry_quote=(meta or {}).get("quote", 0.0),
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
             failed_fees_sol=fill.fees_lost,
-            bot="ride" if source == "manual" and self.away else "")
+            bot="ride" if source == "manual" and self.away else "", feat=(meta or {}).get("feat"))
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
@@ -1479,6 +1481,7 @@ class Engine:
             "exit_vs_signal_pct": round((pos.exit_fill / pos.exit_quote - 1) * 100, 2) if pos.exit_quote else None,
             "entry_delay_s": pos.entry_delay_s, "exit_delay_s": pos.exit_delay_s,
             "failed_fees_sol": round(pos.failed_fees_sol, 6),
+            "feat": pos.feat,
         }
         self.record_close(row, pos.mint)
         if pos.leader:
@@ -1841,6 +1844,31 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    FEATS = ("age_s", "curve_progress_pct", "market_cap_sol", "unique_buyers", "buys", "sells", "buys_last_20s",
+             "sells_last_20s", "net_flow_sol_20s", "dev_initial_buy_pct", "dev_sold", "bundle_pct", "early_buyers_sold_ratio",
+             "top10_holders_pct", "price_vs_peak")
+
+    def _entry_features(self, s: TokenState, source: str) -> dict | None:
+        """What the bot saw when it decided to buy, kept with the trade: the coins that dumped can later be told
+        apart from the ones that didn't (the desk's own view, plus flow over the graduation play's window)."""
+        try:
+            from .desk import snapshot_for
+            d = snapshot_for(s, self.now, "late" if source == "late" else "sniper", {})
+            f = {k: d.get(k) for k in self.FEATS}
+            t = d.get("token") or {}
+            w = float(self.p.late.flow_window_s)
+            f.update(links=sum(bool(t.get(k)) for k in ("twitter", "telegram", "website")),
+                     net_flow_sol_window=round(s.net_flow_sol(self.now, w), 3), buyers_window=s.buyers_in(self.now, w),
+                     net_flow_sol_60s=round(s.net_flow_sol(self.now, 60), 3), buyers_60s=s.buyers_in(self.now, 60),
+                     secs_since_high=round(self.now - s.last_high_ts(), 1) if s.last_high_ts() else None,
+                     creator_launches=len(self.creators.get(s.creator, ())))
+            fam = self.family(s.mint)
+            f["family"] = ("og" if fam.get("og") else "copy") if fam else "alone"
+            f["family_n"] = fam.get("n", 1) if fam else 1
+            return f
+        except Exception:                                # research data must never stop a trade
+            return None
 
     def _late_red(self, s: TokenState) -> dict:
         en = self.p.entry
