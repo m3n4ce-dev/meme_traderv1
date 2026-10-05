@@ -12,6 +12,11 @@ not upgradeable, no blacklist, no pausing, no owner balance changes); on Solana 
 authorities must be renounced. Measured 2026-10-05: 3 of the 8 trending BNB Chain pools and 1 of 8 on Base were
 honeypots, and honeypot.is didn't know most brand-new pools or some large BNB Chain ones.
 
+Real-price check: at every paper buy and sell, a real swap router is asked what the same swap would return
+(KyberSwap on BNB Chain / Base / Ethereum, Jupiter on Solana; no key or wallet needed). A coin no router can buy is
+skipped, and each closed trade carries its "real" P&L next to the paper one. readiness() turns those into the
+checklist that has to pass before real money is even discussed (docs/MULTICHAIN.md).
+
 Paper only: there's no EVM wallet or executor, so in live mode this never opens anything.
 """
 from __future__ import annotations
@@ -44,6 +49,12 @@ MAJORS = {"WETH", "ETH", "WBNB", "BNB", "SOL", "WSOL", "USDC", "USDT", "DAI", "B
           "WBTC", "BTCB", "CBBTC", "BTC", "STETH", "WSTETH", "CBETH", "JITOSOL", "MSOL"}
 DEX_FEE = {"pancakeswap_v2": 0.25, "pancakeswap-v2-bsc": 0.25, "uniswap_v2": 0.3, "raydium": 0.25, "pumpswap": 0.3}
 DS = "https://api.dexscreener.com"
+KYBER = "https://aggregator-api.kyberswap.com"
+KYBER_CHAIN = {"bsc": "bsc", "base": "base", "eth": "ethereum"}
+# what a real wallet would pay with and be paid in: a dollar stablecoin per chain (address, decimals)
+STABLE = {"bsc": ("0x55d398326f99059fF775485246999027B3197955", 18), "base": ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6),
+          "eth": ("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6), "solana": ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6)}
+READY = {"min_trades": 50, "min_conf": 0.9, "max_gap_pct": 2.0, "min_quotes": 20}
 
 
 def fee_pct(row: dict) -> float:
@@ -128,6 +139,22 @@ def judge_goplus(d: dict | None, token: str, max_tax: float) -> tuple[bool, str,
     return True, "", {"buy_tax": bt, "sell_tax": st}
 
 
+def parse_kyber(status: int, d) -> tuple[str, dict | None]:
+    """KyberSwap /routes -> ('ok', {out_raw, out_usd, gas_usd}) | ('no route', None) | ('error', None)."""
+    rs = ((d.get("data") or {}).get("routeSummary") or {}) if isinstance(d, dict) else {}
+    if status == 200 and d.get("code") == 0 and int(rs.get("amountOut") or 0) > 0:
+        return "ok", {"out_raw": int(rs["amountOut"]), "out_usd": float(rs.get("amountOutUsd") or 0) or None,
+                      "gas_usd": float(rs["gasUsd"]) if rs.get("gasUsd") is not None else None}
+    return ("error", None) if status == 429 or status >= 500 else ("no route", None)
+
+
+def parse_jupiter(status: int, d) -> tuple[str, dict | None]:
+    """Jupiter /quote -> ('ok', {out_raw}) | ('no route', None) | ('error', None)."""
+    if status == 200 and isinstance(d, dict) and int(d.get("outAmount") or 0) > 0:
+        return "ok", {"out_raw": int(d["outAmount"]), "out_usd": None, "gas_usd": None}
+    return ("error", None) if status == 429 or status >= 500 else ("no route", None)
+
+
 def judge_solana_mint(d: dict | None, max_tax: float) -> tuple[bool, str, dict]:
     """getAccountInfo (jsonParsed) of a Solana mint -> (tradable, why not, {buy_tax, sell_tax})."""
     try:
@@ -144,7 +171,7 @@ def judge_solana_mint(d: dict | None, max_tax: float) -> tuple[bool, str, dict]:
             fee = float(((x.get("state") or {}).get("newerTransferFee") or {}).get("transferFeeBasisPoints") or 0) / 100
     if fee > max_tax:
         return False, f"transfer fee {fee:g}%", {}
-    return True, "", {"buy_tax": fee, "sell_tax": fee}
+    return True, "", {"buy_tax": fee, "sell_tax": fee, "decimals": info.get("decimals")}
 
 
 class XChain:
@@ -160,6 +187,7 @@ class XChain:
         self.http = None
         self._chains = None
         self._recorded = None                          # the lists last kept (their fetch time)
+        self._ready: tuple[float, dict] | None = None
         self.load()
 
     @property
@@ -256,6 +284,24 @@ class XChain:
                 del self.checks[k]
         return res
 
+    async def real_quote(self, chain: str, token_in: str, token_out: str, amount_raw: int) -> tuple[str, dict | None]:
+        """What a real swap of amount_raw would return, from a real router. ('ok' | 'no route' | 'error', quote)."""
+        if amount_raw <= 0:
+            return "no route", None
+        s = await self._session()
+        try:
+            if chain == "solana":
+                key = os.environ.get("JUPITER_API_KEY")
+                url = "https://api.jup.ag/swap/v1/quote" if key else "https://lite-api.jup.ag/swap/v1/quote"
+                async with s.get(url, params={"inputMint": token_in, "outputMint": token_out, "amount": str(amount_raw), "slippageBps": "300"},
+                                 headers={"x-api-key": key} if key else {}) as r:
+                    return parse_jupiter(r.status, await r.json(content_type=None))
+            async with s.get(f"{KYBER}/{KYBER_CHAIN[chain]}/api/v1/routes", headers={"x-client-id": "meme-trader-paper"},
+                             params={"tokenIn": token_in, "tokenOut": token_out, "amountIn": str(amount_raw)}) as r:
+                return parse_kyber(r.status, await r.json(content_type=None))
+        except Exception:                               # (the router being down never blocks paper trading)
+            return "error", None
+
     # ------------------------------------------------------------------ the loop
     async def run(self) -> None:
         while True:
@@ -275,7 +321,7 @@ class XChain:
     async def step(self, now: float) -> None:
         if self.positions:
             await self.refresh(now)
-            self.check_exits(now)
+            await self.check_exits(now)
         if self.active and now - self.last_scan >= float(self.cfg["scan_s"]):
             self.last_scan = now
             await self.scan_and_enter(now)
@@ -365,7 +411,12 @@ class XChain:
             if not ok:
                 self._why(r, why)
                 continue
-            self.open(r, q, info, size, now)
+            stable, dec = STABLE[r["chain"]]
+            st, rq = await self.real_quote(r["chain"], stable, r["token"], int(size * 10 ** dec))
+            if st == "no route":
+                self._why(r, "no real swap route (KyberSwap / Jupiter): a real wallet couldn't buy it")
+                continue
+            self.open(r, q, info, size, now, real=rq)
 
     def _why(self, r: dict, why: str) -> None:
         for x in self.scan:
@@ -384,7 +435,7 @@ class XChain:
                 "sells_h1", "age_s", "price_usd", "why")} for r in rows]}) + "\n")
 
     # ------------------------------------------------------------------ fills (paper)
-    def open(self, r: dict, q: dict, info: dict, size_usd: float, now: float) -> dict:
+    def open(self, r: dict, q: dict, info: dict, size_usd: float, now: float, real: dict | None = None) -> dict:
         cfg, e = self.cfg, self.e
         sol_usd = e.sol_price.usd or 1.0
         liq = q["liq"] or r.get("liq_usd") or 0
@@ -404,16 +455,30 @@ class XChain:
                "last": q["price"], "last_ts": now, "peak": q["price"], "trough": q["price"],
                "proceeds_sol": 0.0, "proceeds_usd": 0.0, "tp_taken": False, "exits": [], "sol_usd0": sol_usd,
                "why": f"1h {r.get('chg_h1'):+.0f}%, {r.get('buys_h1')}/{r.get('sells_h1')} buys/sells, ${(r.get('vol_h1') or 0) / 1000:,.0f}k vol"}
+        if real:                                          # the same buy at a real router's price
+            dec = info.get("decimals")
+            val = real["out_usd"] if real.get("out_usd") else (real["out_raw"] / 10 ** dec * q["price"] if dec is not None else None)
+            paper_val = tokens * q["price"]
+            pos["real"] = {"raw": real["out_raw"], "raw_left": real["out_raw"],
+                           "cost_usd": size_usd + (real["gas_usd"] if real.get("gas_usd") is not None else gas),
+                           "buy_gap_pct": round((val / paper_val - 1) * 100, 2) if val and paper_val else None,
+                           "proceeds_usd": 0.0, "sell_gaps": [], "complete": True}
         self.positions[key] = pos
         self.save()
         mc = q.get("mcap")
         e.say("buy", f"🌐 {pos['symbol']} on {pos['chain_name']}: ${size_usd:,.0f} (paper){f' at ${mc / 1e6:,.2f}M market cap' if mc else ''} | {pos['why']}")
         return pos
 
-    def sell(self, key: str, frac: float, reason: str, now: float, price: float | None = None) -> None:
+    async def sell(self, key: str, frac: float, reason: str, now: float, price: float | None = None) -> None:
         pos = self.positions.get(key)
         if pos is None:
             return
+        real, rq, st, amt = pos.get("real"), None, "", 0
+        if real and real["raw_left"] > 0 and price != 0.0:   # ask a real router first: what would this sale fetch?
+            amt = real["raw_left"] if frac >= 0.999 else int(real["raw_left"] * frac)
+            st, rq = await self.real_quote(pos["chain"], pos["token"], STABLE[pos["chain"]][0], amt)
+            if self.positions.get(key) is not pos:            # sold meanwhile (e.g. your Sell click)
+                return
         cfg, e = self.cfg, self.e
         sol_usd = e.sol_price.usd or 1.0
         frac = min(max(frac, 0.0), 1.0)
@@ -431,7 +496,19 @@ class XChain:
         e.book.sol += sol
         e.book.day_pnl += sol - cost_part
         pos["exits"].append([now, reason, round(frac, 3), round(sol, 6)])
-        e.say("sell", f"🌐 {pos['symbol']} ({pos['chain_name']}) {frac:.0%} for ${usd:,.2f} | {reason}")
+        if real:
+            real_gas = float(cfg["gas_usd"].get(pos["chain"], 0.05))
+            if st == "ok":
+                got = rq["out_raw"] / 10 ** STABLE[pos["chain"]][1] * (1 - pos["sell_tax"] / 100) - real_gas
+                real["proceeds_usd"] += got
+                if usd > 0:
+                    real["sell_gaps"].append(round((got / usd - 1) * 100, 2))
+            elif st == "no route":                       # a real wallet would be stuck with these: worth nothing
+                self.note(f"{pos['symbol']}: no real route to sell {frac:.0%}: counted as $0 at real prices")
+            else:
+                real["complete"] = False                 # router down: this trade's real P&L is unknown
+            real["raw_left"] -= amt
+        e.say("sell", f"🌐 {pos['symbol']} ({pos['chain_name']}) {frac:.0%} for ${usd:,.2f} (paper) | {reason}")
         if frac >= 0.999 or pos["tokens"] * px < 1.0:
             self._close(pos, now)
         else:
@@ -460,38 +537,46 @@ class XChain:
                "entry_mcap_sol": round(pos["mcap0"] / pos["sol_usd0"], 2) if pos.get("mcap0") else None,
                "exit_mcap_sol": round(pos["mcap"] / usd, 2) if pos.get("mcap") and usd else None,
                "fees": {"swap_pct": pos["fee_pct"], "buy_tax": pos["buy_tax"], "sell_tax": pos["sell_tax"]}}
+        r = pos.get("real")
+        if r:
+            gaps = r["sell_gaps"]
+            row["real"] = {"cost_usd": round(r["cost_usd"], 2), "proceeds_usd": round(r["proceeds_usd"], 2),
+                           "pnl_usd": round(r["proceeds_usd"] - r["cost_usd"], 2), "complete": r["complete"] and r["raw_left"] <= 0,
+                           "buy_gap_pct": r["buy_gap_pct"], "sell_gap_pct": round(sum(gaps) / len(gaps), 2) if gaps else None}
         e.record_close(row, pos["key"])
         self.save()
 
-    def check_exits(self, now: float) -> None:
+    async def check_exits(self, now: float) -> None:
         cfg = self.cfg
         for key, p in list(self.positions.items()):
+            if key not in self.positions:
+                continue
             if self.e.book.halted:
-                self.sell(key, 1.0, "kill switch", now)
+                await self.sell(key, 1.0, "kill switch", now)
                 continue
             px, entry = p["last"], p["entry"]
             stale = now - p["last_ts"]
             if now - p["opened"] >= float(cfg["max_hold_h"]) * 3600:
                 if stale > 1800:                         # no price for 30 min at the end: assume the worst
-                    self.sell(key, 1.0, "no price for 30 min (pool gone?)", now, price=0.0)
+                    await self.sell(key, 1.0, "no price for 30 min (pool gone?)", now, price=0.0)
                 else:
-                    self.sell(key, 1.0, f"held {cfg['max_hold_h']} h", now)
+                    await self.sell(key, 1.0, f"held {cfg['max_hold_h']} h", now)
             elif stale > 120:
                 continue                                  # don't act on an old price
             elif p["liq0"] and p["liq"] < 0.4 * p["liq0"]:
-                self.sell(key, 1.0, f"liquidity pulled (${p['liq']:,.0f} from ${p['liq0']:,.0f})", now)
+                await self.sell(key, 1.0, f"liquidity pulled (${p['liq']:,.0f} from ${p['liq0']:,.0f})", now)
             elif px <= entry * (1 - float(cfg["stop_loss_pct"]) / 100):
-                self.sell(key, 1.0, f"stop loss -{cfg['stop_loss_pct']}%", now)
+                await self.sell(key, 1.0, f"stop loss -{cfg['stop_loss_pct']}%", now)
             elif not p["tp_taken"] and px >= entry * (1 + float(cfg["take_profit_pct"]) / 100):
                 p["tp_taken"] = True
-                self.sell(key, float(cfg["take_profit_fraction"]), f"take profit +{cfg['take_profit_pct']}%", now)
+                await self.sell(key, float(cfg["take_profit_fraction"]), f"take profit +{cfg['take_profit_pct']}%", now)
             elif p["peak"] >= entry * (1 + float(cfg["trail_after_pct"]) / 100) and px <= p["peak"] * (1 - float(cfg["trail_pct"]) / 100):
-                self.sell(key, 1.0, f"trailing stop {cfg['trail_pct']}% under the peak", now)
+                await self.sell(key, 1.0, f"trailing stop {cfg['trail_pct']}% under the peak", now)
 
-    def sell_now(self, key: str) -> str:
+    async def sell_now(self, key: str) -> str:
         if key not in self.positions:
             return "no such position"
-        self.sell(key, 1.0, "you sold", time.time())
+        await self.sell(key, 1.0, "you sold", time.time())
         return ""
 
     # ------------------------------------------------------------------ views
@@ -521,15 +606,63 @@ class XChain:
                 "blocked": self.block(size / sol_usd) if self.active else "", "positions": pos, "scan": self.scan,
                 "last_scan": self.last_scan, "notes": [{"ts": t, "text": x} for t, x in list(self.notes)[:5]],
                 "today": {"trades": len(today), "pnl_sol": round(sum(c["pnl"] for c in today), 4),
-                          "pnl_usd": round(sum(c.get("pnl_usd") or 0 for c in today), 2)},
+                          "pnl_usd": round(sum(c.get("pnl_usd") or 0 for c in today), 2),
+                          "real_usd": round(sum((c.get("real") or {}).get("pnl_usd") or 0 for c in today), 2)},
+                "ready": self.readiness(),
                 "rules": {k: cfg[k] for k in ("min_liq_usd", "min_vol_h1_usd", "min_age_min", "max_age_h", "min_mcap_usd", "max_mcap_usd",
                                               "min_buy_ratio", "min_chg_h1", "max_chg_h1", "max_tax_pct", "stop_loss_pct",
                                               "take_profit_pct", "trail_pct", "max_hold_h")}}
+
+    def _closed_rows(self) -> list[dict]:
+        """Every closed other-chain paper trade: from the trade journal (all time) when there is one."""
+        if self.path and getattr(self.e, "journal", False):
+            rows = []
+            for f in sorted(self.path.parent.glob("trades-*.jsonl")):
+                try:
+                    with open(f) as fh:
+                        rows += [json.loads(line) for line in fh if '"source": "chains"' in line]
+                except (OSError, ValueError):
+                    continue
+            return [r for r in rows if r.get("mode") == "paper"]
+        return [c for c in self.e.book.closed if c.get("source") == "chains"]
+
+    def readiness(self) -> dict:
+        """The checklist before real money: enough trades, a profit that isn't luck or one coin, at real prices too."""
+        now = time.time()
+        if self._ready and now - self._ready[0] < 120:
+            return self._ready[1]
+        import random
+        rows = self._closed_rows()
+        pnl = [float(r.get("pnl_usd") or 0) for r in rows]
+        n, tot = len(pnl), sum(pnl)
+        rng = random.Random(11)
+        conf = (sum(sum(rng.choice(pnl) for _ in range(n)) > 0 for _ in range(2000)) / 2000) if n >= 5 else 0.0
+        without3 = tot - sum(sorted(pnl)[-3:])
+        reals = [r["real"] for r in rows if r.get("real") and r["real"].get("complete")]
+        real_tot = sum(x["pnl_usd"] for x in reals)
+        gaps = sorted(abs(g) for x in (r.get("real") or {} for r in rows) for g in (x.get("buy_gap_pct"), x.get("sell_gap_pct")) if g is not None)
+        med_gap = gaps[len(gaps) // 2] if gaps else None
+        R = READY
+        checks = [
+            {"name": f"At least {R['min_trades']} closed paper trades", "ok": n >= R["min_trades"], "value": str(n)},
+            {"name": "Paper profit after every cost", "ok": n > 0 and tot > 0, "value": f"{'+' if tot >= 0 else '−'}${abs(tot):,.2f}"},
+            {"name": f"{R['min_conf']:.0%}+ sure it isn't luck", "ok": conf >= R["min_conf"], "value": f"{conf:.0%}"},
+            {"name": "Still up without the 3 best trades", "ok": n > 3 and without3 > 0, "value": f"{'+' if without3 >= 0 else '−'}${abs(without3):,.2f}"},
+            {"name": f"Real router quotes within {R['max_gap_pct']:g}% of paper fills (typical)", "ok": len(gaps) >= R["min_quotes"] and med_gap is not None and med_gap <= R["max_gap_pct"],
+             "value": f"{med_gap:.1f}% over {len(gaps)} quotes" if med_gap is not None else "no quotes yet"},
+            {"name": "Profit at real router prices too", "ok": len(reals) >= 0.8 * max(n, 1) and n > 0 and real_tot > 0,
+             "value": f"{'+' if real_tot >= 0 else '−'}${abs(real_tot):,.2f} over {len(reals)} trades"},
+        ]
+        out = {"ready": all(c["ok"] for c in checks), "passed": sum(c["ok"] for c in checks), "checks": checks,
+               "trades": n, "paper_usd": round(tot, 2), "real_usd": round(real_tot, 2)}
+        self._ready = (now, out)
+        return out
 
     def brief(self) -> dict:
         """What the AI desk reads about the other-chain bot."""
         v = self.view()
         return {"active": v["active"], "chains": v["chains"], "today": v["today"],
+                "real_money_checklist": f"{v['ready']['passed']} of {len(v['ready']['checks'])} passed",
                 "open": [{"coin": f"{p['symbol']} ({p['chain_name']})", "pnl_pct": p["pnl_pct"], "held_min": round((time.time() - p["opened"]) / 60)}
                          for p in v["positions"]],
                 "top_candidates": [f"{r['symbol']} ({r['chain_name']}): {r['why'] or 'passes'}" for r in v["scan"][:5]]}
