@@ -57,6 +57,19 @@ A running record of decisions, research, parameters and status. Newest entries a
 
   "Under 30 s" was better on all 3 days, with about half the trades. Each day alone is still "no clear difference", and the strategy stays slightly negative. It's queued in the lab (`late.min_age_s` 0 → 30), and the findings are on the team's corkboard. It's still off until the owner applies it.
 - **Lab fixes along the way:** a queued test is compared with the settings of the moment it starts, landing like the bot. Two tests queued before today's fix would otherwise have run with instant fills.
+- **Lab replays now compare rules without the account's stops** (no daily loss limit, kill switch or defense mode, and a big paper balance). The live bot keeps them all.
+
+**What a faster feed would be worth.** Replayed without account stops, at three landing delays (decision to fill):
+
+| Landing delay | Oct 3 | Oct 4 | Oct 5 | Total |
+|---|---|---|---|---|
+| 2.5 s (now) | −0.96 (180) | +0.83 (132) | −1.12 (145) | −1.25 SOL |
+| 1.5 s | −0.20 (192) | +2.17 (138) | −1.86 (147) | +0.11 SOL |
+| 1.0 s | −0.04 (205) | +2.24 (144) | −2.94 (154) | −0.74 SOL |
+
+- **It's mixed:** faster helped on two days and hurt on the third.
+- **The likely reason:** at 2.5 s, a buy whose price runs past the 15% slippage limit before landing simply fails, which screens out blow-off tops by accident. A faster bot catches those too, and on Oct 5 they dumped.
+- **The decision:** a paid low-latency feed ($49/mo) isn't a clear win for this strategy yet. Recordings carry today's feed lag, so a lower landing delay only approximates a faster feed.
 
 ---
 
