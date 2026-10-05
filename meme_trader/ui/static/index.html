@@ -777,6 +777,7 @@ body.arranging [data-pid].ar-drag { opacity: .45; }
 .pl-curve i { display: block; height: 100%; background: linear-gradient(90deg, var(--series), var(--good)); }
 .pl-lk { font-size: 11px; color: var(--muted); letter-spacing: 2px; }
 .pf { font-size: 10.5px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--ring); }
+.pf.og { color: #b7791f; border-color: #d69e2e; font-weight: 700; } .pf.copy { color: var(--muted); border-style: dashed; }
 .pf.bad { color: var(--bad); border-color: var(--bad); } .pf.warn { color: var(--warn); border-color: var(--warn-mark); } .pf.good { color: var(--good); border-color: var(--good-mark); }
 .pl-qb { padding: 4px 9px; font-weight: 700; font-size: 12px; background: var(--surface); border-color: var(--ring); white-space: nowrap; }
 .pl-qb:hover { background: var(--good); color: #fff; border-color: transparent; }
@@ -1617,7 +1618,7 @@ function render(s) {
     if (pe.dataset.keys !== keys) {
       pe.dataset.keys = keys;
       pe.innerHTML = s.positions.map(p => `<div class="pos ${p.source === "manual" ? "manual" : ""}" id="p-${esc(p.mint)}" data-open="${esc(p.mint)}" tabindex="0" role="button" aria-label="${esc(p.symbol)} details">
-        <div class="top"><span class="sym">${logo(p.mint, p.symbol, "md")}${esc(p.symbol)}</span><span class="gain num"></span></div>
+        <div class="top"><span class="sym">${logo(p.mint, p.symbol, "md")}${esc(p.symbol)} ${famBadge(p.fam)}</span><span class="gain num"></span></div>
         <div class="meta num"></div><canvas height="90"></canvas><div class="nochart note" hidden>No trades since you bought: the line runs from your entry to the last price seen.</div>
         <div class="top" style="margin-top:6px"><div class="bar" style="flex:1" title="bonding curve"><i></i></div>
           <span class="btnrow">${sellBtns(p.mint)}</span></div>
@@ -1808,6 +1809,11 @@ function renderDrawer(d) {
       <div class="fact"><div class="l">Net inflow 60s</div><div class="v num ${cls(f.net_flow_60s)}">${flowAmt(f.net_flow_60s)}</div></div>
     </div>
     ${posBlock}
+    ${d.family ? `<div class="dr-sec"><h4>Same name or ticker <small class="note">${d.family.n} coins in the last 6 h · ${d.family.og ? "this is the OG (first launched)" : `this is copy ${d.family.rank}: the OG is $${esc(d.family.og_symbol)}, ${dur(d.family.after_og_s)} earlier`}</small></h4>
+      <div class="tablewrap"><table><tbody>${(d.family.members || []).map(m => `<tr class="${m.mint === d.mint ? "sel" : ""}" data-open="${esc(m.mint)}" style="cursor:pointer">
+        <td>${m.rank === 1 ? '<span class="pf og">OG</span>' : `<span class="note">#${m.rank}</span>`}</td><td><b>${esc(m.symbol)}</b> <span class="note">${esc(m.name)}</span></td>
+        <td class="r note">${dur(m.age_s)} old</td><td class="r num">${m.mcap_usd ? "$" + fmtUsd(m.mcap_usd) : '<span class="note">not tracked</span>'}${m.migrated ? ' <span class="pf good">graduated</span>' : ""}</td></tr>`).join("")}</tbody></table></div>
+      ${d.family.og_known ? "" : `<p class="note">The bot started watching after the first of these launched, so an older original may exist.</p>`}</div>` : ""}
     <div class="dr-sec"><h4>Price <small class="note">${LC.data[d.mint] ? "live, every trade · ▲ buys ▼ sells (hover for who)" : "(last 150 trades)"}</small></h4><canvas id="dr-chart" height="170"></canvas>
       <div class="lc-legend" id="dr-legend">${lcLegend(LC.data[d.mint])}</div></div>
     <div class="dr-sec"><h4>Model</h4>${pBlock}</div>
@@ -1851,7 +1857,7 @@ function onTicks(m) {
     const c = LC.data[mint] && !d.full ? LC.data[mint] : (LC.data[mint] = {pts: [], marks: []});
     if (d.pts && d.pts.length) { c.pts.push(...d.pts); if (c.pts.length > 3000) c.pts.splice(0, c.pts.length - 3000); }
     if (d.marks) c.marks = d.marks;
-    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, got: Date.now()});
+    Object.assign(c, {symbol: d.symbol, price: d.price, entry: d.entry, position: d.position, now: d.now, fam: d.fam, got: Date.now()});
   }
   if (!LC.raf) LC.raf = requestAnimationFrame(lcDraw);
 }
@@ -1859,6 +1865,17 @@ function lcDraw() {
   LC.raf = 0;
   document.querySelectorAll("canvas[data-lc]").forEach(cv => { if (cv.offsetParent && LC.data[cv.dataset.lc]) tickChart(cv, LC.data[cv.dataset.lc]); });
   if (S.tab === "charts") lcCardNums();
+}
+// coin families: coins sharing a ticker or name in the last 6 h; the first launched is the OG
+function famBadge(f) {
+  if (!f) return "";
+  if (f.og) return `<span class="pf og" title="The first of ${f.n} coins with this name or ticker in the last 6 h${f.og_known ? "" : " (the bot started watching after it launched, so an older original may exist)"}">OG · ${f.n}</span>`;
+  return `<span class="pf copy" title="Copy ${f.rank} of ${f.n}: $${esc(f.og_symbol)} launched ${dur(f.after_og_s)} earlier${f.lead_symbol ? ` · biggest now: $${esc(f.lead_symbol)}` : ""}">copy ${f.rank}/${f.n}</span>`;
+}
+function famOf(mint) {
+  const c = LC.data[mint]; if (c && c.fam !== undefined) return c.fam;
+  for (const col of ["new", "stretch"]) { const r = ((PL.data || {})[col] || []).find(x => x.mint === mint); if (r) return r.fam; }
+  const p = ((snap || {}).positions || []).find(x => x.mint === mint); return p ? p.fam : null;
 }
 function lcLegend(c) {
   const kinds = new Set((c && c.marks || []).map(m => m.who));
@@ -1946,7 +1963,7 @@ function renderCharts(s) {
     box.dataset.key = key;
     box.innerHTML = ps.length ? ps.map(p => { const [who, lab] = lcOwner(p);
       return `<div class="lc-card ${who}" data-mint="${esc(p.mint)}">
-        <div class="lc-h">${logo(p.mint, p.symbol)} <b>${esc(p.symbol)}</b> <span class="tag">${esc(lab)}</span> <span class="lc-g num"></span>
+        <div class="lc-h">${logo(p.mint, p.symbol)} <b>${esc(p.symbol)}</b> ${famBadge(p.fam)} <span class="tag">${esc(lab)}</span> <span class="lc-g num"></span>
           <span class="note lc-sub"></span><span class="spacer"></span><button class="small ghost" data-lcopen="${esc(p.mint)}">Details</button></div>
         <canvas data-lc="${esc(p.mint)}" height="200"></canvas><div class="lc-legend"></div>
         <div class="lc-act"><span class="note">Sell</span>${[.25, .5, 1].map(f => `<button class="small" data-lcsell="${esc(p.mint)}" data-f="${f}">${f * 100}%</button>`).join("")}
@@ -4493,7 +4510,7 @@ function plRow(r, col) {
     <a class="small pl-ext" href="https://dexscreener.com/solana/${encodeURIComponent(r.mint)}" target="_blank" rel="noopener noreferrer" title="Chart on DexScreener" onclick="event.stopPropagation()">↗</a></div>`;
   return `<div class="pl-row${fresh ? " fresh" : ""}" data-open="${esc(r.mint)}" data-ctx="${esc(r.mint)}">
     ${logo(r.mint, r.symbol, "md")}<div class="pl-main">
-      <div class="pl-top"><b>${esc(r.symbol)}</b><span class="pl-name">${esc(r.name || "")}</span>${socials}<span class="note num">${age(r.age)}</span></div>
+      <div class="pl-top"><b>${esc(r.symbol)}</b>${famBadge(r.fam)}<span class="pl-name">${esc(r.name || "")}</span>${socials}<span class="note num">${age(r.age)}</span></div>
       <div class="pl-sub"><span class="num">MC <b>$${fmtUsd(r.mcap_usd)}</b></span><span class="pl-curve" title="Bonding curve ${fx(r.progress * 100, 0)}%"><i style="width:${Math.min(100, r.progress * 100).toFixed(0)}%"></i></span>
         <span class="num" title="Unique buyers">👥 ${r.buyers}</span><span class="num" title="Buys / sells"><span class="up">${r.buys}</span>/<span class="down">${r.sells}</span></span>
         <span class="num ${cls(r.flow30)}" title="Net money in, last 30 s">${flowAmt(r.flow30, 1)}</span>
@@ -5173,6 +5190,8 @@ function buyTips(mint, sol) {
   }
   const i = TR.info && TR.info.mint === mint ? TR.info : null, bad = ((i && i.flags) || []).filter(f => f.level === "bad").map(f => esc(f.text));
   if (bad.length) out.push({kind: "flags", html: `Red flags on <b>${sym}</b>: ${bad.slice(0, 3).join(" · ")}.`});
+  const fm = famOf(mint);
+  if (fm && !fm.og) out.push({kind: "copy", html: `<b>${sym}</b> is copy ${fm.rank} of ${fm.n} coins with this name or ticker: the first, <b>$${esc(fm.og_symbol)}</b>, launched ${dur(fm.after_og_s)} earlier${fm.lead_symbol ? `; the biggest now is <b>$${esc(fm.lead_symbol)}</b>${fm.lead_mcap_usd ? " at $" + fmtUsd(fm.lead_mcap_usd) : ""}` : ""}. Copies split the same buyers, and the weaker ones usually fade.`});
   const kb = ((LC.data[mint] || {}).marks || []).filter(m => m.who === "kol" && m.side === "buy" && (s.now || 0) - m.t < 120);
   if (kb.length) out.push({kind: "kol", html: `<b>${esc(kb[kb.length - 1].label)}</b> ${dur(Math.max(0, (s.now || 0) - kb[kb.length - 1].t))} ago. In our recordings KOLs sold a median 34 s after buying, and copying them 1-2.5 s late lost ~13% a trade: if you're in for the KOL, be ready to get out fast.`});
   const q = quietFor(mint);
