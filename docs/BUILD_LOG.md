@@ -4,6 +4,33 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #53: The AI team gets a track record, practice, and side votes
+
+**Owner's requests:** "are they learning?", "add an option for them to just train if all modes are off other than manual", and yes to a switch that lets graduation trades skip the vote.
+
+**The team's record** (`sniper/desk_record.py`, `data/desk_calls.jsonl`). Every graduation vote is scored by what the coin did next on the bot's own exits (the exit lab's "as now"), whether the team said buy or pass.
+- **Seeded from history:** 112 past votes matched to their outcomes in the journal and the exit lab.
+
+| | Buy calls | Median | Pass calls | Median |
+|---|---|---|---|---|
+| The team | 59 | −15.4% | 53 | −3.4% |
+| Veteran | 62 | −15.4% | 49 | −3.4% |
+| Narrative | 46 | −7.6% | 64 | −6.3% |
+| Skeptic | 39 | −15.4% | 71 | −5.0% |
+| Quant | 75 | −9.7% | 36 | −3.4% |
+
+- **What it says:** every persona's buys did worse than its passes; the vote isn't picking better coins yet. Narrative comes closest to neutral.
+- **How the team learns:** an LLM can't change its weights, so each persona now reads its own record and its latest six scored calls at every graduation vote, and the meetings read the scorecard (`team_record` in the brief).
+- **Where to look:** Analytics → The AI team's record.
+
+**Practice** (`desk.practice`, on by default, a Controls switch). With graduation plays off, the scanner keeps running and the team votes on what the rules pick. Nothing is bought; each coin is followed on the bot's exits from the vote and scored. At most 3 votes at a time (4 model calls each).
+
+**Side votes** (`desk.graduation_vote`, on by default, a Controls switch). Off: graduation buys go on the rules alone, the team votes on the side, and the bot's own trade scores the call. This is the clean test of whether the vote adds anything: every rule pick is bought, labelled with what the team would have done.
+
+**Also scored:** an approval the bot couldn't act on (price ran during the vote, no size, slots full) is followed like a practice buy.
+
+---
+
 ## 2026-10-06 — Entry #52: A faster, better-looking room
 
 **Owner's request:** "improve the graphics and de-lag".

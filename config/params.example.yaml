@@ -207,6 +207,10 @@ sniper:
     huddle_minutes: 30           # the team meets this often while the desk is awake (one model call, ~1¢ on Sonnet); 0 = only on request
     note_replies: true           # every persona reads each note you save (Teach the desk) and replies; 4 calls a note
     note_effort: low             # thinking effort for those replies
+    graduation_vote: true        # the team decides graduation buys. false: the rules decide and the team votes on the
+                                 #   side; every vote is still scored (Analytics -> The AI team's record)
+    practice: true               # with graduation plays off, the team still votes on what the rules pick: nothing is
+                                 #   bought, each call is followed on the bot's exits and scored. Each vote is 4 model calls
 
   callouts:                      # pump.fun callouts: hold the $1 minimum, post a factual card, track results
     enabled: true
