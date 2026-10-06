@@ -4,6 +4,44 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-05 — Entry #50: Lab tests by the day, the first "better" verdict turned on, honest fills, fewer pauses
+
+**Owner's requests:** "Do whatever is needed" (before the 7 pm daily reset), then "proceed" with the plan.
+
+**Before 7 pm:**
+- **The problem:** the paper book sat 0.15 SOL above its kill switch with the dial on Max.
+- **Added 4 paper SOL.** It counts as starting capital, not profit.
+- **Applied the AI team's proposal:** a 1.5 SOL daily loss limit, voted in three meetings in a row.
+- **The result:** a bad day now pauses at −1.5 SOL and resumes at 7 pm, instead of tripping the kill switch, which only the owner can lift.
+
+**Lab tests replay every recorded day** (`lab.days` 5).
+- **How:** one replay at a time. The current settings' replay of a day is cached (`data/lab/base/`) until the settings or the replay code change. All days' 6-hour blocks are pooled, plus "better on N of M days"; a change that's better overall only thanks to one day is called "no clear difference".
+- **Why:** on Oct 5 a 24-hour verdict flipped more than once.
+
+**The first verdict under the new method: `late.min_age_s` 0 → 30 is better on all 3 days** (bot's 2.5 s landing, no account stops):
+
+| Day | Now | Skip coins under 30 s |
+|---|---|---|
+| Oct 3 | −0.96 (180 trades) | −0.03 (79) |
+| Oct 4 | +0.83 (132) | +1.03 (65) |
+| Oct 5 | −2.15 (176) | −1.08 (66) |
+| Pooled | −2.28 SOL (−3.2%/trade) | −0.09 SOL (−0.4%/trade) |
+
+- p_better was 0.975.
+- **Turned on** (owner: "do whatever is needed"). The strategy is still slightly negative, but losses fell about 96% with less than half the trades.
+- **Next test queued:** `late.min_recent_sells` 0 → 1 on top of it, the AI team's suggestion.
+
+**Other-chain paper fills are the worse of the model and the real route.**
+- **The data:** 14 router-checked trades had small median gaps (−0.7% on buys, −0.1% on sells), but a thin BNB Chain route paid 17% less than the model and one Solana route 9% less. Real P&L was −$13.40 against −$10.75 on paper.
+- **Now:** paper results can't look better than a real wallet would have done.
+
+**Fewer pauses after reconnects.**
+- **The data:** per-minute health records show entries paused 77 min (Oct 4) and 109 min (Oct 5) "checking trade data" after reconnects, mostly public-RPC hang-ups followed by a reconnect to the same endpoint.
+- **The fix:** a reconnect to an endpoint measured fine in the last 90 s keeps entries open until the new measurement is in.
+- **Other pauses:** being behind the chain cost 5 (Oct 4) and 47 (Oct 5) minutes a day.
+
+---
+
 ## 2026-10-05 — Entry #49: Debug pass, and what the dumps look like at entry
 
 **Owner's requests:** "Improve." "Debug and test." "Improve more while you wait."

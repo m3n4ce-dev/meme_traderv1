@@ -3152,7 +3152,7 @@ class Engine:
             x["unit"] = f"meme-lab-{x['id']}"
             self.xlab.save()
             self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
-                       f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
+                       f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on each recorded day", "", "", "work")
             try:
                 p = await asyncio.create_subprocess_exec(
                     "systemd-run", "--user", "--quiet", "--collect", f"--unit={x['unit']}",
@@ -3168,7 +3168,7 @@ class Engine:
             return
         self.xlab.save()
         self.think("quant" if x["by"] in ("quant", "team", "you") else x["by"],
-                   f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on the last 24 hours", "", "", "work")
+                   f"lab: testing {x['key'].split('.')[-1]} {x['now']} -> {x['value']} on each recorded day", "", "", "work")
         out = DATA / "lab" / f"{x['id']}.result.json"
         out.unlink(missing_ok=True)
         try:
