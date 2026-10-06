@@ -202,6 +202,11 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 ## The AI desk and its huddles
 
 - **What it does:** four AI personas (veteran, narrative, skeptic, quant) vote on each entry the rules pick.
+- **The narrative persona judges the story, not the chart.** On top of the numbers, it alone reads:
+  - **The coin's description** and **what its X link really is:** the post's text, views and likes, the poster's followers and account age, and how long before launch it was posted. A link that doesn't exist says so.
+  - **What's live now:** this hour's copycat waves, coins that graduated in the last 2 hours, and X feed posts naming the coin.
+
+  The link is read once, through FxTwitter (no X login, no cost), as the coin nears the graduation window, so the vote doesn't wait for it.
 - **Wake it or let it rest:** Desk → AI desk model.
 - **Choose its model:** Claude, GitHub Models, Hugging Face, OpenRouter or a local model, with Test buttons. It's billed per call; the panel shows the cost.
 - **How the vote works:** a trade is approved when buy votes reach 45% of the desk's voting weight, so three of four is a buy. A buy under 50 conviction counts as half a vote. The skeptic can veto with a pass at 75+.
