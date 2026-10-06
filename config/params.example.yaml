@@ -335,6 +335,8 @@ sniper:
     graduated: true              # each graduated coin's 1-minute candles (its pool, GeckoTerminal), fetched once
     graduated_after_h: 6         #   ... this long after it graduates -> data/graduated-YYYY-MM-DD.jsonl
     graduated_per_day: 2000      #   ... at most (one GeckoTerminal call every 40 s at most, shared pacing)
+    revival: true                # second-life momentum, a forward test on established coins (sniper/revival.py): read
+                                 #   from the wallet recorder's live PumpSwap trades -> data/revival.jsonl. Nothing traded
 
   lab:                           # the team's lab: one setting at a time replayed on the last 24 h of recordings
     enabled: true                #   (a separate low-priority process; results go to the next huddle)

@@ -275,6 +275,9 @@ class Engine:
         ik = self.p.get("intel") or {}
         self.gradlog = GradLog(DATA, float(ik.get("graduated_after_h", 6)), int(ik.get("graduated_per_day", 2000))) \
             if feed.realtime and self.persist and ik.get("graduated", True) else None      # the real bot only, no demos
+        from .revival import Revival                     # second-life momentum: a forward test on the recorder's trades
+        self.revival = Revival(DATA) if feed.realtime and self.persist and ik.get("revival", True) else None
+        self._last_revival = 0.0
         self.xfeed = None                                  # the dashboard's X feed (posts naming a coin), when it runs
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
@@ -1696,6 +1699,13 @@ class Engine:
         self._x_intel()
         if self.gradlog is not None:
             self.gradlog.tick(self.now, getattr(self, "chains", None))
+        if self.revival is not None and self.now - self._last_revival >= 5:
+            self._last_revival = self.now
+            try:
+                self.revival.tick(max_bytes=2_000_000)    # small reads: it runs on the event loop
+            except Exception as e:                       # a measurement must never stop the bot
+                self.say("error", f"second-life follow: {type(e).__name__}: {e}"[:200])
+                self.revival = None
         await self._manual_queue_tick()
         await self._orders_tick()
         if self.lab.open:
