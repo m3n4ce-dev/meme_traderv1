@@ -76,10 +76,11 @@ def _trader(monkeypatch, price=0.001, liq=80_000, safe=(True, "", {"buy_tax": 0.
     async def real_quote(chain, token_in, token_out, amount_raw):          # a stand-in router: 1% worse than the pool
         if state.get("route") is False:
             return "no route", None
+        k = state["route"] if isinstance(state.get("route"), float) else 0.99      # the route's share of the pool price
         if token_out == "0xTOKEN":                                          # buy: dollars in, coins (18 decimals) out
             usd = amount_raw / 1e6
-            return "ok", {"out_raw": int(usd * 0.99 / state["price"] * 1e18), "out_usd": usd * 0.99, "gas_usd": 0.01}
-        return "ok", {"out_raw": int(amount_raw / 1e18 * state["price"] * 0.99 * 1e6), "out_usd": None, "gas_usd": 0.01}
+            return "ok", {"out_raw": int(usd * k / state["price"] * 1e18), "out_usd": usd * k, "gas_usd": 0.01}
+        return "ok", {"out_raw": int(amount_raw / 1e18 * state["price"] * k * 1e6), "out_usd": None, "gas_usd": 0.01}
     monkeypatch.setattr(x, "_chains_data", chains_data)
     monkeypatch.setattr(x, "real_quote", real_quote)
     monkeypatch.setattr(x, "quotes", quotes)
@@ -226,3 +227,24 @@ def test_one_sale_at_a_time_per_coin(monkeypatch):
     asyncio.run(go())
     p = x.positions[key]
     assert abs(p["tokens"] / p["tokens0"] - 0.5) < 1e-9 and p["real"]["raw_left"] > 0
+
+
+
+def test_paper_fills_are_never_better_than_the_real_route(monkeypatch):
+    """Seen 2026-10-05: a thin BNB Chain route paid 17% less than the paper model on the buy (ANIMA)."""
+    e, x, state = _trader(monkeypatch)
+    state["route"] = 0.83                                                  # the router gives 17% less than the pool price
+    now = time.time()
+    asyncio.run(x.step(now))
+    p = next(iter(x.positions.values()))
+    assert p.get("fill") == "router" and p["real"]["buy_gap_pct"] < -10    # fewer coins: the route's, not the model's
+    state["price"] = 0.0008
+    asyncio.run(x.step(now + 20))
+    row = e.book.closed[-1]
+    assert abs(row["pnl_usd"] - row["real"]["pnl_usd"]) < 0.5              # paper books what a real wallet would get
+    state["route"] = 1.2                                                   # a route better than the model ...
+    x.last_scan = 0
+    x.cooldown.clear()
+    asyncio.run(x.step(now + 60))
+    q = next(iter(x.positions.values()))
+    assert q.get("fill") != "router"                                       # ... doesn't make the paper fill better

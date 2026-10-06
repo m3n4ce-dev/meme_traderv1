@@ -18,7 +18,8 @@ filled 7-10% past their level. DexScreener stays the fallback, and the source of
 
 Real-price check: at every paper buy and sell, a real swap router is asked what the same swap would return
 (KyberSwap on BNB Chain / Base / Ethereum, Jupiter on Solana; no key or wallet needed). A coin no router can buy is
-skipped, and each closed trade carries its "real" P&L next to the paper one. readiness() turns those into the
+skipped, the paper fill is the worse of the model and the route (2026-10-05: a thin BNB Chain route paid 17% less
+than the model), and each closed trade carries its "real" P&L next to the paper one. readiness() turns those into the
 checklist that has to pass before real money is even discussed (docs/MULTICHAIN.md).
 
 Paper only: there's no EVM wallet or executor, so in live mode this never opens anything.
@@ -491,6 +492,11 @@ class XChain:
             pos["dec"] = dec
             val = real["out_usd"] if real.get("out_usd") else (real["out_raw"] / 10 ** dec * q["price"] if dec is not None else None)
             paper_val = tokens * q["price"]
+            if dec is not None:                           # the paper fill is the worse of the model and the real route
+                routed = real["out_raw"] / 10 ** dec * (1 - info.get("buy_tax", 0) / 100)
+                if 0 < routed < tokens:
+                    pos["tokens"] = pos["tokens0"] = tokens = routed
+                    pos["fill"] = "router"
             pos["real"] = {"raw": real["out_raw"], "raw_left": real["out_raw"],
                            "cost_usd": size_usd + (real["gas_usd"] if real.get("gas_usd") is not None else gas),
                            "buy_gap_pct": round((val / paper_val - 1) * 100, 2) if val and paper_val else None,
@@ -526,6 +532,12 @@ class XChain:
         gross = sold * px
         imp = impact_pct(gross, pos["liq"]) + float(cfg["extra_slip_pct"])
         usd = gross * max(0.0, 1 - imp / 100) * (1 - (pos["fee_pct"] + pos["sell_tax"]) / 100) - float(cfg["gas_usd"].get(pos["chain"], 0.05))
+        routed_usd = None
+        if real and st == "ok":                          # the paper fill is the worse of the model and the real route
+            routed_usd = rq["out_raw"] / 10 ** STABLE[pos["chain"]][1] * (1 - pos["sell_tax"] / 100) - float(cfg["gas_usd"].get(pos["chain"], 0.05))
+        model_usd = usd
+        if routed_usd is not None and routed_usd < usd:
+            usd = routed_usd
         sol = usd / sol_usd
         cost_part = pos["cost_sol_left"] * frac
         pos["tokens"] -= sold
@@ -540,8 +552,8 @@ class XChain:
             if st == "ok":
                 got = rq["out_raw"] / 10 ** STABLE[pos["chain"]][1] * (1 - pos["sell_tax"] / 100) - real_gas
                 real["proceeds_usd"] += got
-                if usd > 0:
-                    real["sell_gaps"].append(round((got / usd - 1) * 100, 2))
+                if model_usd > 0:                        # the gap is router vs the paper model (a calibration check)
+                    real["sell_gaps"].append(round((got / model_usd - 1) * 100, 2))
             elif st == "no route":                       # a real wallet would be stuck with these: worth nothing
                 self.note(f"{pos['symbol']}: no real route to sell {frac:.0%}: counted as $0 at real prices")
             else:
