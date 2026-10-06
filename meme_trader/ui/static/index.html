@@ -1320,7 +1320,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
-      <div class="seg" id="lab-kind" role="group" aria-label="Which strategy"><button data-labkind="late" aria-pressed="true">Graduation plays</button><button data-labkind="sniper" aria-pressed="false">Sniper and copy</button></div>
+      <div class="seg" id="lab-kind" role="group" aria-label="Which strategy"><button data-labkind="late" aria-pressed="true">Graduation plays</button><button data-labkind="sniper" aria-pressed="false">Sniper and copy</button><button data-labkind="picks" aria-pressed="false">Model picks</button></div>
       <div id="an-lab" style="margin-top:10px"></div></section>
     <section class="panel"><h2>Gate audit <small>had we bought at the decision, would it double before −30%? (10 min)</small></h2><div id="an-gates"></div>
       <p class="note">“(bought)” is the same test on our own entries: the yardstick. A gate whose rejects double more often than our buys is costing trades.</p></section>
@@ -5771,8 +5771,22 @@ function renderTeamRecord() {                          // every graduation vote,
       <tr><th></th><th class="r">Calls</th><th class="r">Avg</th><th class="r">Median</th><th class="r">Won</th><th class="r">Calls</th><th class="r">Avg</th><th class="r">Median</th><th class="r">Won</th><th class="r">median</th></tr></thead><tbody>
       ${row("The team", t)}${Object.entries(t.personas || {}).map(([p, r]) => row(p[0].toUpperCase() + p.slice(1), r)).join("")}</tbody></table></div>`);
 }
+function renderPicks(v) {               // the stronger model's picks, followed live: never traded
+  const pk = v || {}, bands = pk.bands || {}, names = Object.keys(bands);
+  const head = `<p class="note">Every new coin the stronger model (trees) rates at a 25%+ chance of doubling, at the ages it was trained on, is followed on these exits.
+      Nothing is bought. Each exit runs twice: filled instantly, and filled as late as the paper bot lands. In replays the instant fills made money and the late ones about broke even, so the gap shows what speed is worth.</p>`;
+  if (!pk.picks) { setHTML($("an-lab"), head + `<div class="empty">No picks scored yet${pk.open ? ` (${pk.open} being followed now)` : ""}. Results show here as each follow closes.</div>`); return; }
+  const vs = [...new Set(names.flatMap(b => bands[b].map(r => r.variant)))];
+  const cell = r => r ? `<td class="r num">${r.n}</td><td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td><td class="r num">${Math.round(r.win_rate * 100)}%</td>`
+    : `<td class="r num" colspan="4">–</td>`;
+  setHTML($("an-lab"), head + `<p class="note">${pk.picks} picks${pk.open ? ` · ${pk.open} being followed now` : ""}${pk.since ? ` · since ${new Date(pk.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""} · P&amp;L per pick after fees.${pk.picks < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}</p>
+    <div class="tablewrap"><table><thead><tr><th></th>${names.map(b => `<th class="r" colspan="4">P(2x) ${esc(b)}</th>`).join("")}</tr>
+      <tr><th>Exit rule</th>${names.map(() => `<th class="r">Picks</th><th class="r">Mean</th><th class="r">Median</th><th class="r">Won</th>`).join("")}</tr></thead><tbody>
+      ${vs.map(x => `<tr><td>${esc(x)}</td>${names.map(b => cell(bands[b].find(r => r.variant === x))).join("")}</tr>`).join("")}</tbody></table></div>`);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
+  if (S.labKind === "picks") { renderPicks(all.picks); return; }
   const v = all[S.labKind || "late"], dp = all.desk_pass;
   const base0 = ((all.late && all.late.variants) || []).find(r => r.variant === "as now"), r0 = dp && dp.variants && dp.variants[0];
   const passes = r0 ? `<p class="note" style="margin-top:10px"><b>AI desk passes:</b> ${dp.entries} graduation coin${dp.entries === 1 ? "" : "s"} it turned down would have averaged

@@ -51,8 +51,31 @@ def _sniper_variants(x) -> dict[str, dict]:
     }
 
 
+# the stronger model's picks (P(2x) from the trees at a checkpoint age): stop, trail and time-limit exits. Picked on
+# recordings (Oct 3-6, 2026): with instant fills these made money on two unseen days; with fills 2.5 s late, about
+# nothing. So each runs twice, filled instantly and as late as the paper bot lands: the gap is what speed is worth.
+PICK_EXITS = {                                     # (take profit %, stop %, sell by s, trail once up %, trail %)
+    "stop 40, trail 30 once up 50, out at 3 min": (None, 40, 180, 50, 30),
+    "stop 40, trail 25 once up 30, out at 3 min": (None, 40, 180, 30, 25),
+    "stop 40, trail 25 once up 30, out at 30 min": (None, 40, 1800, 30, 25),
+    "+100% or -30%, out at 10 min": (100, 30, 600, None, None),
+}
+
+
+def _pick_variants(delay_s: float) -> dict[str, dict]:
+    out = {}
+    for name, b in PICK_EXITS.items():
+        out[name] = {"_bracket": b}
+        if delay_s > 0:
+            out[f"{name} · lands {delay_s:g} s late"] = {"_bracket": b, "_delay": delay_s}
+    out["the sniper's exits"] = {}
+    return out
+
+
 LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass")   # followed on the graduation-play exits
 SNIPER_CALLS = ("sniper-pass", "sniper-skip")      # sniper votes that bought nothing: followed on the sniper's exits
+PICKS = "model-pick"                               # the trees' picks: a follow, not a trade
+PICK_BANDS = (("30%+", .30, 1.01), ("25-30%", .25, .30))
 
 class ExitLab:
     def __init__(self, path: Path | None, fee_pct: float):
@@ -74,28 +97,44 @@ class ExitLab:
     def mints(self) -> set[str]:
         return set(self.open)
 
-    def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p, only: tuple | None = None) -> None:
+    def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p, only: tuple | None = None,
+              extra: dict | None = None) -> None:
         """A bot entry at `price` (p: params.sniper). kind 'late' runs the graduation-play exits, else the sniper's.
         kind 'desk-pass': a graduation coin the AI desk turned down, followed with the bot's own exits ("as now")
         so Analytics can show what the desk's passes would have made. 'practice-buy' / 'practice-pass': a team vote
-        that bought nothing (practice, or an approval that couldn't be sized), followed the same way."""
-        if not price or mint in self.open:
+        that bought nothing (practice, or an approval that couldn't be sized), followed the same way. 'model-pick':
+        the trees' pick, on PICK_EXITS (extra: its P(2x), carried into each row). One follow per mint and kind."""
+        if not price or any(sh["kind"] == kind for sh in self.open.get(mint, ())):
             return
         late = kind in LATE_KINDS
-        variants = _late_variants(p.late) if late else _sniper_variants(p.exit)
+        variants = _late_variants(p.late) if late else \
+            _pick_variants(float(p.execution.get("paper_delay_s", 0) or 0)) if kind == PICKS else _sniper_variants(p.exit)
         if only:
             variants = {k: v for k, v in variants.items() if k in only}
         base = SniperPosition(mint=mint, symbol=symbol, opened_at=now, entry_price=price, tokens=1 / price,
                               initial_tokens=1 / price, cost_sol=1.0, initial_cost_sol=1.0, score=0.0,
                               peak_price=price, exits=[], source=kind)
-        self.open[mint] = [{"variant": name, "over": over, "late": late, "pos": replace(base, exits=[]),
-                            "proceeds": 0.0, "opened": now, "symbol": symbol, "kind": kind}
-                           for name, over in variants.items()]
+        self.open.setdefault(mint, []).extend(
+            {"variant": name, "over": over, "late": late, "pos": replace(base, exits=[]), "proceeds": 0.0, "opened": now,
+             "symbol": symbol, "kind": kind, "extra": extra or {}, "land_at": now + over.get("_delay", 0)}
+            for name, over in variants.items())
 
     def _rule(self, sh: dict, s, now: float, p):
         pos, over = sh["pos"], sh["over"]
         gain = pos.gain_pct(s.curve.price)
         pos.peak_price = max(pos.peak_price, s.curve.price)
+        if "_bracket" in over:
+            tp, stop, by_s, arm, trail = over["_bracket"]
+            if tp is not None and gain >= tp:
+                return 1.0, f"take profit +{gain:.0f}%"
+            if gain <= -stop:
+                return 1.0, f"stop {gain:.0f}%"
+            peak = pos.gain_pct(pos.peak_price)
+            if trail is not None and peak >= arm and s.curve.price <= pos.peak_price * (1 - trail / 100):
+                return 1.0, f"trail {trail}% off +{peak:.0f}%"
+            if now - sh["opened"] >= by_s:                # counted from the decision, as in the replays
+                return 1.0, f"out at {by_s // 60} min"
+            return None
         if "_tp" in over and gain >= over["_tp"]:
             return 1.0, f"take profit +{gain:.0f}%"
         if "_half" in over and not sh.get("half_done") and gain >= over["_half"]:
@@ -127,11 +166,25 @@ class ExitLab:
                     if now - sh["opened"] >= MAX_OPEN_S:
                         self._close(sh, None, now, "token gone")
                     continue
-                r = (1.0, "30 min limit") if now - sh["opened"] >= MAX_OPEN_S else self._rule(sh, s, now, p)
+                pos, price = sh["pos"], s.curve.price
+                if sh.get("land_at") and now < sh["land_at"]:
+                    continue                             # a late fill: the buy hasn't landed yet
+                if sh.get("land_at") and sh["over"].get("_delay"):
+                    sh["land_at"] = 0                    # it lands now, at this price
+                    pos.entry_price, pos.peak_price, pos.tokens = price, price, 1 / price
+                    pos.initial_tokens = pos.tokens
+                if sh.get("sell_at"):                    # a late fill: the sell was sent, it lands now
+                    if now < sh["sell_at"]:
+                        continue
+                    r = (1.0, sh["sell_why"])
+                else:
+                    r = (1.0, "30 min limit") if now - sh["opened"] >= MAX_OPEN_S else self._rule(sh, s, now, p)
+                    if r and sh["over"].get("_delay") and r[0] >= 1:
+                        sh["sell_at"], sh["sell_why"] = now + sh["over"]["_delay"], r[1]
+                        continue
                 if not r:
                     continue
                 frac, why = r
-                pos, price = sh["pos"], s.curve.price
                 sold = pos.tokens * min(max(frac, 0.0), 1.0)
                 sh["proceeds"] += sold * price * (1 - self.fee / 100)
                 pos.tokens -= sold
@@ -149,7 +202,7 @@ class ExitLab:
         cost = 1.0 * (1 + self.fee / 100)
         row = {"closed": now, "opened": sh["opened"], "mint": pos.mint, "symbol": sh["symbol"], "kind": sh["kind"],
                "variant": sh["variant"], "pnl_pct": round((sh["proceeds"] / cost - 1) * 100, 2), "why": why,
-               "held_s": round(now - sh["opened"])}
+               "held_s": round(now - sh["opened"]), **sh.get("extra", {})}
         sh["closed"] = True
         self.done.append(row)
         if self.on_close is not None:
@@ -161,7 +214,7 @@ class ExitLab:
 
     def view(self, kind: str = "late") -> dict:
         """Per variant: entries, mean and median P&L % per entry, win rate; sorted by mean, best first."""
-        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS + SNIPER_CALLS)]
+        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS + SNIPER_CALLS + (PICKS,))]
         by: dict[str, list[float]] = {}
         for r in rows:
             by.setdefault(r["variant"], []).append(r["pnl_pct"])
@@ -172,3 +225,19 @@ class ExitLab:
         return {"kind": kind, "entries": entries, "open": sum(1 for v in self.open.values() for sh in v
                                                               if not sh.get("closed") and (sh["kind"] == kind)),
                 "variants": out}
+
+    def picks_view(self) -> dict:
+        """The trees' picks: per exit rule and P(2x) band, mean / median P&L per pick after fees and how many won."""
+        rows = [r for r in self.done if r["kind"] == PICKS]
+        bands = {}
+        for name, lo, hi in PICK_BANDS:
+            by: dict[str, list[float]] = {}
+            for r in rows:
+                if lo <= r.get("p", 0) < hi:
+                    by.setdefault(r["variant"], []).append(r["pnl_pct"])
+            bands[name] = [{"variant": v, "n": len(xs), "mean_pct": statistics.fmean(xs), "median_pct": statistics.median(xs),
+                            "win_rate": sum(1 for x in xs if x > 0) / len(xs)} for v, xs in by.items()]
+        return {"kind": PICKS, "picks": len({(r["mint"], r["opened"]) for r in rows}),
+                "open": len({m for m, v in self.open.items() for sh in v if sh["kind"] == PICKS and not sh.get("closed")}),
+                "since": min((r["opened"] for r in rows), default=None), "bands": bands,
+                "exits": list(PICK_EXITS)}

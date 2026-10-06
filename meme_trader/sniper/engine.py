@@ -33,7 +33,7 @@ from .execution import SniperFill
 from .features import extract
 from .funding import FundingResolver, cluster_report, cohort
 from .notify import Notifier
-from .predictor import LogisticModel, expected_value_pct, kelly
+from .predictor import LogisticModel, TreeModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import (SKIP_FOR_GOOD, SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry,
@@ -306,6 +306,15 @@ class Engine:
         self._model_checked_replay = feed.realtime
         self._model_mtime = self._mtime(self.model_path)
         self._last_model_check = 0.0
+        # the stronger model's picks (predict.picks): live only, followed in the exit lab, never traded
+        pk = self.p.predict.get("picks") or {}
+        pp = Path(pk.get("model_path", "data/model-trees.json"))
+        self.picks_path = pp if pp.is_absolute() else ROOT / pp
+        self.pick_model = TreeModel.load(self.picks_path) if pk.get("enabled", True) and feed.realtime else None
+        self._picks_mtime = self._mtime(self.picks_path)
+        self._pick_cp: dict[str, int] = {}                # mint -> checkpoints already looked at
+        self._picked: dict[str, float] = {}               # mint -> P(2x) when it was picked
+        self._last_pick_scan = 0.0
         self.audit: dict[str, list] = {}                   # mint -> [gate, t0, p0, peak, trough, outcome]
         self.gate_stats: dict[str, dict] = defaultdict(lambda: {"n": 0, "win": 0, "loss": 0, "peak_sum": 0.0})
         self.defense_until = 0.0
@@ -476,6 +485,12 @@ class Engine:
         if not self.p.predict.enabled or not self.feed.realtime or self.now - self._last_model_check < 60:
             return
         self._last_model_check = self.now
+        pt = self._mtime(self.picks_path)
+        if pt != self._picks_mtime and (self.p.predict.get("picks") or {}).get("enabled", True):
+            self._picks_mtime = pt
+            self.pick_model = TreeModel.load(self.picks_path)
+            if self.pick_model is not None:
+                self.say("info", f"model picks: {self.picks_path.name} loaded ({len(self.pick_model.trees)} trees)")
         mt = self._mtime(self.model_path)
         if mt and mt != self._model_mtime:
             self._model_mtime = mt
@@ -1668,6 +1683,7 @@ class Engine:
             self._maybe_reload_model()
         await self._maybe_callout()
         await self._maybe_late()
+        self._model_picks()
         await self._manual_queue_tick()
         await self._orders_tick()
         if self.lab.open:
@@ -1952,6 +1968,37 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _model_picks(self) -> None:
+        """The stronger model looks at each new coin at the ages it was trained on (predict.checkpoints_s); a coin at
+        or over picks.min_p is followed in the exit lab on PICK_EXITS, filled instantly and as late as the paper bot
+        lands. Measurement only: nothing is bought, and it doesn't wait on any switch or the kill switch."""
+        m = self.pick_model
+        if m is None or not self.feed.realtime or self.now - self._last_pick_scan < 1:
+            return
+        self._last_pick_scan = self.now
+        cps = sorted(self.p.predict.checkpoints_s)
+        min_p = float((self.p.predict.get("picks") or {}).get("min_p", 0.25))
+        for s in self.tokens.values():
+            age = self.now - s.created_ts
+            if s.launch is None or age > cps[-1] + 10 or s.mint in self._picked:
+                continue
+            i = self._pick_cp.get(s.mint, 0)
+            if i >= len(cps) or age < cps[i]:
+                continue
+            while i < len(cps) and age >= cps[i]:
+                i += 1                                   # one look per checkpoint passed
+            self._pick_cp[s.mint] = i
+            if not s.price_known or len(s.buyers) < 3 or s.migrated:      # as in training (build_dataset)
+                continue
+            p = m.predict(extract(s, self.now, self._ctx(s)))
+            if p >= min_p:
+                self._picked[s.mint] = p
+                self.lab.start(s.mint, s.symbol, "model-pick", s.curve.price, self.now, self.p,
+                               extra={"p": round(p, 3), "age_s": round(age)})
+        if len(self._pick_cp) > 20_000:                  # coins long past their last checkpoint
+            self._pick_cp = {k: v for k, v in self._pick_cp.items() if k in self.tokens}
+            self._picked = {k: v for k, v in self._picked.items() if k in self.tokens}
 
     def _practicing(self, blocked: str = "") -> bool:
         """desk.practice: whenever the bot can't buy for a while (the play is off, the kill switch, the daily loss

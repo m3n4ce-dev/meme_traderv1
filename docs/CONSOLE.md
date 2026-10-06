@@ -350,6 +350,7 @@ In the terminal: `deposit <sol>`, `reset`.
 - **Is it working:**
   - **Edge check:** is each strategy's edge real, with a 90% range.
   - **Exit lab:** other exits on the same entries, including the desk's passes.
+  - **Exit lab → Model picks:** every new coin the stronger model (trees, `predict.picks`) rates at a 25%+ chance of doubling, at the ages it was trained on (15 s to 3 min), is followed on stop/trail/time exits. Each exit runs twice, filled instantly and filled as late as the paper bot lands (`execution.paper_delay_s`). Results are split by P(2x) band, 30%+ and 25–30%. Nothing is bought. Retrain with `python -m meme_trader.sniper train --kind trees --file data/feed-*` (needs lightgbm); the bot picks up the new file within a minute.
   - **Gate audit:** what the rejected coins did.
 - **Wallet study:** which early wallets were early again, with clusters.
 - **Prediction model.**
