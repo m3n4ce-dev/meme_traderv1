@@ -2070,12 +2070,20 @@ function tickChart(cv, c, o = {}) {
       const L = cv._lc; if (!L) return;
       const r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
       const near = L.drawn.filter(d => Math.abs(d.x - x) < 8 && Math.abs(d.y - y) < 10);
-      if (near.length) { tip(near.map(d => `<b>${esc(d.m.label)}</b>${L.mcpp ? ` at ${mcUsd(d.m.p * L.mcpp)} MC` : ""} <span class="note">${dur(L.tEnd - d.m.t)} ago${d.m.wallet ? " · " + short(d.m.wallet) : ""}</span>`).join("<br>"), ev); return; }
+      if (near.length) { tip(near.map(d => `<b>${esc(d.m.label)}</b>${L.mcpp ? ` at ${mcUsd(d.m.p * L.mcpp)} MC` : ""} <span class="note">${dur(L.tEnd - d.m.t)} ago${d.m.wallet ? " · " + short(d.m.wallet) + " · click: Solscan" : ""}</span>`).join("<br>"), ev); return; }
       const t = L.t0 + (x - L.padL) / (cv.clientWidth - L.padL - L.padR) * (L.tEnd - L.t0);
       let k = 0; while (k + 1 < L.pts.length && L.pts[k + 1][0] <= t) k++;
       tip(`${L.mcpp ? `MC <b>${mcUsd(L.pts[k][1] * L.mcpp)}</b> · ` : ""}${px(L.pts[k][1])} <span class="note">${dur(Math.max(0, L.tEnd - t))} ago</span>`, ev);
     });
     cv.addEventListener("mouseleave", hideTip);
+    cv.addEventListener("click", ev => {
+      const L = cv._lc; if (!L) return;
+      const r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+      const hit = L.drawn.find(d => d.m.wallet && Math.abs(d.x - x) < 8 && Math.abs(d.y - y) < 10);
+      if (hit) { window.open(`https://solscan.io/account/${encodeURIComponent(hit.m.wallet)}`, "_blank", "noopener"); return; }
+      if (cv.dataset.lc) openCoin(cv.dataset.lc);
+    });
+    cv.style.cursor = "pointer";
   }
 }
 // ---------------------------------------------------------------- Charts tab: optional views (remembered here)
@@ -2144,8 +2152,8 @@ function viewBody(k) {
     const chip = (v, l, key) => `<button class="small ${(key === "kind" ? LV.chainKind : LV.chain) === v ? "primary" : "ghost"}" data-lvchain="${key}:${v}">${l}</button>`;
     const pc = v => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${fx(v, 1)}%</span>`;
     return `<div class="lv-chips">${chip("all", "All", "net")}${nets.map(n => chip(n, esc(d.chains[n]), "net")).join("")}<span class="spacer"></span><button class="small ${LV.fresh ? "primary" : "ghost"}" data-lvchain="fresh:${LV.fresh ? 0 : 1}" title="Only pools under a week old">Fresh only</button>${chip("trending", "🔥 Trending", "kind")}${chip("new", "🌱 New", "kind")}</div>
-      ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Chain</th><th>Pair</th><th class="r">MC</th><th class="r">Vol 1h</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th class="r">Buys/sells 1h</th><th class="r">Age</th><th></th></tr></thead><tbody>${rows.map(r => `
-        <tr><td><span class="tag">${esc(r.chain_name)}</span></td><td><b>${esc(r.symbol)}</b> <span class="note">${esc(r.name.split(" / ").slice(1).join(" / "))}</span></td>
+      ${rows.forEach(r => { if (r.chain !== "solana" && r.token && r.dex) XURL[r.token] = r.dex; }) || ""}${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Chain</th><th>Pair</th><th class="r">MC</th><th class="r">Vol 1h</th><th class="r">5m</th><th class="r">1h</th><th class="r">24h</th><th class="r">Buys/sells 1h</th><th class="r">Age</th><th></th></tr></thead><tbody>${rows.map(r => `
+        <tr class="click" ${r.token ? `data-open="${esc(r.token)}"` : ""} title="${r.chain === "solana" ? "Open the coin" : "Open on DexScreener"}"><td><span class="tag">${esc(r.chain_name)}</span></td><td><b>${esc(r.symbol)}</b> <span class="note">${esc(r.name.split(" / ").slice(1).join(" / "))}</span></td>
         <td class="r num">${r.mcap_usd || r.fdv_usd ? "$" + fmtUsd(r.mcap_usd || r.fdv_usd) : "–"}</td><td class="r num">${r.vol_h1 != null ? "$" + fmtUsd(r.vol_h1) : "–"}</td>
         <td class="r num">${pc(r.chg_m5)}</td><td class="r num">${pc(r.chg_h1)}</td><td class="r num">${pc(r.chg_h24)}</td>
         <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${ageShort(r.age_s)}</td>
@@ -6054,6 +6062,8 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
+  const lnk = e.target.closest("a[href]");
+  if (lnk && !Object.keys(lnk.dataset).length) return;   // a plain link inside a clickable row goes only where it says
   const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-tctf],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
