@@ -218,16 +218,25 @@ def ws_urls(configured="") -> list[str]:
 
 class FeedQuality:
     """Live completeness check of the trade stream. Each pump.fun trade carries the curve's token reserves
-    after it, so consecutive trades of one token must chain exactly (reserves - bought, + sold). The share
-    that doesn't is the share of trades the endpoint dropped or reordered; free endpoints quietly drift
-    from ~0% to 30%+ as they throttle, without ever closing the connection."""
+    after it, so a token's trades must chain exactly (reserves - bought, + sold). A trade whose previous state
+    never shows up within REORDER_N more trades is one the endpoint dropped; free endpoints quietly drift from ~0% to 30%+
+    as they throttle, without ever closing the connection. Order doesn't count against an endpoint: measured
+    2026-10-06, RPC Fast delivers ~5% of trades out of order within their slot, with ~0.3% really missing, and
+    a strict in-order check read that as 4-5% missing, next to the 5% that switches endpoints."""
+
+    REORDER_N = 200         # a trade whose previous state arrives within this many more trades (~3 s at the
+                            # day's peak, ~25 a slot) was reordered, not dropped
 
     def __init__(self, max_gap_pct: float = 5.0, window: int = 2000, min_checks: int = 400,
-                 max_lag_s: float = 5.0, min_lags: int = 200):
+                 max_lag_s: float = 5.0, min_lags: int = 200, reorder_n: int | None = None):
         self.max_gap_pct = max_gap_pct
+        self.reorder_n = self.REORDER_N if reorder_n is None else reorder_n
         self.min_checks = min_checks
         self.checks: deque[bool] = deque(maxlen=window)
-        self.last: dict[str, float] = {}
+        self.ends: dict[str, deque] = {}               # mint -> its recent end states (token reserves after a trade)
+        self.pending: dict[str, list] = {}             # mint -> [(start state, deadline)] whose previous trade is due
+        self.firsts: dict[str, float] = {}             # mint -> the start state of the earliest of its trades seen
+        self._n = 0
         # latency: receive time minus the trade's on-chain Clock time. Complete is not enough - measured
         # 2026-10-03, PublicNode's log stream ran 12 s behind the chain (p99 13.6 s) with ~0% missing,
         # while the public RPC was 1-2 s behind. A stale feed makes every decision on old prices.
@@ -237,7 +246,9 @@ class FeedQuality:
 
     def reset(self) -> None:
         self.checks.clear()
-        self.last.clear()
+        self.ends.clear()
+        self.pending.clear()
+        self.firsts.clear()
         self.lags.clear()
 
     @property
@@ -254,13 +265,44 @@ class FeedQuality:
     def observe(self, t: Trade) -> None:
         if t.chain_ts > 0:
             self.lags.append(t.ts - t.chain_ts)
-        prev = self.last.pop(t.mint, None)
-        if prev is not None:
-            expected = prev - t.tokens if t.side == "buy" else prev + t.tokens
-            self.checks.append(abs(expected - t.v_tokens) < 1.0)
-        self.last[t.mint] = t.v_tokens
-        if len(self.last) > 20_000:                     # bounded: forget the least recently traded token
-            self.last.pop(next(iter(self.last)))
+        self._n += 1
+        n = self._n
+        ends = self.ends.pop(t.mint, None)             # (re-inserted below: the dict stays least-recent first)
+        start = t.v_tokens + t.tokens if t.side == "buy" else t.v_tokens - t.tokens    # reserves before this trade
+        if ends is None:                               # the first trade seen of this coin: nothing to chain to
+            ends = deque(maxlen=16)
+            self.firsts[t.mint] = start
+        elif abs(self.firsts.get(t.mint, -9.0) - t.v_tokens) < 1.0:
+            self.firsts[t.mint] = start                # it came before the first one seen: nothing to chain to either
+        elif any(abs(e - start) < 1.0 for e in ends):
+            self.checks.append(True)
+        else:                                          # its previous trade may still be on its way
+            self.pending.setdefault(t.mint, []).append((start, n + self.reorder_n))
+        ends.append(t.v_tokens)
+        self.ends[t.mint] = ends
+        waiting = self.pending.get(t.mint)
+        if waiting:                                    # this trade arrived after the one that follows it
+            keep = [(st, dl) for st, dl in waiting if abs(st - t.v_tokens) >= 1.0 and dl >= n]
+            self.checks.extend([True] * sum(1 for st, _ in waiting if abs(st - t.v_tokens) < 1.0))
+            self.checks.extend([False] * sum(1 for st, dl in waiting if abs(st - t.v_tokens) >= 1.0 and dl < n))
+            if keep:
+                self.pending[t.mint] = keep
+            else:
+                del self.pending[t.mint]
+        if n % 50 == 0:                                # other coins' overdue ones: their previous trade never came
+            for m in [m for m, w in self.pending.items() if any(dl < n for _, dl in w)]:
+                w = self.pending[m]
+                self.checks.extend([False] * sum(1 for _, dl in w if dl < n))
+                left = [x for x in w if x[1] >= n]
+                if left:
+                    self.pending[m] = left
+                else:
+                    del self.pending[m]
+        if len(self.ends) > 20_000:                    # bounded: forget the least recently traded token
+            m = next(iter(self.ends))
+            self.ends.pop(m)
+            self.pending.pop(m, None)
+            self.firsts.pop(m, None)
 
     @property
     def gap_pct(self) -> float:

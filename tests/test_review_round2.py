@@ -963,7 +963,7 @@ def _chain(mint, n, skip_every=0):
 def test_watchdog_measures_missing_trades():
     from meme_trader.sniper.feeds import FeedQuality
 
-    q = FeedQuality(max_gap_pct=5, min_checks=100)
+    q = FeedQuality(max_gap_pct=5, min_checks=100, reorder_n=0)      # strict: no wait for a late trade
     for t in _chain(A, 300):
         q.observe(t)
     assert q.measured and q.gap_pct == 0 and not q.bad
@@ -971,6 +971,13 @@ def test_watchdog_measures_missing_trades():
     for t in _chain(A, 300, skip_every=8):                # ~1 in 8 trades never arrived
         q.observe(t)
     assert q.bad and 10 < q.gap_pct < 16
+    w = FeedQuality(max_gap_pct=5, min_checks=100)        # the default waits 200 trades for a late one, then counts it
+    for t in _chain(A, 300, skip_every=8):
+        w.observe(t)
+    assert w.pending and w.gap_pct < q.gap_pct            # the last ones are still within their wait
+    for t in _chain("B" * 44, 260):                       # the stream goes on (another coin, nothing missing)
+        w.observe(t)
+    assert not w.pending.get(A) and w.bad
 
 
 def test_watchdog_endpoint_order(monkeypatch):
@@ -1270,3 +1277,16 @@ def test_a_newly_configured_endpoint_is_tried_first_at_startup(tmp_path, monkeyp
     mem.write_text(json.dumps({"paid.example.com": [3.0, now], "api.mainnet-beta.solana.com": [1.4, now]}))
     g = SolanaTradeFeed(memory_path=mem)                     # once measured, the fastest wins as before
     assert g.ws_urls[g.ws_idx].endswith("api.mainnet-beta.solana.com")
+
+
+def test_watchdog_doesnt_count_reordered_trades_as_missing():
+    """RPC Fast (2026-10-06) delivers ~5% of trades out of order within their slot: that isn't data loss."""
+    from meme_trader.sniper.feeds import FeedQuality
+
+    q = FeedQuality(max_gap_pct=5, min_checks=100)
+    ts = _chain(A, 300)
+    for i in range(0, len(ts) - 1, 7):                  # every 7th pair arrives swapped
+        ts[i], ts[i + 1] = ts[i + 1], ts[i]
+    for t in ts:
+        q.observe(t)
+    assert q.measured and q.gap_pct == 0 and not q.bad and not q.pending
