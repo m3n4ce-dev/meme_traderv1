@@ -323,6 +323,7 @@ def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict
     improving, grade on the latest. Then refit on everything with that many trees."""
     try:
         import lightgbm as lgb
+        import numpy as np                               # (lightgbm's own dependency: it takes arrays, not lists)
     except ImportError:
         raise SystemExit("train --kind trees needs the lightgbm package: .venv/bin/pip install lightgbm")
     from .sweep import split
@@ -339,13 +340,15 @@ def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict
     cfg = {"objective": "binary", "metric": "auc", "learning_rate": 0.03, "num_leaves": 31, "min_data_in_leaf": 200,
            "bagging_fraction": 0.8, "bagging_freq": 1, "feature_fraction": 0.8, "lambda_l2": 1.0, "verbose": -1,
            "num_threads": 4, "seed": 7}
-    held = lgb.train(cfg, lgb.Dataset(Xtr, ytr), 2000, valid_sets=[lgb.Dataset(Xv, yv)],
+    def data(X, y):
+        return lgb.Dataset(np.asarray(X, dtype=np.float64), np.asarray(y, dtype=np.float64))
+    held = lgb.train(cfg, data(Xtr, ytr), 2000, valid_sets=[data(Xv, yv)],
                      callbacks=[lgb.early_stopping(100, verbose=False)])
     n_trees = max(held.best_iteration, 1)
     holdout = TreeModel.from_lightgbm(held, num_iteration=n_trees)
     test_metrics = evaluate(yte, holdout.predict_rows(Xte)) if yte else {"n": 0}
     Xall, yall, _ = build_dataset(events, params)
-    final = TreeModel.from_lightgbm(lgb.train(cfg, lgb.Dataset(Xall, yall), n_trees))
+    final = TreeModel.from_lightgbm(lgb.train(cfg, data(Xall, yall), n_trees))
     ts = [e.ts for e in events]
     src = source or {}
     final.info = {
