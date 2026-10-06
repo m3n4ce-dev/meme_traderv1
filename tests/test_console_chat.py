@@ -309,6 +309,53 @@ def test_chat_shows_a_card_for_a_pasted_contract_address(fake_claude, tmp_path, 
     run(go())
 
 
+def test_a_ticker_finds_its_coins_most_liquid_first(monkeypatch):
+    import httpx
+    pairs = [{"chainId": "solana", "baseToken": {"address": "A1", "symbol": "WIF", "name": "copy"}, "liquidity": {"usd": 900},
+              "volume": {"h24": 50}, "marketCap": 1e4},
+             {"chainId": "solana", "baseToken": {"address": "B2", "symbol": "wif", "name": "dogwifhat"}, "liquidity": {"usd": 5e6},
+              "volume": {"h24": 9e6}, "marketCap": 2e9},
+             {"chainId": "solana", "baseToken": {"address": "B2", "symbol": "WIF"}, "liquidity": {"usd": 1e5}, "volume": {"h24": 1e5}},
+             {"chainId": "base", "baseToken": {"address": "0xC", "symbol": "WIF"}, "liquidity": {"usd": 9e9}},
+             {"chainId": "solana", "baseToken": {"address": "D4", "symbol": "WIFE"}, "liquidity": {"usd": 9e9}}]
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        return httpx.Response(200, json={"pairs": pairs})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(lk.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    got = run(lk.search_ticker("WIF"))
+    assert [g["mint"] for g in got] == ["B2", "A1"] and got[0]["pairs"] == 2 and got[0]["vol_h24"] == 9.1e6
+    assert "q=WIF" in seen[0]
+    assert lk.TICKER_RE.findall("chart $wif please, not $5 or a$b") == ["wif"]
+    assert lk.default_tf(600) == "1m" and lk.default_tf(5 * 3600) == "5m" and lk.default_tf(None) == "15m"
+
+
+def test_chat_shows_a_card_for_a_ticker(fake_claude, tmp_path, monkeypatch):
+    async def fake_search(sym):
+        return [{"mint": BONK, "symbol": sym, "name": "first", "mcap_usd": 2e9}, {"mint": "X" * 43, "symbol": sym, "name": "copy", "mcap_usd": 1e4}]
+
+    async def fake_lookup(mint, engine=None, sol_usd=None, watch=False):
+        return {"mint": mint, "symbol": "TST", "stage": "listed", "candles": [], "flags": []}
+
+    monkeypatch.setattr("meme_trader.ui.chat.search_ticker", fake_search)
+    monkeypatch.setattr("meme_trader.ui.chat.lookup", fake_lookup)
+
+    async def go():
+        chat = ChatManager(engine(), 8787, {"claude_bin": str(fake_claude)}, tmp_path / "chat.json")
+        await chat.send("$tst")
+        await wait_idle(chat)
+        part = chat.state["messages"][-1]["parts"][0]
+        assert part["type"] == "card" and part["mint"] == BONK and [x["name"] for x in part["data"]["also"]] == ["copy"]
+        prompt = calls(tmp_path)[0]["prompt"]
+        assert prompt.startswith("What do you make of this token?") and "Metrics for " + BONK in prompt
+        await chat.send("is $ABC or $XYZ better?")                        # two tickers: no card, just the question
+        await wait_idle(chat)
+        assert not any(p["type"] == "card" for p in chat.state["messages"][-1]["parts"])
+    run(go())
+
+
 def test_chat_state_survives_a_restart(tmp_path):
     path = tmp_path / "chat.json"
     path.write_text(json.dumps({"session_id": "s1", "messages": [

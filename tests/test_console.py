@@ -154,6 +154,29 @@ def test_other_chains_rows_and_cache(monkeypatch):
     assert len(calls) == 1                                                # and waits before asking again
 
 
+def test_chart_candles_at_any_timeframe_are_paced_cached_and_back_off(monkeypatch):
+    from meme_trader.ui import chains
+    monkeypatch.setattr(chains, "GAP_S", 0.0)
+    c = chains.Chains()
+    calls, answer = [], {"status": 200}
+    pool = "7fDzFPYhdtNm5NbqvZYRcjB879DxH4dRjmMhbHSYqM5J"
+
+    async def fake(net, p, tf):
+        calls.append((net, p, tf))
+        return answer["status"], {"data": {"attributes": {"ohlcv_list": [[2, 1, 2, 1, 2, 9], [1, 1, 1, 1, 1, 5]]}}}
+    c._ohlcv = fake
+    assert "unknown" in asyncio.run(c.candles("solana", "not a pool", "1h"))["error"]
+    assert "unknown" in asyncio.run(c.candles("solana", pool, "7m"))["error"] and not calls
+    x = asyncio.run(c.candles("solana", pool, "1h"))
+    assert x["candles"] == [[1, 1, 1, 1, 1, 5], [2, 1, 2, 1, 2, 9]] and x["tf"] == "1h" and not x["error"]   # oldest first
+    asyncio.run(c.candles("solana", pool, "1h"))
+    assert len(calls) == 1                                                # cached
+    answer["status"] = 429
+    assert "limit" in asyncio.run(c.candles("solana", pool, "1d"))["error"] and c.backoff_until > 0
+    assert "limit" in asyncio.run(c.candles("solana", pool, "4h"))["error"] and len(calls) == 2   # waits it out
+    assert set(chains.OHLCV) == {"1m", "5m", "15m", "1h", "4h", "1d"}
+
+
 def test_hq_status(tmp_path):
     from aiohttp.test_utils import TestClient, TestServer
 

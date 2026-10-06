@@ -27,7 +27,7 @@ from pathlib import Path
 
 from ..config import ROOT
 from ..journal import DATA
-from ..sniper.lookup import brief, is_mint, lookup
+from ..sniper.lookup import TICKER_RE, brief, is_mint, lookup, search_ticker
 
 TOOL_PREFIX = "mcp__meme-trader__"
 READ_TOOLS = ["get_status", "get_positions", "get_radar", "get_token", "lookup_token", "get_analytics",
@@ -317,6 +317,19 @@ class ChatManager:
         """A pasted contract address gets its metrics card right away (no Claude usage), and the metrics go
         into the prompt so Claude doesn't need a tool call to see them."""
         mints = list(dict.fromkeys(m for m in MINT_RE.findall(text) if is_mint(m)))
+        also, tag = [], ""
+        if not mints:                                     # or one $TICKER: the most liquid Solana coin trading as it
+            tags = list(dict.fromkeys(t.upper() for t in TICKER_RE.findall(text)))
+            if len(tags) != 1:
+                return text
+            tag = tags[0]
+            try:
+                found = await search_ticker(tag)
+            except Exception:                             # DexScreener down: Claude still gets the question
+                return text
+            if not found:
+                return text
+            mints, also = [found[0]["mint"]], found[1:]
         if len(mints) != 1:
             return text
         mint = mints[0]
@@ -325,6 +338,8 @@ class ChatManager:
         self._emit_msg(msg)
         try:
             data = await lookup(mint, self.e, watch=True)
+            if also:                                      # (a copy: the lookup's cache keeps its own dict)
+                data = {**data, "also": also}
             part.update(status="ok", data=data)
         except Exception as e:
             part.update(status="error", error=str(e) or type(e).__name__)
@@ -334,7 +349,7 @@ class ChatManager:
         if not self.state["auto_read"]:
             return None
         facts = json.dumps(brief(data), default=str, separators=(",", ":"))[:12000]
-        ask = text if text != mint else "What do you make of this token?"
+        ask = "What do you make of this token?" if text.strip() == mint or (tag and text.strip().upper() == f"${tag}") else text
         return f"{ask}\n\n[Metrics for {mint}, already shown to me as a card]\n{facts}"
 
     def _argv(self, resume: bool) -> list[str]:
