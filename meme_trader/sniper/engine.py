@@ -2054,8 +2054,9 @@ class Engine:
         from .desk_record import call_votes
         if len(self._calls_open) > 300:                  # never scored (a buy that didn't land): let them go
             self._calls_open = {m: c for m, c in self._calls_open.items() if self.now - c["ts"] < 7200}
+        from .desk import RUBRIC_VERSION
         self._calls_open[s.mint] = {"ts": self.now, "mint": s.mint, "symbol": s.symbol, "mode": mode, "strategy": strategy,
-                                    "approve": bool(v.approve), "votes": call_votes(v.votes)}
+                                    "approve": bool(v.approve), "votes": call_votes(v.votes), "rubric": RUBRIC_VERSION}
 
     def _score_call(self, row: dict) -> None:
         """The exit lab closed a follow: if a team vote was waiting on that coin, it gets its score."""
