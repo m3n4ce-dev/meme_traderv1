@@ -32,6 +32,9 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Charts:** a bar in "Where the P&L comes from" opens the same list in By exit, and a dot on the hold-time scatter opens its coin.
 - **If a trade closed since the table was drawn,** the table refreshes so the count and the list agree.
 
+**Fixed: the agent read placeholders as facts.** When you pasted SWAP, the chat's agent called `get_token` on a coin the bot had only just started watching. It got a fresh curve's numbers ($3.3K, 0% curve, 2 s old) for a 33-hour-old $394K graduate, and flagged the coin wrongly before correcting itself.
+- **Now:** a coin the bot didn't see launch reports `age_s: null` (plus `watching_for_s`). Before its first trade, price, market cap and curve are `null`, with a caveat pointing to `lookup_token`. A graduated coin's curve % is `null`.
+
 **Small polish:**
 - **Charts:** a first visit opens Graduation watch and Market pulse, instead of an empty page.
 - **Live:** the headline numbers flash green or red when they really move (equity by 0.5% or more, at most every 4 s; off with reduced motion).

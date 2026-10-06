@@ -69,6 +69,23 @@ def test_reads_are_json_ready():
     run(go())
 
 
+def test_a_coin_only_just_watched_reads_as_unknown_not_as_a_fresh_launch():
+    """Seen 2026-10-06: the chat's agent read a 33-hour-old $394K coin as "$3.3K, 2 s old" (placeholders)."""
+    async def go():
+        eng = engine()
+        api = AgentAPI(eng)
+        s = eng.tokens["C" * 44] = TokenState("C" * 44, None, eng.now)          # watched, never seen trading
+        d = await api.call("token", {"mint": s.mint})
+        assert d["price_known"] is False and d["mcap_usd"] is None and d["curve_pct"] is None and d["age_s"] is None
+        assert any("lookup_token" in c for c in d["caveats"]) and "watching_for_s" in d
+        s.on_trade(Trade(s.mint, eng.now + 1, "w", "buy", 1.0, 1e6, 0, 0, pool="pump-amm", mcap_sol=3000.0), 2)
+        d = await api.call("token", {"mint": s.mint})
+        assert d["mcap_usd"] > 0 and d["curve_pct"] is None and any("graduated" in c for c in d["caveats"])
+        token(eng)
+        assert "caveats" not in await api.call("token", {"mint": A})              # a coin seen from launch: as is
+    run(go())
+
+
 def test_agent_may_lower_risk_but_never_exceed_the_owners_limits():
     async def go():
         eng = engine(entry__enabled=False)
