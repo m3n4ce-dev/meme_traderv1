@@ -335,6 +335,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                      "vote_s": engine.vote_speed(),
                      "huddles": len(engine.huddles), "huddle_error": engine.huddle_error},
             "chat": {"available": bool(chat and chat._status().get("available"))} if chat else {"available": False},
+            "intel": engine.intel_view(),
             "machine": {"disk_free_gb": round(du.free / 1e9, 1), "disk_used_pct": round(du.used / du.total * 100), "mem_free_mb": round(free_mb() or 0)},
         })
 

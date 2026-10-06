@@ -170,6 +170,35 @@ class Chains:
         self._candles[key] = (time.time(), out)
         return {"candles": out, "tf": tf, "error": ""}
 
+    async def history(self, net: str, pool: str, limit: int = 1000) -> dict:
+        """Up to `limit` one-minute candles of a pool, priced in its quote token (SOL), for the graduated-coin log.
+        Paced with everything else."""
+        import aiohttp
+
+        if net not in NETWORKS or not POOL_RE.match(pool or ""):
+            return {"candles": [], "error": "unknown chain or pool"}
+        async with self._pace:
+            if time.time() < self.backoff_until:
+                return {"candles": [], "error": "GeckoTerminal's free limit"}
+            wait = self._last_call + GAP_S - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.time()
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), headers={"Accept": "application/json"}) as s:
+                    async with s.get(f"{GT}/{net}/pools/{pool}/ohlcv/minute",
+                                     params={"aggregate": 1, "limit": min(limit, 1000), "currency": "token"}) as r:
+                        status, d = r.status, (await r.json() if r.status == 200 else {})
+            except Exception as e:
+                return {"candles": [], "error": f"couldn't reach GeckoTerminal ({type(e).__name__})"}
+        if status == 429:
+            self.backoff_until = time.time() + BACKOFF_S
+            return {"candles": [], "error": "GeckoTerminal's free limit"}
+        if status != 200:
+            return {"candles": [], "error": f"HTTP {status}"}
+        rows = ((d.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
+        return {"candles": [[int(t), o, h, lo, cl, v] for t, o, h, lo, cl, v in sorted(rows)], "error": ""}
+
     def names(self, limit: int = 5) -> dict:
         """What's trending per chain, for the desk's narrative reads (no fetch: whatever was last seen)."""
         return {NETWORKS[n][0]: [r["symbol"] for r in rows[:limit]] for n, rows in (self.data.get("trending") or {}).items() if rows}
