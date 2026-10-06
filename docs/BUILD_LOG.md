@@ -35,6 +35,11 @@ A running record of decisions, research, parameters and status. Newest entries a
 **Fixed: the agent read placeholders as facts.** When you pasted SWAP, the chat's agent called `get_token` on a coin the bot had only just started watching. It got a fresh curve's numbers ($3.3K, 0% curve, 2 s old) for a 33-hour-old $394K graduate, and flagged the coin wrongly before correcting itself.
 - **Now:** a coin the bot didn't see launch reports `age_s: null` (plus `watching_for_s`). Before its first trade, price, market cap and curve are `null`, with a caveat pointing to `lookup_token`. A graduated coin's curve % is `null`.
 
+**"Close this trade if it goes under 50% or over 30%" now just works in the chat.** It used to ask "do you already hold ex?", a coin from earlier in the chat, while the owner held RABBIT, and planned to sell only half at +30%.
+- **Every message to the chat** now starts with what's open: each position's coin, mint, whose it is, P&L now, and any exits already set.
+- **The chat's instructions:** with exactly one open position, "this trade" or "it" means that one. "Close it at +30%" sells all of it; "take half" sells 0.5. "Under 50%" is a 50% stop.
+- **The tool:** `set_position_exits` says the take profit sells half unless told otherwise, and `get_positions` shows the owner's current exits.
+
 **Small polish:**
 - **Charts:** a first visit opens Graduation watch and Market pulse, instead of an empty page.
 - **Live:** the headline numbers flash green or red when they really move (equity by 0.5% or more, at most every 4 s; off with reduced motion).

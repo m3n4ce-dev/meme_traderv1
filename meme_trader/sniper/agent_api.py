@@ -131,7 +131,11 @@ class AgentAPI:
         snap = self.e.snapshot()
         keep = ("mint", "symbol", "source", "held_s", "gain_pct", "peak_gain_pct", "value_sol", "cost_sol",
                 "proceeds_sol", "progress", "score", "initials")
-        return {"positions": [{k: p[k] for k in keep if k in p} for p in snap["positions"]],
+        def mine(p):                                     # the owner's exits on their own positions
+            pos = self.e.positions.get(p.get("mint"))
+            return {"your_exits": {k: v for k, v in (pos.manual or {}).items() if k in ("sl", "tp", "tp_frac", "trail") and v}} \
+                if pos is not None and pos.source == "manual" else {}
+        return {"positions": [{**{k: p[k] for k in keep if k in p}, **mine(p)} for p in snap["positions"]],
                 "callout_bags": snap["callout_bags"],
                 "other_chain_positions": [{k: p[k] for k in ("symbol", "chain_name", "size_usd", "pnl_usd", "pnl_pct", "mcap0", "mcap", "why")}
                                           for p in self.e.xchain.view()["positions"]]}
