@@ -275,3 +275,33 @@ def test_recording_rotates_at_utc_midnight(tmp_path):
     eng._rotate_record()
     assert eng.record_path.name != "feed-2026-10-01.jsonl" and eng.record_path.exists()
     eng.record_file.close()
+
+
+def test_an_analytics_row_opens_exactly_its_trades():
+    """Owner: clicking a row in Analytics should show those trades. trades_in groups with the tables' own keys."""
+    import random
+
+    from meme_trader.sniper.analytics import compute, trades_in
+    rnd = random.Random(7)
+    closed = []
+    for i in range(80):
+        src = rnd.choice(["manual", "late", "sniper", "copy:alpha", "chains", "callout"])
+        closed.append({"mint": f"M{i}", "symbol": f"S{i}", "source": src, "opened": 1_790_000_000 + i * 977, "closed": 1_790_000_000 + i * 977 + 60,
+                       "pnl": rnd.uniform(-.2, .3), "pnl_pct": rnd.uniform(-40, 80), "cost": .2, "proceeds": .2, "peak_gain_pct": rnd.uniform(0, 90),
+                       "exit": rnd.choice(["late stop -16%", "momentum decay (outflow -2)", "manual sell 100%", "trailing stop -22% from peak (+80%)"]),
+                       "score": rnd.choice([None, 45, 65, 95]), "p": rnd.choice([None, .05, .25, .8]),
+                       "entry_mcap_usd": rnd.choice([None, 4000, 12000, 50000, 300000])})
+    a = compute(closed, [], 5.0, 40)
+    tables = {"source": a["by_source"], "exit": a["by_exit"], "hour": a["by_hour"], "day": a["by_day"], "score": a["by_score"], "p": a["by_p"]}
+    for table, rows in tables.items():
+        assert rows
+        for r in rows:
+            got = trades_in(closed, table, str(r["key"]))
+            assert len(got) == r["n"], (table, r["key"])
+            assert abs(sum(t["pnl"] for t in got) - r["pnl_sol"]) < 1e-3
+    for who in ("all", "manual", "bots"):
+        for r in a["by_mcap"][who]:
+            assert len(trades_in(closed, "mcap", r["key"], who)) == r["n"]
+    got = trades_in(closed, "source", "manual")
+    assert got == sorted(got, key=lambda t: -t["closed"]) and all(t["source"] == "manual" for t in got)
+    assert trades_in(closed, "nope", "x") == [] and not any(t["source"] == "callout" for t in trades_in(closed, "exit", "manual sell"))

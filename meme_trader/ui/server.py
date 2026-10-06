@@ -270,6 +270,11 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
     async def chains_view(_):
         return _json(await chains.get(viewer=True, wait=False))
 
+    async def group_trades(request):            # an Analytics row's trades (the tables group exactly this way)
+        from ..sniper.analytics import trades_in
+        q = request.query
+        return _json({"trades": trades_in(list(engine.book.closed), q.get("table", ""), q.get("key", ""), q.get("who", "all"))})
+
     async def candles_view(request):            # the coin card's timeframe buttons (GeckoTerminal, paced and cached)
         q = request.query
         return _json(await chains.candles(q.get("net", "solana"), q.get("pool", ""), q.get("tf", "")))
@@ -865,7 +870,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/xfeed", xfeed), web.get("/api/logo/{mint}", logo), web.get("/api/memory", memory),
                     web.get("/api/calls", calls), web.get("/api/calls/export", calls_export),
                     web.get("/api/pulse", pulse_board), web.get("/api/social", social),
-                    web.get("/api/kols", kols_view), web.get("/api/hot", hot_names), web.get("/api/lab", lab_view), web.get("/api/chains", chains_view), web.get("/api/candles", candles_view), web.get("/api/hq", hq),
+                    web.get("/api/kols", kols_view), web.get("/api/hot", hot_names), web.get("/api/lab", lab_view), web.get("/api/chains", chains_view), web.get("/api/candles", candles_view), web.get("/api/trades", group_trades), web.get("/api/hq", hq),
                     web.get("/api/card.png", card_png), web.get("/x/connect", x_connect),
                     web.get("/x/callback", x_callback),
                     web.get("/api/ui", ui_state)])
