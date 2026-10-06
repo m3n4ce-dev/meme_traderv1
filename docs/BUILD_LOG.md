@@ -4,6 +4,29 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #51: Risk to Normal, twice the lab tests, and two new ideas for it to test
+
+**Owner's requests:** "lets do more tests if it wont slow things down", risk to Normal ("your call"), then "keep working".
+
+**Where things stood:** the graduation bot lost 4.26 SOL in 24 hours (58 trades, 16 won), mostly on Oct 5 at Max size. The paper account was 1.1 SOL above its kill switch.
+
+**Risk dial to Normal.** The dial only scales size, positions and the daily loss limit; it never changes which coins are bought. In 220 graduation trades the bot never held more than 4 at once, so Normal's 6 slots don't bind.
+
+**Lab: up to 8 tests a day** (`lab.max_per_day` in the owner's config; the default stays 4).
+- **Why it's safe:** one test at a time, at the lowest CPU priority, capped at 6 GB, with 11.7 GB free. Feed lag stayed at 1.1–1.4 s.
+- **First results:** `late.stop_loss_pct` 15 → 20 no clear difference; `late.min_buyers` 12 → 8 worse (−0.69 vs −0.09 SOL).
+
+**What the replays say about the graduation bot** (current settings, Oct 3–5, 210 trades, −0.09 SOL):
+- 42% of entries never rose 1% after the buy (88 trades, −3.10 SOL). No single entry feature separated them by more than 14 points.
+- The 9 plays held to the graduation exit made +2.26 SOL (median +167%). The 21 that peaked at +50..100% were sold by momentum decay at a median +44%.
+- Entries land a median 2.7% above the signal price and exits 2.8% below it (the 2.5 s landing).
+
+**Two new settings, off by default, for the lab to test:**
+- **`late.runner_after_pct`** (0 = off) and **`late.runner_trail_pct`** (25): once a play has been up this much, momentum decay and the stall stop no longer sell it; a trailing stop does.
+- **`late.max_dev_sold_pct`** (0 = any creator sale skips, as before): the owner saw coins passed for "dev holding: sold" whose charts kept climbing; four of ten on the graduation watch at once. A coin let in this way still sells if the creator sells again after the buy.
+
+---
+
 ## 2026-10-05 — Entry #50: Lab tests by the day, the first "better" verdict turned on, honest fills, fewer pauses
 
 **Owner's requests:** "Do whatever is needed" (before the 7 pm daily reset), then "proceed" with the plan.

@@ -188,7 +188,8 @@ def test_dump_profile_filters_skip_young_and_one_sided_entries():
     assert evaluate_late_entry(s, now, L, red) == (False, "one-sided buying")
     L.update(min_recent_sells=0)
     assert evaluate_late_entry(s, now, L, red)[0] == base_ok                     # off by default: nothing changes
-    assert {"late.min_age_s", "late.min_recent_sells"} <= set(labmod.TESTABLE) and "late.min_recent_sells" in e.lab_baseline()
+    assert {"late.min_age_s", "late.min_recent_sells", "late.runner_after_pct"} <= set(labmod.TESTABLE)
+    assert e.lab_baseline()["late.runner_after_pct"] == 0 and "late.min_recent_sells" in e.lab_baseline()
 
 
 

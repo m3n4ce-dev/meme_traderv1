@@ -38,7 +38,7 @@ from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
 from .strategy import (SKIP_FOR_GOOD, SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry,
                        evaluate_late_exit, evaluate_manual_exit, evaluate_ride_exit, exit_watch, gate_checklist,
-                       initials_fraction, late_checklist)
+                       initials_fraction, late_checklist, late_dev_ok)
 from .tracker import TokenState
 
 # handed-over positions: half out at 2x, trail the rest 30% off its peak once it's run 30%, stop 40% down
@@ -1066,7 +1066,7 @@ class Engine:
         why = self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
             ("the curve is too thin to size a buy" if size <= 0 else "") or \
             (f"price moved {moved:+.0f}% during review" if moved > self.p.desk.max_price_move_pct else "") or \
-            ("dev sold" if s.dev_sold else "")
+            ("dev sold" if (not late_dev_ok(s, self.p.late) if kind == "late" else s.dev_sold) else "")
         if why:
             self.say("info", f"desk approved {s.symbol} but skipped: {why}", s.mint)
             if kind == "sniper" and not why.startswith(("max positions", "paused", "low SOL")):
@@ -1099,7 +1099,8 @@ class Engine:
         self.book.reserved[s.mint] = sol + self._order_overhead(source)
         self.pending.add(s.mint)
         s.decided = "entered"
-        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add), "amm": bool(s.migrated)}
+        meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add), "amm": bool(s.migrated),
+                "dev_sold": s.dev_sold}
         if not add and source != "callout":
             meta["feat"] = self._entry_features(s, source)
         if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
@@ -1270,7 +1271,8 @@ class Engine:
             entry_quote=(meta or {}).get("quote", 0.0),
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
             failed_fees_sol=fill.fees_lost,
-            bot="ride" if source == "manual" and self.away else "", feat=(meta or {}).get("feat"))
+            bot="ride" if source == "manual" and self.away else "", feat=(meta or {}).get("feat"),
+            dev_sold_at_entry=(meta or {}).get("dev_sold", 0.0) if source == "late" else 0.0)
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
