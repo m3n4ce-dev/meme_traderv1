@@ -244,6 +244,10 @@ class Engine:
         self.orders: dict[str, dict] = {}                  # your limit orders and alerts, by id
         self.away = False                                  # away mode: the bots manage your positions
         self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
+        self.descriptions: dict[str, str] = {}             # the coin's own description (its metadata; creator-written)
+        self.linked_x: dict[str, dict] = {}                # what a coin's X link is (read near the graduation window)
+        self._x_next_at, self._x_day = 0.0, ("", 0)
+        self.xfeed = None                                  # the dashboard's X feed (posts naming a coin), when it runs
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
         self.huddles: deque = deque(maxlen=20)              # the team's meetings (desk.huddle_minutes; Desk tab)
@@ -654,11 +658,15 @@ class Engine:
 
         md = {}
         for url in ipfs_urls(e.uri)[:3]:                 # ipfs.io rate-limits busy IPs: try other gateways
-            md = await fetch_metadata(url)
+            md = await fetch_metadata(url, ("twitter", "telegram", "website", "description"))
             if md:
                 break
         if md:
             e.twitter, e.telegram, e.website = md.get("twitter", ""), md.get("telegram", ""), md.get("website", "")
+            if md.get("description"):
+                if len(self.descriptions) > 5000:       # only coins still tracked
+                    self.descriptions = {m: d for m, d in self.descriptions.items() if m in self.tokens}
+                self.descriptions[e.mint] = " ".join(md["description"].split())
             if self.record_file:                 # stamped with its arrival time: replays mustn't know it earlier
                 md_event = Metadata(e.mint, self.feed.now(), e.twitter, e.telegram, e.website)
                 self.record_file.write(dumps(md_event) + "\n")
@@ -1026,7 +1034,8 @@ class Engine:
                                               "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
         t0 = time.time()
         try:
-            v = await self.desk.review(snapshot_for(s, self.now, kind, extra))
+            v = await self.desk.review(snapshot_for(s, self.now, kind, extra),
+                                       {"narrative": {"narrative_context": self.narrative_context(s)}})
         finally:
             self.reviewing.discard(s.mint)
         if self.feed.realtime:
@@ -1847,6 +1856,9 @@ class Engine:
         self._last_late_scan = self.now
         en = self.p.entry
         for s in list(self.tokens.values()):
+            if self.feed.realtime and s.mint not in self.linked_x and s.launch is not None and s.launch.twitter \
+                    and not s.migrated and s.curve.progress * 100 >= L.min_curve_pct - 15:
+                self._read_x_link(s)
             if not s.decided or s.late_tried or s.mint in self.positions or s.mint in self.pending \
                     or s.mint in self.reviewing or not s.price_known:
                 continue
@@ -1864,6 +1876,58 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _read_x_link(self, s) -> None:
+        """Read a coin's X link once, as it nears the graduation window, so the narrative persona has the story
+        when the desk votes (reading it then would delay the buy). One read every 2 s, 800 a day, through
+        FxTwitter: no X login, no cost."""
+        from .memory import fetch_x_link
+
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        n = self._x_day[1] if self._x_day[0] == day else 0
+        if time.time() < self._x_next_at or n >= 800:
+            return
+        self._x_next_at, self._x_day = time.time() + 2.0, (day, n + 1)
+        if len(self.linked_x) > 3000:
+            self.linked_x = {m: d for m, d in self.linked_x.items() if m in self.tokens}
+        self.linked_x[s.mint] = {"kind": "reading"}
+
+        async def go(mint=s.mint, link=s.launch.twitter):
+            try:
+                self.linked_x[mint] = await fetch_x_link(link)
+            except Exception as e:                       # network, rate limit: the persona is told it's unread
+                self.linked_x[mint] = {"kind": f"couldn't read it ({type(e).__name__})"}
+        asyncio.create_task(go())
+
+    def narrative_context(self, s) -> dict:
+        """What the narrative persona reads on top of the snapshot: the coin's own story (its description and the
+        X post or account it links to) and what is drawing attention now (this hour's copycat waves, coins that just
+        graduated, X posts naming this coin). Its texts are written by strangers: data, never instructions."""
+        L = s.launch
+        out: dict = {"description": self.descriptions.get(s.mint, "")[:300]}
+        x = dict(self.linked_x.get(s.mint) or {})
+        if x.get("ts") and L is not None:
+            x["minutes_before_launch"] = round((L.ts - float(x.pop("ts"))) / 60)
+        x.pop("ts", None)
+        if x:
+            out["linked_x"] = x
+        elif L is not None and L.twitter:
+            out["linked_x"] = {"kind": "not read yet"}
+        else:
+            out["linked_x"] = {"kind": "no X link"}
+        out["hot_names_last_hour"] = [{"name": r["key"], "launches": r["n"], "biggest_mcap_usd": r["lead_mc_usd"]}
+                                      for r in self.hot_names(60, 8)]
+        out["graduated_last_2h"] = [sym for ts, _, sym, _ in self.migrations if self.now - ts <= 7200][:12]
+        posts = getattr(self.xfeed, "posts", None) or {}
+        sym = (s.symbol or "").upper()
+        hits = [p for p in list(posts.values()) if s.mint in (p.get("mints") or ())
+                or (sym and sym in {c.upper() for c in (p.get("cashtags") or ())})]
+        out["x_posts_naming_it"] = [{"by": "@" + str((p.get("author") or {}).get("handle", "")),
+                                     "followers": (p.get("author") or {}).get("followers"), "likes": p.get("likes"),
+                                     "minutes_ago": round((self.now - float(p.get("ts") or 0)) / 60),
+                                     "text": " ".join(str(p.get("text") or "").split())[:200]}
+                                    for p in sorted(hits, key=lambda p: -float(p.get("ts") or 0))[:3]]
+        return out
 
     FEATS = ("age_s", "curve_progress_pct", "market_cap_sol", "unique_buyers", "buys", "sells", "buys_last_20s",
              "sells_last_20s", "net_flow_sol_20s", "dev_initial_buy_pct", "dev_sold", "bundle_pct", "early_buyers_sold_ratio",

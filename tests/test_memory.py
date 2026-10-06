@@ -86,7 +86,7 @@ def test_the_operator_and_the_desk_read_it():
     class Desk:
         enabled, client, calls = True, object(), 0
 
-        async def review(self, snap):
+        async def review(self, snap, only=None):
             seen.append(snap)
             return aggregate([Vote("veteran", "pass", 10)], {}, 0.45, 75)
 

@@ -129,6 +129,61 @@ async def fetch_x(user: str, status_id: str) -> tuple[str, str, str]:
     return f"{author}: {' '.join(text.split())[:80]}", text, author
 
 
+X_LINK = re.compile(r"^https?://(?:www\.|mobile\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})(?:/status(?:es)?/(\d{5,25}))?/?(?:[?#].*)?$")
+X_NOT_USERS = {"i", "home", "search", "intent", "explore", "hashtag", "share", "messages", "settings"}
+
+
+def parse_x_link(link: str) -> tuple[str, str, str]:
+    """A coin's twitter field: ("post", user, id), ("account", user, ""), ("community", "", "") or ("other", "", "")."""
+    link = (link or "").strip()
+    if "/i/communities/" in link:
+        return "community", "", ""
+    m = X_LINK.match(link)
+    if not m or m.group(1).lower() in X_NOT_USERS:
+        return "other", "", ""
+    return ("post", m.group(1), m.group(2)) if m.group(2) else ("account", m.group(1), "")
+
+
+def _year(joined: str) -> int | None:
+    try:
+        return int(str(joined).split()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+async def fetch_x_link(link: str) -> dict:
+    """What a coin's X link really is, through FxTwitter: the post (text, reach, when) or the account (followers,
+    bio, age). The narrative persona reads it; every text in it is written by strangers."""
+    import aiohttp
+
+    kind, user, sid = parse_x_link(link)
+    if kind in ("community", "other"):
+        return {"kind": "X community" if kind == "community" else "not an X post or account"}
+    url = f"https://api.fxtwitter.com/{user}/status/{sid}" if kind == "post" else f"https://api.fxtwitter.com/{user}"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+        async with s.get(url, headers={"User-Agent": "meme_trader-dashboard/1.0"}) as r:
+            if r.status == 404:
+                return {"kind": f"the linked {kind} doesn't exist (or is private)"}
+            if r.status != 200:
+                raise MemoryError_(f"FxTwitter answered HTTP {r.status}")
+            d = await r.json(content_type=None)
+    if kind == "account":
+        u = d.get("user") or {}
+        return {"kind": "account", "handle": f"@{u.get('screen_name', user)}", "followers": u.get("followers"),
+                "posts": u.get("tweets"), "since": _year(u.get("joined", "")),
+                "verified": bool((u.get("verification") or {}).get("verified")), "bio": str(u.get("description") or "")[:200]}
+    t = d.get("tweet") or {}
+    a = t.get("author") or {}
+    text = " ".join(str(t.get("text") or "").split())[:400]
+    q = t.get("quote") or {}
+    if q.get("text"):
+        text += f" (quoting @{(q.get('author') or {}).get('screen_name', '?')}: {' '.join(str(q['text']).split())[:200]})"
+    return {"kind": "post", "by": f"@{a.get('screen_name', user)}", "followers": a.get("followers"),
+            "account_since": _year(a.get("joined", "")), "verified": bool((a.get("verification") or {}).get("verified")),
+            "text": text, "views": t.get("views"), "likes": t.get("likes"), "reposts": t.get("retweets"),
+            "replies": t.get("replies"), "ts": t.get("created_timestamp")}
+
+
 class Memory:
     def __init__(self, path: Path | None):
         self.path = Path(path) if path else None

@@ -866,6 +866,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     web.get("/api/ui", ui_state)])
 
     async def _start_bg(_app):
+        engine.xfeed = xf                                  # the narrative persona reads posts naming a coin
         spawn(xf.run())
 
     async def _stop_bg(_app):
