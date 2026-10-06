@@ -36,8 +36,8 @@ KEYS: dict[str, tuple[str, str, str, str]] = {
                        "also sets the Solana RPC URL to Helius if that's empty.", "secret", "restart"),
     "PUMPPORTAL_API_KEY": ("PumpPortal API key", "Live trading through PumpPortal (paper trading doesn't need it).",
                            "secret", "restart"),
-    "TELEGRAM_BOT_TOKEN": ("Telegram bot token", "Phone alerts: create a bot with @BotFather.", "secret", "restart"),
-    "TELEGRAM_ALERT_CHAT_ID": ("Telegram chat id", "Where alerts go: your id from @userinfobot.", "plain", "restart"),
+    "TELEGRAM_BOT_TOKEN": ("Telegram bot token", "Phone alerts: create a bot with @BotFather.", "secret", "now"),
+    "TELEGRAM_ALERT_CHAT_ID": ("Telegram chat id", "Where alerts go: your id from @userinfobot.", "plain", "now"),
     "TELEGRAM_CHANNEL_ID": ("Telegram channel or group", "Where your posts and calls go: @yourchannel or a chat id. "
                             "Add the bot as an admin of the channel (or a member of the group).", "plain", "now"),
     "X_API_KEY": ("X API key", "Post to X as your own developer account: console.x.com → your app → Keys and tokens. "
