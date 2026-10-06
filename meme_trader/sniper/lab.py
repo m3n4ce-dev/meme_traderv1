@@ -32,6 +32,12 @@ AUTO_STEPS = {"late.min_net_flow_sol": 1.0, "late.min_buyers": 4, "late.min_buy_
 # (graduation-v1 fills instantly with 3% slippage; the owner's bot waits 2.5 s and its sells can fail and retry)
 EXECUTION = ("execution.paper_delay_s", "execution.paper_latency_slippage_pct", "execution.slippage_pct",
              "execution.sell_slippage_steps", "execution.urgent_sell_slippage_steps")
+# Rules are compared without the account's stops: a side halted by the daily loss limit or the kill switch partway
+# through a day just stops trading, which distorts the comparison (seen 2026-10-05: the baseline hit its 1 SOL limit at
+# 14:53 UTC on Oct 3 while a variant traded on all day). Size doesn't depend on the balance, so a big one only removes
+# "low SOL" blocks. The live bot keeps all of its stops.
+NO_STOPS = ["capital.starting_sol=100", "capital.daily_loss_limit_sol=1000000", "capital.max_drawdown_pct=100",
+            "risk_adapt.enabled=false"]
 BLOCK_S = 6 * 3600
 MAX_QUEUED = 6
 
@@ -205,6 +211,7 @@ def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1,
     pol = research.load_policy("graduation-v1")          # its rules and costs, unfrozen: a development copy
     pol.pop("frozen_at", None)
     base_sets = [f"{k}={json.dumps(v)}" for k, v in (x.get("baseline") or {}).items() if k in TESTABLE or k in EXECUTION]
+    base_sets += NO_STOPS
     # the last 24 hours of recordings (measured 2026-10-05: three days took over 30 minutes per pair of replays), and
     # only coins that got far enough up their curve for the graduation play to touch them
     files = files or research.feed_files()[-2:]
@@ -216,4 +223,5 @@ def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1,
                                 jobs=jobs)
     out = compare(res["now"]["trades"], res["change"]["trades"], span)
     out["files"] = [p.name for p in files]
+    out["account_stops"] = "off (rules compared on their own)"
     return out
