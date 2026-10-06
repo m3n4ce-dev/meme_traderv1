@@ -234,6 +234,7 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - **Min age** (`late.min_age_s`): skip coins younger than this many seconds.
 - **Two more it can test** (also off until a test supports them):
   - **Dev already sold** (`late.max_dev_sold_pct`): let a coin in when its creator has sold up to this % of the supply. At 0, any creator sale skips the coin. A held coin still sells if the creator sells again after the buy.
+  - **Bundled supply and early buyers dumped** (`entry.max_bundle_pct` 15, `entry.max_early_sold_ratio` 0.35): the red flags the graduation play shares with the early sniper. A change applies to both.
   - **Runner mode** (`late.runner_after_pct`, `late.runner_trail_pct`): once a play has been up this much, momentum decay and the stall stop stop selling it; a trailing stop this far under its peak does instead.
 
   Replays found graduation dumps were young coins with heavy buying and nobody selling.
