@@ -35,6 +35,12 @@ BLOCK_S = 6 * 3600
 MAX_QUEUED = 6
 
 
+def landed_like_bot(x: dict) -> bool:
+    """Was this test replayed with the bot's own order landing (delay, failed sells, retries)? Tests queued before
+    2026-10-05 13:00 filled instantly with 3% slippage: easier than what the bot faces, so their verdicts are weaker."""
+    return "execution.paper_delay_s" in (x.get("baseline") or {})
+
+
 class Lab:
     def __init__(self, path: Path | None):
         self.dir = Path(path) if path else None
@@ -89,7 +95,8 @@ class Lab:
 
     def auto_candidate(self, baseline: dict, now: float) -> tuple[str, float] | None:
         """The next one-step change nobody has tested lately (on this data)."""
-        recent = {(x["key"], x["value"]) for x in self.items if now - x["created"] < 2 * 86400}
+        # (a test judged with instant fills, before replays landed orders like the bot, doesn't count: it's tried again)
+        recent = {(x["key"], x["value"]) for x in self.items if now - x["created"] < 2 * 86400 and landed_like_bot(x)}
         options = []
         for key, step in AUTO_STEPS.items():
             cur = baseline.get(key)
@@ -109,8 +116,8 @@ class Lab:
         return sum(1 for x in self.items if x["status"] == "done")
 
     def view(self) -> dict:
-        return {"running": self.running(), "queued": self.queued(),
-                "done": [x for x in self.items if x["status"] in ("done", "failed")][-20:][::-1], "tries": self.tries()}
+        done = [{**x, "instant_fills": not landed_like_bot(x)} for x in self.items if x["status"] in ("done", "failed")][-20:][::-1]
+        return {"running": self.running(), "queued": self.queued(), "done": done, "tries": self.tries()}
 
 
 # ------------------------------------------------------------------ the run itself (a separate process)

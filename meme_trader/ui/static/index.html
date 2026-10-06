@@ -2381,7 +2381,7 @@ async function loadHQ() {
     ["The lab", true, `${d.lab.running ? "testing now" : "idle"} · ${d.lab.queued} queued · ${d.lab.tests} tests done`],
     ["Other chains", d.xchain ? (d.xchain.active && d.xchain.last_scan_s != null && d.xchain.last_scan_s < 600 ? true : null) : null,
      d.xchain ? `${d.xchain.active ? "paper, scanning" : "off"}${d.xchain.note ? " · " + esc(d.xchain.note) : ""} · ${d.xchain.open} open · today ${d.xchain.today.trades} trades ${usdS(d.xchain.today.pnl_usd)} · real-money checklist ${d.xchain.ready}${d.xchain.last_scan_s != null ? ` · scanned ${dur(d.xchain.last_scan_s)} ago` : ""}` : "–"],
-    ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
+    ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""}${d.desk.vote_s ? ` · votes take ${d.desk.vote_s.median} s (slowest 10%: ${d.desk.vote_s.p90} s, ${d.desk.vote_s.n} votes)` : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
     ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
     ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
   $("hq-body").innerHTML = `<div class="hq-svcs">${svc}</div><div class="hq-rows">${rows.map(([k, ok, v]) => `<div>${dot(ok)}<b>${k}</b><span class="note">${v}</span></div>`).join("")}</div>`;
@@ -5594,7 +5594,7 @@ function renderLab() {
     return `<tr><td>${labTest(x)}<div class="note">${esc(who(x.by))}${x.why ? " · " + esc(x.why.slice(0, 60)) : ""}</div></td>
       <td class="r num">${n.pnl_sol != null ? signed(n.pnl_sol) : "–"}<div class="note">${n.trades ?? "–"} trades</div></td>
       <td class="r num">${c.pnl_sol != null ? signed(c.pnl_sol) : "–"}<div class="note">${c.trades ?? "–"} trades</div></td>
-      <td class="r num">${r.blocks ? `${r.better_blocks} / ${r.blocks}` : "–"}</td><td>${x.status === "failed" ? `<span class="tag bad" title="${esc(r.error || "")}">failed</span>` : vtag(r.verdict)}</td></tr>`; }).join("");
+      <td class="r num">${r.blocks ? `${r.better_blocks} / ${r.blocks}` : "–"}</td><td>${x.status === "failed" ? `<span class="tag bad" title="${esc(r.error || "")}">failed</span>` : vtag(r.verdict)}${x.instant_fills ? ` <span class="note" title="Replayed with instant fills, before tests landed orders like your bot (2.5 s delay, failed sells, retries). The team re-tests these.">· old fill model</span>` : ""}</td></tr>`; }).join("");
   const opts = Object.keys(d.testable || {}).map(k => `<option value="${esc(k)}">${esc(labName(k))} (now ${d.baseline[k] ?? "?"})</option>`).join("");
   setHTML(box, `${run}${q ? `<div class="lab-qs">${q}</div>` : ""}
     ${rows ? `<div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">Now</th><th class="r">With the change</th><th class="r" title="6-hour blocks where the change made more">Blocks better</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>`

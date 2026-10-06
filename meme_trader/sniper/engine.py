@@ -183,6 +183,7 @@ class Engine:
         self._think: dict[str, tuple[str, str, float]] = {}       # mint -> (verdict, why, when said)
         self._last_think = 0.0
         self.desk_reviews: deque = deque(maxlen=20)
+        self.desk_vote_s: deque = deque(maxlen=200)     # how long each desk review took (wall clock), for the Desk and HQ
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
@@ -1022,10 +1023,13 @@ class Engine:
             extra = {**extra, "name_family": {"coins_sharing_name_or_ticker_6h": fam["n"], "is_first_launched": fam["og"],
                                               "launch_order": fam["rank"], "seconds_after_first": fam["after_og_s"],
                                               "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
+        t0 = time.time()
         try:
             v = await self.desk.review(snapshot_for(s, self.now, kind, extra))
         finally:
             self.reviewing.discard(s.mint)
+        if self.feed.realtime:
+            self.desk_vote_s.append(round(time.time() - t0, 2))
         s.desk = v.summary
         self.say("desk", f"{s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
         self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": kind,
@@ -1095,6 +1099,8 @@ class Engine:
         self.pending.add(s.mint)
         s.decided = "entered"
         meta = {"quote": s.curve.price, "decided": self.now, "slot": self.last_slot, "add": bool(add), "amm": bool(s.migrated)}
+        if not add and source != "callout":
+            meta["feat"] = self._entry_features(s, source)
         if self._paper_delay() > 0:                       # paper: lands later, at the price it lands at
             self._defer({"side": "buy", "mint": s.mint, "score": score, "sol": sol, "notes": list(notes),
                          "source": source, "leader": leader, "then": then, **meta})
@@ -1263,7 +1269,7 @@ class Engine:
             entry_quote=(meta or {}).get("quote", 0.0),
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
             failed_fees_sol=fill.fees_lost,
-            bot="ride" if source == "manual" and self.away else "")
+            bot="ride" if source == "manual" and self.away else "", feat=(meta or {}).get("feat"))
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
@@ -1479,6 +1485,7 @@ class Engine:
             "exit_vs_signal_pct": round((pos.exit_fill / pos.exit_quote - 1) * 100, 2) if pos.exit_quote else None,
             "entry_delay_s": pos.entry_delay_s, "exit_delay_s": pos.exit_delay_s,
             "failed_fees_sol": round(pos.failed_fees_sol, 6),
+            "feat": pos.feat,
         }
         self.record_close(row, pos.mint)
         if pos.leader:
@@ -1842,6 +1849,31 @@ class Engine:
             if self.entries_blocked():
                 break
 
+    FEATS = ("age_s", "curve_progress_pct", "market_cap_sol", "unique_buyers", "buys", "sells", "buys_last_20s",
+             "sells_last_20s", "net_flow_sol_20s", "dev_initial_buy_pct", "dev_sold", "bundle_pct", "early_buyers_sold_ratio",
+             "top10_holders_pct", "price_vs_peak")
+
+    def _entry_features(self, s: TokenState, source: str) -> dict | None:
+        """What the bot saw when it decided to buy, kept with the trade: the coins that dumped can later be told
+        apart from the ones that didn't (the desk's own view, plus flow over the graduation play's window)."""
+        try:
+            from .desk import snapshot_for
+            d = snapshot_for(s, self.now, "late" if source == "late" else "sniper", {})
+            f = {k: d.get(k) for k in self.FEATS}
+            t = d.get("token") or {}
+            w = float(self.p.late.flow_window_s)
+            f.update(links=sum(bool(t.get(k)) for k in ("twitter", "telegram", "website")),
+                     net_flow_sol_window=round(s.net_flow_sol(self.now, w), 3), buyers_window=s.buyers_in(self.now, w),
+                     net_flow_sol_60s=round(s.net_flow_sol(self.now, 60), 3), buyers_60s=s.buyers_in(self.now, 60),
+                     secs_since_high=round(self.now - s.last_high_ts(), 1) if s.last_high_ts() else None,
+                     creator_launches=len(self.creators.get(s.creator, ())))
+            fam = self.family(s.mint)
+            f["family"] = ("og" if fam.get("og") else "copy") if fam else "alone"
+            f["family_n"] = fam.get("n", 1) if fam else 1
+            return f
+        except Exception:                                # research data must never stop a trade
+            return None
+
     def _late_red(self, s: TokenState) -> dict:
         en = self.p.entry
         return {"max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
@@ -1896,6 +1928,13 @@ class Engine:
         view.sort(key=lambda r: (order.get(r["verdict"], 9), -r["readiness"], -r["progress"]))
         self.late_view = view
 
+    def vote_speed(self) -> dict | None:
+        """How long the desk's reviews take: median and slowest 10%, over the last 200."""
+        v = sorted(self.desk_vote_s)
+        if not v:
+            return None
+        return {"n": len(v), "median": v[len(v) // 2], "p90": v[min(len(v) - 1, int(len(v) * 0.9))]}
+
     def desk_view(self) -> dict:
         """Everything the Desk tab shows that lives in the engine."""
         L, x = self.p.late, self.p.exit
@@ -1932,6 +1971,7 @@ class Engine:
                 "desk": {"enabled": bool(d and d.enabled), "configured": bool(self.p.desk.enabled), "brain": self.desk_brain(),
                          "personas": list(self.p.desk.personas), "model": self.p.desk.model,
                          "calls": d.calls if d else 0, "cost_usd": round(d.cost_usd(), 4) if d else 0.0,
+                         "vote_s": self.vote_speed(),
                          "error": self.desk_error, "failures": self.desk_failures,
                          "reviews": list(self.desk_reviews)[::-1]},
                 "risk": self.risk_info(), "day_pnl": self.book.day_pnl,
@@ -3102,13 +3142,14 @@ class Engine:
 
     def lab_brief(self) -> dict:
         """What the team reads about its lab at a meeting."""
-        from .lab import TESTABLE
+        from .lab import TESTABLE, landed_like_bot
         def row(x):
             r = x.get("result") or {}
             return {"test": f"{x['key']}: {x['now']} -> {x['value']}", "by": x["by"], "why": x.get("why", "")[:120], "status": x["status"],
                     "verdict": r.get("verdict"), "now": r.get("now"), "change": r.get("change"),
                     "blocks_better_of": f"{r.get('better_blocks')} of {r.get('blocks')}" if r.get("blocks") else None,
-                    "error": r.get("error")}
+                    "error": r.get("error"),
+                    "caveat": None if landed_like_bot(x) else "judged with instant fills (before replays landed orders like the bot): weaker"}
         v = self.xlab.view()
         return {"testable": {k: f"{lo:g}-{hi:g}" for k, (lo, hi) in TESTABLE.items()}, "current": self.lab_baseline(),
                 "tries": v["tries"], "running": row(v["running"]) if v["running"] else None,
