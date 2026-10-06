@@ -174,3 +174,58 @@ def test_the_exit_lab_tries_a_curve_ladder_on_sniper_entries():
         s.curve = Curve(30.0 * INITIAL_V_TOKENS / vt, vt)
         e.lab.tick(e.tokens, e.now + 1, e.p)
     assert sh["rung"] == 3 and abs(sh["pos"].tokens / sh["pos"].initial_tokens - .25) < 1e-6 and sh["proceeds"] > 0
+
+
+def _settle(coro):
+    async def go():
+        await coro
+        for _ in range(5):
+            await asyncio.sleep(0)
+    asyncio.run(go())
+
+
+def test_the_team_practices_while_the_kill_switch_is_on(monkeypatch):
+    e = engine()
+    e.book.halted = "drawdown 50%"
+    e.desk = FakeDesk(True, votes(("veteran", "buy"), ("quant", "pass")))
+    monkeypatch.setattr("meme_trader.sniper.engine.evaluate_late_entry", lambda *a: (True, "late play"))
+    s = TokenState("H" * 40 + "pump", None, e.now)
+    s.price_known, s.decided = True, "watching"
+    e.tokens[s.mint] = s
+    _settle(e._maybe_late())
+    assert not e.positions and not e.pending and e._calls_open[s.mint]["mode"] == "practice"
+    assert e.lab.open[s.mint][0]["kind"] == "practice-buy" and not e.practicing and not e.reviewing
+
+
+def test_the_sniper_practices_when_stopped_or_off_and_never_buys(monkeypatch):
+    e = engine()
+    e.desk = FakeDesk(False, votes(("veteran", "pass"), ("skeptic", "pass")))
+    monkeypatch.setattr("meme_trader.sniper.engine.evaluate_entry", lambda *a: NS(action="enter", score=70.0, notes=["ok"]))
+
+    async def no_gate(s):
+        return ""
+    monkeypatch.setattr(e, "_funding_gate", no_gate)
+    for i, (how, off) in enumerate([("halted", False), ("sniper off", True)]):
+        e.book.halted, e.p.entry["enabled"] = ("drawdown 50%" if how == "halted" else ""), not off
+        s = TokenState(chr(65 + i) * 40 + "pump", None, e.now)
+        s.price_known = True
+        e.tokens[s.mint] = s
+        _settle(e._check_entry(s))
+        assert s.decided.startswith("practice vote (") and how in s.decided
+        c = e._calls_open[s.mint]
+        assert (c["mode"], c["strategy"], c["approve"]) == ("practice", "sniper", False)
+        assert e.lab.open[s.mint][0]["kind"] == "sniper-pass"
+    assert not e.positions and not e.pending and e.stats.get("skipped_sniper_off", 0) == 0
+    assert e.desk_reviews[-1]["kind"] == "sniper practice"
+
+
+def test_no_practice_for_a_moments_block_and_practice_takes_no_seat(monkeypatch):
+    e = engine()
+    e.desk = FakeDesk(True, votes(("veteran", "buy")))
+    assert not e._practicing("max positions") and not e._practicing("no trades for 90s - entries paused")
+    assert e._practicing("halted: drawdown 50%") and e._practicing("daily loss limit")
+    e.p.capital["max_open_positions"] = 1
+    e.reviewing.add("X"), e.practicing.add("X")
+    assert e.entries_blocked() == ""                                    # a practice vote isn't a seat
+    e.practicing.clear()
+    assert e.entries_blocked() == "max positions"
