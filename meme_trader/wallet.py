@@ -47,6 +47,24 @@ class Wallet:
         signed = VersionedTransaction(unsigned.message, [self._kp])
         return base64.b64encode(bytes(signed)).decode(), str(signed.signatures[0])
 
+    @staticmethod
+    def blockhash_of(raw_b64: str) -> str:
+        """The recent blockhash a signed transaction carries: once the chain no longer accepts it, the transaction
+        can't land anymore."""
+        from solders.transaction import VersionedTransaction
+
+        return str(VersionedTransaction.from_bytes(base64.b64decode(raw_b64)).message.recent_blockhash)
+
+    @staticmethod
+    def signature_status(signature: str) -> dict | None:
+        """The chain's record of a signature, searching its whole history (not just recent statuses). None = it
+        never landed (so far)."""
+        return rpc("getSignatureStatuses", [[signature], {"searchTransactionHistory": True}])["value"][0]
+
+    @staticmethod
+    def blockhash_valid(blockhash: str) -> bool:
+        return bool(rpc("isBlockhashValid", [blockhash, {"commitment": "processed"}])["value"])
+
     def send(self, raw_b64: str) -> str:
         return rpc("sendTransaction", [raw_b64, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}])
 

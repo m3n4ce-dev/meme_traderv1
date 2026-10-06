@@ -45,7 +45,7 @@ from .tracker import TokenState
 RIDE_DEFAULTS = {"take_x": 2.0, "take_frac": 0.5, "trail_pct": 30.0, "trail_arm_pct": 30.0, "stop_pct": 40.0}
 DUST_SOL = 0.0005
 TOKEN_ACCOUNT_RENT = 0.00203928       # refundable SOL locked in each new token account (live)
-UNRESOLVED_EXPIRY_S = 150             # a Solana tx can't land once its blockhash expires (~60-90 s)
+UNRESOLVED_ALERT_S = 600              # an order still unknown this long: tell the owner (nothing is released without proof)
 CASH_TOLERANCE_SOL = 0.002            # ledger vs wallet SOL difference that's still just rounding/timing
 
 
@@ -458,7 +458,11 @@ class Engine:
               for x in s.socials]
         return {"creator_launches": len(self.creators.get(s.creator, ())),
                 "symbol_dupes": max(len(self.symbols.get(s.symbol.upper(), ())) - 1, 0),
-                "social_weight": max(ws) if ws else 0.0}
+                "social_weight": max(ws) if ws else 0.0, "skip_mayhem": self._skip_mayhem()}
+
+    def _skip_mayhem(self) -> bool:
+        """market.skip_mayhem (the owner, 2026-10-06): the bots stay out of Mayhem-mode coins."""
+        return bool((self.p.get("market") or {}).get("skip_mayhem", True))
 
     @staticmethod
     def _mtime(path: Path) -> float:
@@ -810,6 +814,8 @@ class Engine:
             return blocked
         if e.pool != "pump":
             return f"not on bonding curve ({e.pool})"
+        if s.mayhem and self._skip_mayhem():
+            return "Mayhem mode"
         if e.sol < c.min_leader_buy_sol:
             return f"leader buy {e.sol:.2f} < {c.min_leader_buy_sol} SOL"
         if self.leaders.copies_last_hour(e.trader, self.now) >= c.max_copies_per_leader_per_hour:
@@ -1229,7 +1235,8 @@ class Engine:
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
                                                     "add": bool((meta or {}).get("add")),
-                                                    "notes": list(notes), "source": source, "leader": leader})
+                                                    "notes": list(notes), "source": source, "leader": leader},
+                                   fill.blockhash)
             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
                               "its cash stays reserved until the chain says", s.mint)
             return
@@ -1396,6 +1403,9 @@ class Engine:
         pos.peak_price = max(pos.peak_price, px)
         pos.trough_price = min(pos.trough_price or px, px)
         rules = "ride" if pos.source == "manual" and pos.bot else pos.source    # handed over: the bots ride it
+        if s.mayhem and pos.source not in ("manual", "callout") and self._skip_mayhem():
+            await self._sell(s, pos, 1.0, "Mayhem mode (the bots stay out)")
+            return
         if rules == "ride":
             if not pos.handed_price:                   # handed over before these rules existed
                 pos.handed_price = pos.handed_peak = px
@@ -1408,8 +1418,6 @@ class Engine:
                                               "dev": bool(mc.sell_on_dev_sell),
                                               "sell_on_graduation": mc.sell_on_graduation and self.mode.startswith("live"),
                                               **(pos.manual or {})})
-            if r and r[1].startswith("manual take profit"):
-                pos.manual = {**(pos.manual or {}), "tp_done": True}      # once per position
         elif rules == "callout":              # hold the $1 callout bag; never trade it against followers
             held = self.now - pos.opened_at
             r = (1.0, "dev sold") if s.dev_sold else \
@@ -1454,7 +1462,8 @@ class Engine:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
             self._book_fees_lost(fill, s)
-            self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason})
+            self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason},
+                                   fill.blockhash)
             self.say("error", f"sell {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - no new "
                               "sell until the chain says", s.mint)
             return
@@ -1484,6 +1493,10 @@ class Engine:
             pos.exit_quote, pos.exit_fill = meta["quote"], fill.sol / sold
             pos.exit_delay_s = round(self.now - meta.get("decided", self.now), 3)
         self.book.day_pnl += fill.sol - cost_part
+        if reason.startswith("manual take profit"):         # spent only by a sell that filled (a failed one retries)
+            pos.manual = {**(pos.manual or {}), "tp_done": True}
+        elif reason.startswith("bots: ") and " out at " in reason:
+            pos.ride_tp = True
         if reason.startswith("initials"):
             pos.initials_taken = True
         elif reason.startswith("ladder ") and "x sell" in reason:
@@ -1495,13 +1508,14 @@ class Engine:
             self._close(pos, s)
         self.save_state()
 
-    def _track_unresolved(self, sig: str, order: dict) -> None:
-        self.unresolved[sig] = {**order, "sent_at": time.time()}
+    def _track_unresolved(self, sig: str, order: dict, blockhash: str = "") -> None:
+        self.unresolved[sig] = {**order, "sent_at": time.time(), "blockhash": blockhash}
         self.save_state()
 
     async def _resolve_unresolved(self) -> None:
         """Ask the chain about orders whose outcome was unknown. Landed: book them (a late buy becomes a
-        managed position). Still unknown after the blockhash must have expired: it never landed."""
+        managed position). It counts as never landed only with proof (the executor's `expired`): an RPC error or a
+        missing record keeps it unresolved, its cash reserved and its coin's sells paused, and the owner is told."""
         resolve = getattr(self.ex, "resolve", None)
         if resolve is None or self._resolving:
             return
@@ -1514,11 +1528,18 @@ class Engine:
     async def _resolve_each(self, resolve) -> None:
         for sig, o in list(self.unresolved.items()):
             mint = o["mint"]
+            age = time.time() - o["sent_at"]
             try:
-                fill = await resolve(sig, mint, o["side"])
+                fill = await resolve(sig, mint, o["side"], blockhash=o.get("blockhash", ""), age_s=age)
             except Exception:
                 continue
-            if fill.unknown and time.time() - o["sent_at"] < UNRESOLVED_EXPIRY_S:
+            if fill.unknown and not fill.expired:
+                if age >= UNRESOLVED_ALERT_S and not o.get("alerted"):
+                    o["alerted"] = True
+                    self.say("error", f"{o['side']} {sig[:8]}… still unknown after {age / 60:.0f} min ({fill.error}): "
+                                      f"{'its cash stays reserved' if o['side'] == 'buy' else 'no new sell for this coin'} "
+                                      "until the chain says - check the wallet", mint)
+                    self.save_state()
                 continue
             del self.unresolved[sig]
             s = self.tokens.get(mint) or self.tokens.setdefault(mint, TokenState(mint, None, self.now))
@@ -1964,7 +1985,7 @@ class Engine:
                 "max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
                 "creator_launches": len(self.creators.get(s.creator, ())),
                 "max_creator_launches_24h": en.max_creator_launches_24h,
-                "max_cluster_pct": en.funding.max_cluster_pct})
+                "max_cluster_pct": en.funding.max_cluster_pct, "skip_mayhem": self._skip_mayhem()})
             if not ok:
                 if why in SKIP_FOR_GOOD:                   # it qualified but looks like the dump profile: never this coin
                     s.late_tried = True
@@ -2002,6 +2023,8 @@ class Engine:
                 i += 1                                   # one look per checkpoint passed
             self._pick_cp[s.mint] = i
             if not s.price_known or len(s.buyers) < 3 or s.migrated:      # as in training (build_dataset)
+                continue
+            if s.mayhem and self._skip_mayhem():                          # the bots won't trade these
                 continue
             p = m.predict(extract(s, self.now, self._ctx(s)))
             if p >= min_p:
@@ -2211,7 +2234,8 @@ class Engine:
         en = self.p.entry
         return {"max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
                 "creator_launches": len(self.creators.get(s.creator, ())),
-                "max_creator_launches_24h": en.max_creator_launches_24h, "max_cluster_pct": en.funding.max_cluster_pct}
+                "max_creator_launches_24h": en.max_creator_launches_24h, "max_cluster_pct": en.funding.max_cluster_pct,
+                "skip_mayhem": self._skip_mayhem()}
 
     def think(self, agent: str, text: str, mint: str = "", symbol: str = "", mood: str = "info") -> None:
         self.thoughts.append({"ts": self.now, "agent": agent, "text": text, "mint": mint, "symbol": symbol,

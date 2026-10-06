@@ -197,7 +197,7 @@ def test_dump_profile_filters_skip_young_and_one_sided_entries():
 def test_a_coin_matching_the_dump_profile_is_passed_over_for_good():
     """Waiting for a first sell / an older coin tested worse (replays, 2026-10-05): it's skipped once, for good."""
     from meme_trader.sniper.strategy import SKIP_FOR_GOOD
-    assert set(SKIP_FOR_GOOD) == {"too young", "one-sided buying"}
+    assert set(SKIP_FOR_GOOD) == {"too young", "one-sided buying", "Mayhem mode"}
     e = market(launches=40)
     e.p.late.update(enabled=True, min_curve_pct=0, max_curve_pct=100, max_age_s=10**9, min_net_flow_sol=-1e9, min_buyers=0,
                     min_buy_sell_ratio=0, min_near_high=0, min_recent_sells=10**6)

@@ -50,6 +50,8 @@ def evaluate_entry(s: TokenState, now: float, p, ctx: dict) -> EntryDecision:
         fails.append(f"copycat ticker ({ctx['symbol_dupes']} same symbol/1h)")
     if prog > p.max_curve_progress_pct:
         fails.append(f"curve {prog:.0f}% > {p.max_curve_progress_pct}% (too late)")
+    if ctx.get("skip_mayhem") and s.mayhem:
+        fails.append("Mayhem mode")
     if fails:
         return EntryDecision("reject", 0.0, fails)
 
@@ -257,7 +259,7 @@ def gate_checklist(s: TokenState, now: float, p, ctx: dict) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- graduation play
-SKIP_FOR_GOOD = ("too young", "one-sided buying")   # graduation rejections that end the coin's chance
+SKIP_FOR_GOOD = ("too young", "one-sided buying", "Mayhem mode")   # graduation rejections that end the coin's chance
 
 
 def late_dev_ok(s: TokenState, L) -> bool:
@@ -274,6 +276,8 @@ def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, 
     prog = s.curve.progress * 100
     if s.migrated or not (L.min_curve_pct <= prog <= L.max_curve_pct) or s.age(now) > L.max_age_s:
         return False, "window"
+    if red.get("skip_mayhem") and s.mayhem:
+        return False, "Mayhem mode"
     if not late_dev_ok(s, L) or s.bundle_pct() > red["max_bundle_pct"] or s.early_sold_ratio() > red["max_early_sold_ratio"]:
         return False, "red flag"
     if red["creator_launches"] > red["max_creator_launches_24h"]:
@@ -349,8 +353,7 @@ def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
         return 1.0, "manual: the creator sold"
     if m.get("sl") and gain <= -m["sl"]:
         return 1.0, f"manual stop {gain:.0f}%"
-    if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:
-        m["tp_done"] = True
+    if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:   # spent once a sell fills (Engine._apply_sell)
         return min(max(float(m.get("tp_frac") or 0.5), 0.05), 1.0), f"manual take profit {gain:+.0f}%"
     if m.get("trail") and gain > 0 and pos.peak_price and price <= pos.peak_price * (1 - m["trail"] / 100):
         return 1.0, f"manual trail -{m['trail']:.0f}% off peak"
@@ -371,8 +374,7 @@ def evaluate_ride_exit(pos: SniperPosition, s: TokenState, r: dict, live: bool =
         return 1.0, "bots: graduated (live sells at graduation)"
     if price <= min(pos.entry_price, handed) * (1 - r["stop_pct"] / 100):
         return 1.0, f"bots: stop {pos.gain_pct(price):.0f}%"
-    if not pos.ride_tp and r.get("take_x") and price >= pos.entry_price * r["take_x"]:
-        pos.ride_tp = True
+    if not pos.ride_tp and r.get("take_x") and price >= pos.entry_price * r["take_x"]:   # spent once a sell fills
         frac = min(max(float(r.get("take_frac") or 0.5), 0.05), 1.0)
         return frac, f"bots: {frac:.0%} out at {r['take_x']:g}x"
     armed = pos.ride_tp or pos.handed_peak >= handed * (1 + r["trail_arm_pct"] / 100)
