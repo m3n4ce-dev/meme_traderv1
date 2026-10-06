@@ -107,7 +107,7 @@ def test_practice_with_the_graduation_play_off_scores_every_call(monkeypatch):
     e.lab._close(e.lab.open[s.mint][0], s.curve.price * 1.2, e.now + 60, "graduation exit")
     c = e.desk_calls[-1]
     assert c["mode"] == "practice" and c["approve"] and c["pnl_pct"] > 15 and s.mint not in e._calls_open
-    assert e.desk_scorecard()["personas"]["skeptic"]["pass"]["n"] == 1
+    assert e.desk_scorecard()["late"]["personas"]["skeptic"]["pass"]["n"] == 1 and e.desk_scorecard()["sniper"]["calls"] == 0
     e.p.desk["practice"] = False                                          # the switch
     assert not e._practicing()
 
@@ -138,3 +138,24 @@ def test_a_side_vote_when_the_rules_decide_graduation_buys(monkeypatch):
     asyncio.run(go())
     assert s.mint in e.pending or s.mint in e.positions                   # bought on the rules, though the team passed
     assert e._calls_open[s.mint]["mode"] == "shadow" and not e._calls_open[s.mint]["approve"]
+
+
+def test_sniper_votes_are_scored_apart_from_graduation_votes(monkeypatch):
+    from meme_trader.sniper import desk as deskmod
+    e = engine()
+    e.desk = FakeDesk(False, votes(("veteran", "pass"), ("quant", "buy")))
+    monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
+    s = TokenState("N" * 40 + "pump", None, e.now)
+    s.price_known = True
+    e.tokens[s.mint] = s
+    asyncio.run(e._desk_then_buy(s, "sniper", 60, 0.1, [], "sniper", "", 0.0))
+    assert e._calls_open[s.mint]["strategy"] == "sniper" and e.lab.open[s.mint][0]["kind"] == "sniper-pass"
+    sh = e.lab.open[s.mint][0]
+    e.lab._close(sh, s.curve.price * .5, e.now + 30, "stop")
+    sc = e.desk_scorecard()
+    assert sc["sniper"]["pass"]["n"] == 1 and sc["late"]["calls"] == 0
+    assert e.lab.view("sniper")["entries"] == 0                         # a vote's follow isn't a sniper trade
+    e.desk_calls += [{"symbol": f"C{i}", "approve": True, "pnl_pct": 5.0, "mode": "live", "strategy": "late",
+                      "votes": [["quant", "buy", 58, "late reason"]]} for i in range(9)]
+    assert dr.persona_record(e.desk_calls, "quant", strategy="sniper") is None      # 1 sniper call: too few
+    assert dr.persona_record(e.desk_calls, "quant", strategy="late")["when_you_said_buy"]["n"] == 9

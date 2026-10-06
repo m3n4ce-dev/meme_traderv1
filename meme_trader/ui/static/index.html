@@ -847,7 +847,8 @@ a.btn.small { padding: 2px 10px; font-size: 12px; } a.btn.primary { background: 
 .lc-views:empty { display: none; } .lc-view { border: 1px solid var(--ring); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lc-view.wide { grid-column: 1 / -1; } .lc-views { align-items: start; } .lc-view td svg { width: 90px; height: 24px; display: block; } .lc-view table { width: 100%; } .lc-view .lc-h { margin-bottom: 6px; }
 .kt-tape { display: grid; gap: 3px; margin-top: 8px; max-height: 260px; overflow: auto; font-size: 13px; } .kt-row { padding: 2px 4px; border-radius: 6px; }
-.kt-row:hover { background: var(--surface-2); } .lv-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; } .lv-chips .spacer { flex: 1; } .kt-kol { color: #f472b6; } .kt-smart { color: #f59e0b; }
+.kt-row:hover { background: var(--surface-2); } .kt-h { margin: 12px 0 4px; } .kt-who { font-size: 12.5px; }
+.kt-in { color: var(--good-mark, #16a34a); white-space: nowrap; } .kt-out { color: var(--muted); white-space: nowrap; } .lv-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; } .lv-chips .spacer { flex: 1; } .kt-kol { color: #f472b6; } .kt-smart { color: #f59e0b; }
 .lc-card.you { border-color: #22d3ee66; } .lc-card.pin { border-style: dashed; } .lc-card canvas { width: 100%; display: block; margin-top: 6px; }
 .lc-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; } .lc-h .spacer { flex: 1; } .lc-g { font-weight: 700; font-size: 15px; }
 .lc-legend { display: inline-flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 4px; }
@@ -1312,7 +1313,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <section class="panel" id="wallet-study"><h2>Wallet study <small>wallets-v1: do wallets that were early on several runners, buying together, make money?</small></h2>
       <div id="an-wallets"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="team-rec"><h2>The AI team's record <small>what its calls did next, on the bot's own exits</small></h2>
-      <div id="an-team"></div></section>
+      <div class="seg" id="team-kind" role="group" aria-label="Which strategy"><button data-teamkind="late" aria-pressed="true">Graduation plays</button><button data-teamkind="sniper" aria-pressed="false">Sniper</button></div>
+      <div id="an-team" style="margin-top:10px"></div></section>
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
@@ -2112,6 +2114,7 @@ function tickChart(cv, c, o = {}) {
 // ---------------------------------------------------------------- Charts tab: optional views (remembered here)
 const LV = {on: new Set((() => { try { const v = store.get("lc-views"); return v == null ? ["grad", "pulse"] : JSON.parse(v); } catch { return ["grad", "pulse"]; } })()), data: {}, timer: 0, keys: {}};   // (first visit: two views, not an empty page)
 const VIEWS = [["kol", "👑 KOL tracker"], ["chains", "🌐 Other chains"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
+LV.kolMin = +store.get("lv-kolmin") || 60; LV.kolWallet = null;
 LV.chain = store.get("lv-chain") || "all"; LV.chainKind = store.get("lv-chainkind") || "trending"; LV.fresh = store.get("lv-fresh") !== "0";
 const ageShort = s => s == null ? "–" : s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 172800 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
 function renderViewBar() {
@@ -2123,7 +2126,7 @@ async function loadViews() {
   if (S.tab !== "charts") return;
   if (!document.hidden) {
     const get = async u => { try { const r = await fetch(u, {cache: "no-store"}); return r.ok ? await r.json() : null; } catch { return null; } };
-    if (LV.on.has("kol")) LV.data.kol = await get("/api/kols") || LV.data.kol;
+    if (LV.on.has("kol")) LV.data.kol = await get("/api/kols?minutes=" + (LV.kolMin || 60)) || LV.data.kol;
     if (LV.on.has("hot")) LV.data.hot = ((await get("/api/hot")) || {}).names || LV.data.hot;
     if (LV.on.has("grad")) LV.data.grad = ((await get("/api/desk")) || {}).late || LV.data.grad;
     if (LV.on.has("chains") && Date.now() - (LV.chainsAt || 0) > (LV.data.chains && LV.data.chains.loading ? 4000 : 30000)) { LV.chainsAt = Date.now(); LV.data.chains = await get("/api/chains") || LV.data.chains; }
@@ -2135,20 +2138,34 @@ function viewBody(k) {
   const s = snap || {};
   if (k === "kol") {
     const d = LV.data.kol; if (!d) return `<div class="empty">Loading…</div>`;
-    const coins = (d.coins || []).slice(0, 8).map(c => { const ch = c.first_mc && c.mc_now ? (c.mc_now / c.first_mc - 1) * 100 : null;
-      return `<tr class="click" data-open="${esc(c.mint)}"><td>${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b> ${famBadge(c.fam)}</td>
-        <td title="${esc(c.names.join(", "))}">${esc(c.names.slice(0, 2).join(", "))}${c.names.length > 2 ? ` +${c.names.length - 2}` : ""}</td>
+    const win = LV.kolMin || 60, wl = {15: "15 min", 60: "1 h", 240: "4 h", 1440: "24 h"};
+    const chips = `<div class="lv-chips">${[15, 60, 240, 1440].map(m => `<button class="small ${m === win ? "primary" : "ghost"}" data-lvkol="${m}">${wl[m]}</button>`).join("")}<span class="spacer"></span>
+      <span class="note">${d.active} wallet${d.active === 1 ? "" : "s"} active${d.median_hold_s != null ? ` · median hold ${dur(d.median_hold_s)}` : ""}${d.kols_loaded ? ` · ${d.kols_loaded} KOLs on the list` : ` · <b>no KOL list yet</b>: 👑 Refresh KOL list (above)`}</span></div>`;
+    const who = c => [...(c.still_in || []).map(n => `<span class="kt-in" title="still in">●&nbsp;${esc(n)}</span>`), ...(c.sold_out || []).map(n => `<span class="kt-out" title="sold out">○&nbsp;${esc(n)}</span>`)]
+      .slice(0, 4).join(" ") + (c.names.length > 4 ? ` <span class="note">+${c.names.length - 4}</span>` : "");
+    const coins = (d.coins || []).slice(0, 12).map(c => { const base = c.avg_entry_mc || c.first_mc, ch = base && c.mc_now ? (c.mc_now / base - 1) * 100 : null;
+      return `<tr class="click" data-open="${esc(c.mint)}"><td>${logo(c.mint, c.symbol)}<b>${esc(c.symbol)}</b> ${famBadge(c.fam)}${c.migrated ? ' <span class="pf good">graduated</span>' : ""}</td>
+        <td class="kt-who">${who(c)}</td>
         <td class="r num"><span class="up">${c.buys}</span>/<span class="down">${c.sells}</span></td><td class="r num ${cls(c.net_sol)}">${c.net_sol > 0 ? "+" : ""}${fx(c.net_sol, 2)}</td>
-        <td class="r num">${mcUsd(c.first_mc)} → ${mcUsd(c.mc_now)}${ch != null ? ` <span class="${cls(ch)}">${pct(ch, 0)}</span>` : ""}${c.migrated ? ' <span class="pf good">graduated</span>' : ""}</td>
+        <td class="r num" title="their buys' average market cap (SOL-weighted) → now">${mcUsd(base)} → ${c.mc_now != null ? mcUsd(c.mc_now) + (c.mc_stale ? '<span class="note" title="last seen: no longer tracked">*</span>' : "") : "–"}</td>
+        <td class="r num ${ch == null ? "" : cls(ch)}">${ch == null ? "–" : pct(ch, 0)}</td>
         <td><button class="small ghost" data-lcpin="${esc(c.mint)}" title="Pin its chart">📈</button></td></tr>`; }).join("");
-    const tape = (d.tape || []).slice(0, 18).map(x => `<div class="kt-row click" data-open="${esc(x.mint)}"><span class="note">${ago(x.t)}</span>
+    const board = (d.kols || []).slice(0, 12).map(b => `<tr class="click${LV.kolWallet === b.wallet ? " sel" : ""}" data-lvkolw="${esc(b.wallet)}" title="${LV.kolWallet === b.wallet ? "Show everyone" : `Show ${esc(b.name)}'s trades`}">
+      <td><b class="${b.kind === "kol" ? "kt-kol" : "kt-smart"}">${esc(b.name)}</b></td><td class="r num">${b.trades}</td><td class="r num">${b.coins}</td>
+      <td class="r num">${fx(b.in_sol, 2)}</td><td class="r num">${fx(b.out_sol, 2)}</td><td class="r num">${b.trips ? `${b.trips_won}/${b.trips}` : "–"}</td>
+      <td class="r num ${b.trip_avg_pct == null ? "" : cls(b.trip_avg_pct)}">${b.trip_avg_pct == null ? "–" : pct(b.trip_avg_pct, 0)}</td>
+      <td class="r num">${b.median_hold_s != null ? dur(b.median_hold_s) : "–"}</td><td class="r note">${ago(b.last_t)}</td></tr>`).join("");
+    const sel = LV.kolWallet && (d.kols || []).find(b => b.wallet === LV.kolWallet);
+    const tape = (d.tape || []).filter(x => !LV.kolWallet || x.wallet === LV.kolWallet).slice(0, LV.kolWallet ? 60 : 18).map(x => `<div class="kt-row click" data-open="${esc(x.mint)}"><span class="note">${ago(x.t)}</span>
       <b class="${x.kind === "kol" ? "kt-kol" : "kt-smart"}">${esc(x.name)}</b> <span class="${x.side === "buy" ? "up" : "down"}">${x.side === "buy" ? "▲ bought" : "▼ sold"} ${fx(x.sol, 2)} SOL</span>
       of <b>${esc(x.symbol)}</b> at ${mcUsd(x.mc)} MC${x.held_s != null ? ` <span class="note">after ${dur(x.held_s)}</span>` : ""}</div>`).join("");
-    return `<div class="note">${d.active} known wallet${d.active === 1 ? "" : "s"} active in the last hour${d.median_hold_s != null ? ` · median hold ${dur(d.median_hold_s)}` : ""}
-        ${d.kols_loaded ? ` · ${d.kols_loaded} KOLs on the list` : ` · <b>no KOL list yet</b>: 👑 Refresh KOL list (above) loads it; the wallet study's wallets show either way`}</div>
-      ${coins ? `<div class="tablewrap"><table><thead><tr><th>Coin they're in</th><th>Who</th><th class="r">Buys/sells</th><th class="r">Net SOL</th><th class="r">MC first buy → now</th><th></th></tr></thead><tbody>${coins}</tbody></table></div>` : `<div class="empty">No KOL or study-wallet trades in the last hour.</div>`}
+    return `${chips}
+      ${coins ? `<h5 class="kt-h">Coins they're in</h5><div class="tablewrap"><table><thead><tr><th>Coin</th><th>Who <span class="note">● in ○ out</span></th><th class="r">Buys/sells</th><th class="r">Net SOL</th><th class="r">Their entry → now</th><th class="r">Since</th><th></th></tr></thead><tbody>${coins}</tbody></table></div>`
+        : `<div class="empty">No KOL or study-wallet trades in the last ${wl[win] || win + " min"}.</div>`}
+      ${board ? `<h5 class="kt-h">Scoreboard <span class="note">click a wallet for its trades · a round trip = a coin they bought and sold in this window</span></h5><div class="tablewrap"><table><thead><tr><th>Wallet</th><th class="r">Trades</th><th class="r">Coins</th><th class="r">SOL in</th><th class="r">SOL out</th><th class="r">Round trips won</th><th class="r">Avg trip</th><th class="r">Median hold</th><th class="r">Last</th></tr></thead><tbody>${board}</tbody></table></div>` : ""}
+      ${sel ? `<p class="note kt-h">Trades by <b>${esc(sel.name)}</b> · <a href="https://solscan.io/account/${encodeURIComponent(sel.wallet)}" target="_blank" rel="noopener noreferrer">Solscan ↗</a> · <button class="small ghost" data-lvkolw="${esc(sel.wallet)}">show everyone</button></p>` : ""}
       ${tape ? `<div class="kt-tape">${tape}</div>` : ""}
-      <p class="note">Who's in, not who to follow: copying KOLs 1–2.5 s late lost ~13% a trade in our recordings.</p>`;
+      <p class="note">Who's in, not who to follow: copying KOLs 1–2.5 s late lost ~13% a trade in our recordings. * = last seen, no longer tracked.</p>`;
   }
   if (k === "hot") {
     const rows = LV.data.hot; if (!rows) return `<div class="empty">Loading…</div>`;
@@ -5720,8 +5737,9 @@ function playHuddle(h) {
   setTimeout(() => { for (const id of speakers) { const b = IO.bots[id]; if (b && b.busy === "huddle") goHome(b); } }, 4500 + h.lines.length * 3600 + 3000);
 }
 function renderTeamRecord() {                          // every graduation vote, scored (desk_record.py)
-  const t = S.analytics && S.analytics.team_record; if (!t || !$("an-team")) return;
-  if (!t.calls) { setHTML($("an-team"), `<div class="empty">No scored calls yet: each graduation vote is scored when the bot's exits would have closed it.</div>`); return; }
+  const all = S.analytics && S.analytics.team_record; if (!all || !$("an-team")) return;
+  const kind = S.teamKind || "late", t = all[kind] || all;
+  if (!t.calls) { setHTML($("an-team"), `<div class="empty">No scored ${kind === "sniper" ? "sniper" : "graduation"} calls yet: each vote is scored when the bot's exits would have closed it.</div>`); return; }
   const cell = x => x && x.n ? `<td class="r num">${x.n}</td><td class="r num ${cls(x.avg_pct)}">${pct(x.avg_pct, 1)}</td><td class="r num ${cls(x.median_pct)}">${pct(x.median_pct, 1)}</td><td class="r num">${x.won_pct}%</td>` : `<td class="r num">0</td><td></td><td></td><td></td>`;
   const edge = (b, s2) => b && s2 && b.n && s2.n ? b.median_pct - s2.median_pct : null;
   const row = (name, r) => { const e = edge(r.buy, r.pass);
@@ -6128,7 +6146,7 @@ setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
   const lnk = e.target.closest("a[href]");
   if (lnk && !Object.keys(lnk.dataset).length) return;   // a plain link inside a clickable row goes only where it says
-  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-tctf],[data-angrp],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-lvkol],[data-lvkolw],[data-tctf],[data-angrp],[data-teamkind],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
@@ -6138,9 +6156,12 @@ document.addEventListener("click", e => {
   if (d.xsell) { if (confirm("Sell this other-chain position now (paper)?")) send({action: "xchain_sell", key: d.xsell}); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
   if (d.tctf) { tcLoadTf(t); return; }
+  if (d.teamkind) { S.teamKind = d.teamkind; $$("#team-kind button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.teamkind === d.teamkind))); renderTeamRecord(); return; }
   if (d.angrp) { openGroup(d.angrp, d.agkey, d.agwho || "all");
     if (d.agjump) setTimeout(() => { const r = document.querySelector("#an-exit tr.sel"); if (r) r.scrollIntoView({block: "center", behavior: "smooth"}); }, 150);
     return; }
+  if (d.lvkol) { LV.kolMin = +d.lvkol; store.set("lv-kolmin", d.lvkol); LV.keys = {}; renderViews(true); loadViews(); return; }
+  if (d.lvkolw != null) { LV.kolWallet = LV.kolWallet === d.lvkolw ? null : d.lvkolw; LV.keys = {}; renderViews(true); return; }
   if (d.lvchain) { const [key, v] = d.lvchain.split(":");
     if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
     LV.keys = {}; renderViews(true); return; }
