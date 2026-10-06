@@ -169,3 +169,23 @@ def test_tests_judged_with_instant_fills_are_marked_and_tried_again(tmp_path):
     assert v[60]["instant_fills"] and not v[30]["instant_fills"]
     picks = {lab.auto_candidate({"late.stall_s": 45}, 2000.0 + h * 3600) for h in range(40)}
     assert ("late.stall_s", 60) in picks and ("late.stall_s", 30) not in picks      # the old one is fair game again
+
+
+def test_dump_profile_filters_skip_young_and_one_sided_entries():
+    from meme_trader.sniper.strategy import evaluate_late_entry
+    e = market(launches=40)
+    L = e.p.late
+    s = max((s for s in e.tokens.values() if not s.migrated and s.price_known and not s.dev_sold), key=lambda s: s.curve.progress)
+    red = {**e._late_red(s), "max_bundle_pct": 100, "max_early_sold_ratio": 99.0, "max_creator_launches_24h": 10**6,
+           "max_cluster_pct": 100}
+    L.update(min_curve_pct=0, max_curve_pct=100, max_age_s=10**9, min_net_flow_sol=-1e9, min_buyers=0,
+             min_buy_sell_ratio=0, min_near_high=0)
+    now = e.now
+    base_ok, _ = evaluate_late_entry(s, now, L, red)
+    L.update(min_age_s=s.age(now) + 5)
+    assert evaluate_late_entry(s, now, L, red) == (False, "too young")
+    L.update(min_age_s=0, min_recent_sells=10**6)
+    assert evaluate_late_entry(s, now, L, red) == (False, "one-sided buying")
+    L.update(min_recent_sells=0)
+    assert evaluate_late_entry(s, now, L, red)[0] == base_ok                     # off by default: nothing changes
+    assert {"late.min_age_s", "late.min_recent_sells"} <= set(labmod.TESTABLE) and "late.min_recent_sells" in e.lab_baseline()

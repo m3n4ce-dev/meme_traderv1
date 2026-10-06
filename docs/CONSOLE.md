@@ -220,6 +220,11 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
   - **The meetings:** they can attach tests to their plan's experiments, and read the results at the next huddle.
   - **You:** *Test a change* (pick the setting, type the value, Test it).
 - **In the room:** Claude sends a bot to the lab bench, the lab board shows what's being tested, and the result is announced.
+- **Two dump filters it can test** (off until a test supports them):
+  - **Min recent sells** (`late.min_recent_sells`): skip coins with no sells in the last 20 seconds.
+  - **Min age** (`late.min_age_s`): skip coins younger than this many seconds.
+
+  Replays found graduation dumps were young coins with heavy buying and nobody selling.
 - **"Better" is promising, not proven:** the panel counts every test run, and the best of many tries always looks better than it is. Nothing changes the bot until you Apply a change.
 - **It runs in the background** as a low-priority process, one test at a time, taking ~10–20 minutes. Trading carries on.
 

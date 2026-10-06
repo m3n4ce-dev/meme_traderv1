@@ -83,14 +83,16 @@ async def _call(tool: str, **args) -> str:
 @tool(READ)
 async def get_status() -> str:
     """Overview: mode, equity/cash/day P&L, whether entries are blocked and why, feed health (endpoint,
-    % of trades missing), which strategies are on, defense mode, session stats by strategy, and how many
-    agent buys are left this hour. Call this first."""
+    % of trades missing), which strategies are on, defense mode, session stats by strategy, how many
+    agent buys are left this hour, and the other-chain paper bot (other_chains_paper_bot: BNB Chain / Base /
+    Solana DEX coins - today's trades and P&L, open coins, its real-money checklist). Call this first."""
     return await _call("status")
 
 
 @tool(READ)
 async def get_positions() -> str:
-    """Open positions: gain %, peak gain %, time held, strategy that opened it, curve progress."""
+    """Open positions: gain %, peak gain %, time held, strategy that opened it, curve progress; plus the
+    other-chain paper bot's open coins (other_chain_positions: chain, size, P&L, market cap in -> now)."""
     return await _call("positions")
 
 
