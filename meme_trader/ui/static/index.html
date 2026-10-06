@@ -429,7 +429,7 @@ tr.cur td { background: var(--accent-soft); font-weight: 600; }
 /* ---- polish */
 html, body { background: radial-gradient(1100px 380px at 8% -8%, var(--accent-soft), transparent 70%),
   radial-gradient(900px 320px at 95% -10%, var(--series-soft), transparent 70%), var(--page); background-attachment: fixed; }
-header { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: saturate(1.4) blur(10px); }
+header { background: color-mix(in srgb, var(--surface) 96%, transparent); }   /* (a backdrop blur re-blurred the room under it every frame) */
 .brand { display: inline-flex; align-items: center; gap: 8px; }
 .mark { width: 22px; height: 22px; border-radius: 7px; flex: none; box-shadow: 0 0 0 3px var(--accent-soft);
   background: conic-gradient(from 210deg, var(--accent), var(--series), var(--good-mark), var(--accent)); }
@@ -613,8 +613,8 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .iso-rug { fill: var(--iso-rug); opacity: .7; stroke: rgba(255,255,255,.25); stroke-width: 2; stroke-dasharray: 6 4; }
 .iso-ln { stroke: var(--iso-ln); stroke-width: 1.4; stroke-linejoin: round; } .iso-hi { stroke: rgba(255,255,255,.35); stroke-width: 1; }
 .iso-plate { font: 700 9px system-ui, sans-serif; fill: #3a2a06; } .iso-plate.ai { fill: #e8f0fb; letter-spacing: .1em; }
-.iso-scr { opacity: .55; } .office[data-phase="night"] .iso-scr { opacity: .95; filter: brightness(1.3); }
-.iso-leaf { fill: #3f9a52; stroke: var(--iso-ln); stroke-width: 1; }
+.iso-scr { opacity: .55; } .office[data-phase="night"] .iso-scr { opacity: 1; }
+.iso-leaf { stroke: rgba(16,48,24,.55); stroke-width: .7; } .iso-rib { stroke: rgba(255,255,255,.28); stroke-width: .8; fill: none; }
 .iso-steam path { fill: none; stroke: rgba(255,255,255,.6); stroke-width: 2; stroke-linecap: round; animation: o-steam 3s ease-in-out infinite; }
 .iso-steam path:nth-child(2) { animation-delay: 1.5s; }
 .iso-frame { fill: var(--iso-frame); stroke: var(--iso-ln); stroke-width: 1.5; }
@@ -632,11 +632,12 @@ input[type="text"], input[type="password"], input[type="time"] { font: inherit; 
 .pb-s { font: 600 7.5px ui-monospace, monospace; fill: #b8d8c8; } .pb-s.up, .pb-line.up { fill: #4ee08a; stroke: #4ee08a; } .pb-s.down, .pb-line.down { fill: #ff7a7a; stroke: #ff7a7a; }
 .pb-line { fill: none !important; stroke-width: 1.5; } .pb-note { stroke: rgba(0,0,0,.25); } .pb-n { font: 600 6.5px system-ui, sans-serif; fill: #3a3416; }
 .iso-click { cursor: zoom-in; } .iso-click:hover polygon { filter: brightness(1.12); }
-.iso-dark { fill: #0a1030; opacity: 0; mix-blend-mode: multiply; transition: opacity 3s; pointer-events: none; }
-.iso-glow { fill: #ffd27a; opacity: 0; mix-blend-mode: screen; filter: blur(14px); transition: opacity 3s; pointer-events: none; }
-.iso-glow.warm { fill: #9fb8ff; }
-.office[data-phase="dusk"] .iso-dark { opacity: .28; } .office[data-phase="dusk"] .iso-glow { opacity: .12; }
-.office[data-phase="night"] .iso-dark { opacity: .58; } .office[data-phase="night"] .iso-glow { opacity: .3; }
+/* night: a plain translucent wash and gradient light pools. (A blur filter and blend modes here made Firefox
+   re-blend the whole room every frame anything moved: the lag at night.) */
+.iso-dark { fill: #0a1030; opacity: 0; transition: opacity 3s; pointer-events: none; }
+.iso-glow { opacity: 0; transition: opacity 3s; pointer-events: none; }
+.office[data-phase="dusk"] .iso-dark { opacity: .2; } .office[data-phase="dusk"] .iso-glow { opacity: .35; }
+.office[data-phase="night"] .iso-dark { opacity: .42; } .office[data-phase="night"] .iso-glow { opacity: .75; }
 .iso-night { pointer-events: none; }
 .av { cursor: zoom-in; }
 .av-shadow { fill: rgba(0,0,0,.28); }
@@ -2972,11 +2973,25 @@ function shade(hex, f) {
   const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(f < 1 ? v * f : v + (255 - v) * (f - 1)))));
   return "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
 }
+function isoShadow(x, y, w, d) {                        // a soft contact shadow on the floor, a little toward the viewer
+  const g = .14, o = .06;
+  return `<polygon points="${P([iso(x - g + o, y - g + o), iso(x + w + g + o, y - g + o), iso(x + w + g + o, y + d + g + o), iso(x - g + o, y + d + g + o)])}" fill="url(#g-shadow)"/>`;
+}
+function pottedPlant(x, y, s = 1) {                    // a tapered terracotta pot with a rim and soil, and a fan of shaded leaves
+  const [bx, by] = iso(x, y), [tx, ty] = iso(x, y, 17 * s), r = 11 * s, rb = 8 * s, ry = r * .5, ryb = rb * .5;
+  const pot = `<path d="M${(tx - r).toFixed(1)} ${ty.toFixed(1)} L${(bx - rb).toFixed(1)} ${by.toFixed(1)} A${rb.toFixed(1)} ${ryb.toFixed(1)} 0 0 0 ${(bx + rb).toFixed(1)} ${by.toFixed(1)} L${(tx + r).toFixed(1)} ${ty.toFixed(1)} Z" fill="url(#g-pot)" stroke="rgba(60,25,10,.55)" stroke-width=".8"/>`
+    + `<ellipse cx="${tx}" cy="${ty}" rx="${(r + 1.5 * s).toFixed(1)}" ry="${(ry + .8 * s).toFixed(1)}" fill="#b0603a" stroke="rgba(60,25,10,.55)" stroke-width=".8"/>`
+    + `<ellipse cx="${tx}" cy="${ty}" rx="${(r - 1.2 * s).toFixed(1)}" ry="${(ry - .7 * s).toFixed(1)}" fill="#3d2a1c"/>`;
+  const leaves = [[-78, 24, 6, "#2a6e3b"], [78, 24, 6, "#2a6e3b"], [-52, 32, 7, "#2f7d43"], [52, 30, 7, "#2f7d43"],
+    [-28, 42, 8, "#3a9150"], [28, 40, 8, "#3a9150"], [-8, 50, 8, "#46a85c"], [12, 46, 7, "#52b867"]];
+  const leaf = ([a, l, w, c]) => `<g transform="translate(${tx} ${(ty + 1).toFixed(1)}) rotate(${a})"><path class="iso-leaf" fill="${c}" d="M0 0 Q${(w * s).toFixed(1)} ${(-l * s * .45).toFixed(1)} 0 ${(-l * s).toFixed(1)} Q${(-w * s).toFixed(1)} ${(-l * s * .45).toFixed(1)} 0 0Z"/><path class="iso-rib" d="M0 -2 L0 ${(-l * s * .8).toFixed(1)}"/></g>`;
+  return `<ellipse cx="${(bx + 2).toFixed(1)}" cy="${(by + 1).toFixed(1)}" rx="${(15 * s).toFixed(1)}" ry="${(7 * s).toFixed(1)}" fill="url(#g-shadow)"/>` + pot + leaves.map(leaf).join("");
+}
 function isoBox(x, y, w, d, h, color, z = 0, cls = "") {
   const top = [iso(x, y, z + h), iso(x + w, y, z + h), iso(x + w, y + d, z + h), iso(x, y + d, z + h)];
   const left = [iso(x, y + d, z), iso(x + w, y + d, z), iso(x + w, y + d, z + h), iso(x, y + d, z + h)];
   const right = [iso(x + w, y, z), iso(x + w, y + d, z), iso(x + w, y + d, z + h), iso(x + w, y, z + h)];
-  return `<g class="${cls}"><polygon points="${P(left)}" fill="${shade(color, .78)}"/><polygon points="${P(right)}" fill="${shade(color, .62)}"/>
+  return `<g class="${cls}">${!z && h >= 10 ? isoShadow(x, y, w, d) : ""}<polygon points="${P(left)}" fill="${shade(color, .78)}"/><polygon points="${P(right)}" fill="${shade(color, .62)}"/>
     <polygon points="${P(top)}" fill="${color}"/><polyline points="${P([top[3], top[2], top[1]])} ${P([top[2], left[1]])}" fill="none" class="iso-hi"/>
     <polygon points="${P([top[0], top[1], right[0], left[1], left[0], top[3]])}" fill="none" class="iso-ln"/></g>`;
 }
@@ -3171,8 +3186,7 @@ function buildRoom() {
   block(12, 0, 2, 1);
   f.push([15 + 1, isoBox(15.1, .1, .8, .8, 52, "#e8edf3") + isoBox(15.25, .25, .5, .5, 26, "#78bef0", 52)]);
   block(15, 0, 1, 1);
-  const plant = (x, y, s = 1) => [x + y + .5, isoBox(x - .25 * s, y - .25 * s, .5 * s, .5 * s, 18 * s, "#b5653d") +
-    [[-10, -38, 11], [9, -42, 12], [0, -54, 10], [-4, -30, 9]].map(([ox, oy, r]) => { const [sx, sy] = iso(x, y, 18 * s); return `<ellipse cx="${sx + ox * s}" cy="${sy + oy * s + 14}" rx="${r * s * .8}" ry="${r * s * 1.4}" class="iso-leaf"/>`; }).join("")];
+  const plant = (x, y, s = 1) => [x + y + .5, pottedPlant(x, y, s)];
   PLANTS.forEach(([x, y, sc], i) => { f.push([...plant(x, y, sc), "plant:" + i]); block(x - .5, y - .5, 1, 1); });
   IO.furni = f;
 }
@@ -3213,6 +3227,10 @@ function officeBuild() {
   const night = `<g class="iso-night"><rect width="${VBW}" height="${VBH}" class="iso-dark"/>
     <g id="iso-nightglow">${nightGlows("floor")}</g></g>`;
   $("office").innerHTML = `<svg class="iso" id="iso" viewBox="0 0 ${VBW} ${VBH}" aria-hidden="false" role="img" aria-label="The trading room">
+      <defs><radialGradient id="g-glow"><stop offset="0" stop-color="#ffd27a" stop-opacity=".85"/><stop offset=".5" stop-color="#ffd27a" stop-opacity=".35"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient>
+        <radialGradient id="g-glow-w"><stop offset="0" stop-color="#9fb8ff" stop-opacity=".8"/><stop offset=".5" stop-color="#9fb8ff" stop-opacity=".3"/><stop offset="1" stop-color="#9fb8ff" stop-opacity="0"/></radialGradient>
+        <radialGradient id="g-shadow"><stop offset="0" stop-color="#140c04" stop-opacity=".34"/><stop offset=".7" stop-color="#140c04" stop-opacity=".16"/><stop offset="1" stop-color="#140c04" stop-opacity="0"/></radialGradient>
+        <linearGradient id="g-pot" x1="0" x2="1"><stop offset="0" stop-color="#c97a4e"/><stop offset="1" stop-color="#8e4a2a"/></linearGradient></defs>
       <g id="iso-back">${roomBackSVG()}</g><g id="iso-ents"></g>${night}</svg>
     <div class="hchat" id="hchat" aria-live="polite"></div><div class="iso-tag" id="iso-tag"></div>
     <div class="iso-tools"><button class="small ghost" data-roomedit="1" title="Move desks, the AI table, the couch and plants">🛠 Edit room</button><button class="small ghost" data-wardrobe="1" title="Each character's looks and how it acts">👕 Characters</button><button class="small ghost" data-dialog="1" aria-pressed="true" title="Speech bubbles on or off (the Room chat panel keeps everything they say)">💬 Speech on</button></div>
@@ -3238,7 +3256,7 @@ function officeBuild() {
   houseInit();
   syncDialogBtn();
   sortDepth();
-  cancelAnimationFrame(IO.raf); IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame);
+  cancelAnimationFrame(IO.raf); clearTimeout(IO.idleT); IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame);
 }
 function drawBot(b) {
   const [sx, sy] = iso(b.x, b.y);
@@ -3249,7 +3267,8 @@ function drawBot(b) {
 }
 function sortDepth() {
   const ents = $("iso-ents"); if (!ents) return;
-  const kids = [...ents.children].sort((a, b) => +a.dataset.depth - +b.dataset.depth);
+  const now = [...ents.children], kids = now.slice().sort((a, b) => +a.dataset.depth - +b.dataset.depth);
+  if (kids.every((k, i) => k === now[i])) return;             // already in order (most frames): moving nodes costs a restyle
   kids.forEach(k => ents.appendChild(k));
 }
 // ---- pathfinding on the tile grid (BFS: small room, uniform cost)
@@ -3307,7 +3326,9 @@ function isoFrame(now) {
   if (moved) sortDepth();
   for (const b of Object.values(IO.bots)) if (!b.path.length) spriteFor(b, now);   // typing, sleeping
   if (IO.zoom) zoomStep(now);
-  if (S.tab === "desk" && !document.hidden) IO.raf = requestAnimationFrame(isoFrame); else IO.raf = 0;
+  if (S.tab !== "desk" || document.hidden) { IO.raf = 0; return; }
+  if (moved || IO.zoom) IO.raf = requestAnimationFrame(isoFrame);   // walking or zooming: every frame
+  else { IO.raf = -1; IO.idleT = setTimeout(() => { IO.raf = requestAnimationFrame(isoFrame); }, 125); }   // typing, dozing: 8 a second
 }
 // ---- the owner's say over the characters: speech on or off, where each one stands, how chatty and busy it is.
 // Saved on the bot with their looks (ui.json "bots"), except the speech switch, which is per browser.
@@ -3462,7 +3483,10 @@ function officeUpdate(sc) {
   }
   sortDepth();
 }
-function kickIso() { if (!IO.raf && IO.built) { IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame); } }
+function kickIso() {                                   // start the loop, or wake it from its idle pace
+  if ((IO.raf && IO.raf !== -1) || !IO.built) return;
+  clearTimeout(IO.idleT); IO.last = performance.now(); IO.raf = requestAnimationFrame(isoFrame);
+}
 function busyCount() { return Object.values(IO.bots).filter(b => b.busy).length; }
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function errand2(b) {
@@ -3565,8 +3589,10 @@ function relay(ev) {
     goTo(b, STOPS.cork.map(v => v + (Math.random() - .5) * .9), () => { setProp(b, "📌"); hsay(ev.persona, line, {force: true});
       setTimeout(() => { if (b.busy === "cork") goHome(b); }, 6500); });
   } else if (ev.kind === "weather") {
-    const say = {storm: "Storm outside. Sizes down, stops tight.", rain: "It's raining. Red day so far.", cloudy: "Clouds rolling in.", clear: "Sun's back out."}[ev.wx];
-    if (say) hsay("scanner", say, {force: true});
+    const sn = snap || {}, day = +sn.day_pnl || 0, pc = day / Math.max(1e-9, (sn.summary && sn.summary.start_sol) || 1) * 100;   // the weather is the day's P&L: say the number
+    const say = ev.wx === "clear" ? `Back to even today: ${signed(day)}${U()}.`
+      : `Today ${signed(day)}${U()} (${pc.toFixed(1)}%)${sn.defense && sn.defense.on ? ", defense mode on: sizes cut" : ""}.`;
+    hsay("risk", say, {force: true});
   } else if (ev.kind === "handover") {
     hsay("exits", ev.n > 1 ? `Got your ${ev.n} positions. Stops and trails are on me.` : `Got it. I'll run my exits on that one.`, {force: true, kind: "act"});
   } else if (ev.kind === "call") {
@@ -3774,7 +3800,7 @@ function makeLounge() {
       const [sx, sy] = iso(x, y); add(x + y - .3, `<ellipse cx="${sx}" cy="${sy - 6}" rx="24" ry="14" fill="${c}"/><ellipse cx="${sx - 4}" cy="${sy - 11}" rx="12" ry="6" fill="${shade(c, 1.25)}" opacity=".7"/>`);
     }
     for (const [x, y] of [[3, 10.4], [15.4, 10.4]]) {
-      const [sx, sy] = iso(x, y, 18); add(x + y + .5, isoBox(x - .25, y - .25, .5, .5, 18, "#b5653d") + [[-10, -38, 11], [9, -42, 12], [0, -54, 10]].map(([ox, oy, r]) => `<ellipse cx="${sx + ox}" cy="${sy + oy + 14}" rx="${r * .8}" ry="${r}" class="iso-leaf"/>`).join(""));
+      add(x + y + .5, pottedPlant(x, y));
       blk(x - .5, y - .5, 1, 1);
     }
     return () => {
@@ -3804,7 +3830,7 @@ function makeLab() {
       Array.from({length: 14}, (_, i) => isoBox(.15, 1.15 + (i % 7) * .55, .38, .35, 14, ["#c0392b", "#2980b9", "#27ae60", "#f39c12", "#8e44ad"][i % 5], 22 + Math.floor(i / 7) * 24)).join(""));
     blk(.1, 1, .5, 4.2);
     for (const [x, y] of [[3, 10.4], [15.4, 10.4]]) {
-      const [sx, sy] = iso(x, y, 18); add(x + y + .5, isoBox(x - .25, y - .25, .5, .5, 18, "#b5653d") + [[-10, -38, 11], [9, -42, 12], [0, -54, 10]].map(([ox, oy, r]) => `<ellipse cx="${sx + ox}" cy="${sy + oy + 14}" rx="${r * .8}" ry="${r}" class="iso-leaf"/>`).join(""));
+      add(x + y + .5, pottedPlant(x, y));
       blk(x - .5, y - .5, 1, 1);
     }
     return () => houseWalls(null) + doorSVG("FLOOR·LOUNGE") +
@@ -3813,7 +3839,7 @@ function makeLab() {
   });
 }
 function nightGlows(room) {
-  const g = (x, y, z, rx, ry, warm) => { const [sx, sy] = iso(x, y, z); return `<ellipse class="iso-glow${warm ? " warm" : ""}" cx="${sx}" cy="${sy}" rx="${rx}" ry="${ry}"/>`; };
+  const g = (x, y, z, rx, ry, warm) => { const [sx, sy] = iso(x, y, z); return `<ellipse class="iso-glow" fill="url(#g-glow${warm ? "-w" : ""})" cx="${sx}" cy="${sy}" rx="${(rx * 1.35).toFixed(0)}" ry="${(ry * 1.35).toFixed(0)}"/>`; };
   if (room === "lounge") return g(6.5, 1, 70, 150, 70) + g(14.8, .6, 40, 50, 36) + g(1, 5, 30, 70, 120, true);
   if (room === "lab") return g(15, .6, 60, 60, 60) + g(4, 4.4, 40, 80, 44) + g(9.5, 4.4, 40, 80, 44) + g(7.8, 8.4, 30, 110, 50, true);
   return Object.entries(DESK_AT).map(([id, [dx, dy]]) => g(dx + 1, dy + .4, 40, 70, 44)).join("") + g(TABLE_AT[0] + 1, TABLE_AT[1] + 1, 40, 110, 60, true);
@@ -4047,7 +4073,7 @@ function renderHouseBoards() {
   }
 }
 
-function rebuildOffice() { cancelAnimationFrame(IO.raf); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat.forEach(m => m.el.remove()); IO.chat = []; if ($("hchat")) $("hchat").innerHTML = ""; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
+function rebuildOffice() { cancelAnimationFrame(IO.raf); clearTimeout(IO.idleT); IO.raf = 0; IO.built = false; IO.bots = {}; IO.block = new Set(); IO.chat.forEach(m => m.el.remove()); IO.chat = []; if ($("hchat")) $("hchat").innerHTML = ""; IO.vb = [0, 0, VBW, VBH]; if (DK.cards) renderDesk(); }
 
 // ---------------------------------------------------------------- arrange: every page is a 12-column board you can rearrange
 // Saved per page in the bot's UI store: {board: true, order: [pid], span: {pid: 1-12}, height: {pid: s|m|l}, hidden: [pid]}.
