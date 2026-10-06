@@ -538,3 +538,19 @@ def test_kol_tracker_and_hot_names():
     assert c["mint"] == s.mint and c["names"] == ["Cooker"] and c["kols"] == 1 and c["buys"] == 1 and c["sells"] == 1
     hot = e.hot_names()
     assert hot and hot[0]["n"] >= 4 and hot[0]["og_symbol"] == "PEPE"
+
+
+
+def test_bot_trades_keep_what_the_bot_saw_at_entry():
+    """Research: each bot trade carries its entry features, so dumps can be told from winners later."""
+    e = market(launches=40)
+    s = max((s for s in e.tokens.values() if not s.migrated and s.curve.progress < 0.9 and s.price_known), key=lambda s: s.curve.progress)
+    f = e._entry_features(s, "late")
+    assert {"curve_progress_pct", "net_flow_sol_window", "buyers_window", "top10_holders_pct", "family"} <= set(f)
+    assert f["family"] in ("og", "copy", "alone")
+
+    async def go():
+        await e._buy(s, 60, 0.05, ["t"], source="late")
+    asyncio.run(go())
+    pos = e.positions.get(s.mint)
+    assert pos is not None and pos.feat and pos.feat["curve_progress_pct"] == f["curve_progress_pct"]

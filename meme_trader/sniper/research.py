@@ -281,7 +281,7 @@ def _run_variant(job: tuple) -> dict:
     eng = asyncio.run(run_backtest(params, MemoryFeed(_W["events"])))
     trades = [{k: c.get(k) for k in ("mint", "symbol", "opened", "closed", "cost", "pnl", "pnl_pct", "exit",
                                      "peak_gain_pct", "source", "entry_vs_signal_pct", "exit_vs_signal_pct",
-                                     "failed_fees_sol")} for c in eng.book.closed]
+                                     "failed_fees_sol", "mae_pct", "feat")} for c in eng.book.closed]   # feat: entry features
     return {"label": label, "extra": extra, "trades": trades, "hash": policy_hash(params),
             "sol_usd": eng.sol_price.usd, "launches": eng.stats["launches"],
             "failed_buys": eng.stats["failed_buys"], "failed_sell_attempts": eng.stats["failed_sell_attempts"]}

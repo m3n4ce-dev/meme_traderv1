@@ -147,6 +147,7 @@ class SniperPosition:
     handed_price: float = 0.0    # the price when you handed it over, and its peak since
     handed_peak: float = 0.0
     ride_tp: bool = False        # the bots already took their partial profit
+    feat: dict | None = None     # what the bot saw when it decided to buy (kept with the trade for research)
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
