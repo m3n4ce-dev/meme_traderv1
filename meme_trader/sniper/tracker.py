@@ -92,7 +92,7 @@ class TokenState:
             # curve parked at its end state. Its depth roughly matches the migrated pool's.
             self.migrated = True
             price = t.mcap_sol / self.supply
-            self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS)
+            self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
             self.price_known = True
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)

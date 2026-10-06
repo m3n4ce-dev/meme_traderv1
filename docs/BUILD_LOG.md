@@ -22,6 +22,26 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Timeframes:** the chat's coin card has 1m, 5m, 15m, 1h, 4h and 1D buttons. Each fetches that pool's candles (`/api/candles`) through the other-chains GeckoTerminal pacer: one call every 2 s, cached 30 s, sharing the 429 back-off, so clicks can't starve the other-chain trader. Daily charts label the axis with dates.
 - **Tickers:** `$WIF` in the chat opens the most liquid Solana coin trading as WIF (DexScreener search, exact symbol), and lists the copies with Copy CA.
 
+**Fixed: paper buys of graduated coins failed "curve full"** (owner's manual buy of a listed coin, three tries).
+- **The cause:** a graduated coin is priced on reserves parked at the curve's end, and the curve's cap (a buy gets only what's left on the curve) left nothing.
+- **Now:** those reserves are marked as an AMM pool (`Curve.amm`) and skip the cap. A bonding curve that's sold out is still capped.
+
+**Lab verdicts on the new settings** (per-day replays, Oct 3–5, current settings −0.09 SOL over 210 trades):
+
+| Change | Verdict | Days better | Result | Trades |
+|---|---|---|---|---|
+| `late.max_dev_sold_pct` 0 → 100 (let dev-sold coins in) | worse | 0 of 3 | −2.21 SOL | 352 |
+| `late.runner_after_pct` 0 → 30 (runner mode) | no clear difference | 2 of 3 | +0.15 SOL | 210 |
+
+- **The dev-sold filter earns its keep:** letting those coins in added 142 trades and lost money on every day. It stays.
+- **Runner mode** helped Oct 3 and Oct 5 but gave back on Oct 4. It stays off until more days say so.
+
+**Clicks in the charts** (owner: "be able to click on everything in all the charts").
+- **The audit:** every row on the Live, Pulse and Charts tabs already opened its coin, except Other chains.
+- **Other chains rows:** open the coin (Solana: the coin drawer; other chains: DexScreener).
+- **Position charts:** a marker opens that wallet on Solscan; anywhere else opens the coin.
+- **Plain links inside clickable rows** go only where they point.
+
 ---
 
 ## 2026-10-06 — Entry #51: Risk to Normal, twice the lab tests, and two new ideas for it to test

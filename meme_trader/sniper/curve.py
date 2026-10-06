@@ -20,6 +20,7 @@ FINAL_V_TOKENS = INITIAL_V_TOKENS - CURVE_TOKENS
 class Curve:
     v_sol: float = INITIAL_V_SOL
     v_tokens: float = INITIAL_V_TOKENS
+    amm: bool = False      # a graduated coin's pool, priced on reserves parked at the curve's end: no curve cap
 
     @property
     def price(self) -> float:
@@ -44,7 +45,7 @@ class Curve:
         net = sol_in * (1 - fee_pct / 100)
         k = self.v_sol * self.v_tokens
         out = self.v_tokens - k / (self.v_sol + net)
-        return min(out, self.v_tokens - FINAL_V_TOKENS)
+        return out if self.amm else min(out, self.v_tokens - FINAL_V_TOKENS)   # a curve sells only what it has left
 
     def quote_sell(self, tokens_in: float, fee_pct: float) -> float:
         """SOL received for tokens_in (fee taken from the SOL coming out)."""

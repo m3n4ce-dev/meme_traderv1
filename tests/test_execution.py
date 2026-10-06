@@ -196,3 +196,22 @@ def test_eval_reports_the_execution_curve(tmp_path):
     assert [r["delay_s"] for r in ex["by_delay"]] == list(R.DELAYS)
     assert ex["estimated_delay_s"] == pytest.approx(1.5 + R.LANDING_S)     # no chain times in synthetic data
     assert ex["pnl_at_estimated_delay_sol"] is not None
+
+
+def test_a_graduated_coin_can_be_bought_on_paper():
+    """Seen 2026-10-06: every manual buy of a listed coin failed "curve full". A graduated coin is priced on reserves
+    parked at the curve's end, and the curve cap (only what's left on the curve) left nothing to buy."""
+    import asyncio
+
+    from meme_trader.sniper.curve import FINAL_V_TOKENS, Curve
+    from meme_trader.sniper.events import Trade
+    from meme_trader.sniper.execution import PaperExecutor
+    from meme_trader.sniper.tracker import TokenState
+    s = TokenState("M" * 44, None, 0.0)
+    s.on_trade(Trade("M" * 44, 1.0, "w", "buy", 1.0, 1e6, 0, 0, pool="pump-amm", mcap_sol=900.0), 10.0)
+    assert s.migrated and s.curve.amm
+    ex = PaperExecutor(P.sniper.execution)
+    fill = asyncio.run(ex.buy(s.mint, s.curve, 0.5))
+    assert fill.ok and fill.tokens > 0 and 1 < fill.price / s.curve.price < 1.08              # fees, slippage, impact
+    full = Curve(85.0 * 1.0, FINAL_V_TOKENS)                            # a bonding curve that's sold out: still capped
+    assert not asyncio.run(ex.buy("x", full, 0.5)).ok

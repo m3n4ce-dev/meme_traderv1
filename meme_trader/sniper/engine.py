@@ -1696,7 +1696,7 @@ class Engine:
                 s.curve = Curve((k * px) ** 0.5, (k / px) ** 0.5)
             else:                                               # graduated: price only
                 s.migrated = True
-                s.curve = Curve(px * FINAL_V_TOKENS, FINAL_V_TOKENS)
+                s.curve = Curve(px * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
             s.price_known = True
             s.peak_price = max(s.peak_price, px)
             s.last_trade_ts = self.now
