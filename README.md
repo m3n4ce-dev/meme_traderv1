@@ -7,29 +7,40 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Tests: 288 passing](https://img.shields.io/badge/tests-288%20passing-brightgreen.svg)
+![Tests: 394 passing](https://img.shields.io/badge/tests-394%20passing-brightgreen.svg)
 ![Mode: paper by default](https://img.shields.io/badge/mode-paper%20by%20default-orange.svg)
 
-![Live dashboard during a real-market paper run](docs/dashboard.png)
-<sub>Live view during a real-market paper run (2026-10-05): pretend money, real pump.fun data.</sub>
+![The trading room: the bots at their desks and the AI team voting on a coin](docs/img/desk.png)
+<sub>The Desk tab during a real-market paper run (2026-10-06): the AI team votes out loud, with real reasons from the data.</sub>
 
 > **Status: paper trading.** The bot has only been tested with pretend money so far. Most pump.fun tokens go to zero. Nothing here is financial advice. Never trade money you can't afford to lose.
 
 ## Results so far
 
-**No trading edge has been proven yet.** The paper bot's own **edge check** (Analytics tab, or `scripts/start.sh edge`) judges each strategy the way a skeptical group would:
+**No trading edge has been proven yet, and four days of testing say why.** The paper bot's own **edge check** (Analytics tab, or `scripts/start.sh edge`) judges each strategy the way a skeptical group would:
 
 | Strategy | Paper trades | Per SOL staked | Average trade (90% range) | Without its best 3 trades | Verdict |
 |---|---|---|---|---|---|
-| Graduation plays | 162 | **+6.5%** | +7.1% (+0.3% to +14.3%) | +0.39 SOL | promising, not proven |
-| Early sniper (now off) | 55 | −13.8% | −13.8% (−17.6% to −9.9%) | −1.71 SOL | losing, not by bad luck |
+| Graduation plays | 225 | +0.3% | +1.9% (−3.5% to +7.6%) | −4.16 SOL | can't tell yet: the range includes zero |
+| Early sniper (now off) | 78 | −13.4% | −13.8% (−17.0% to −10.6%) | −2.37 SOL | losing, not by bad luck |
 
-<sub>Real market, pretend money, 2026-10-03 to 10-04. Fills are modelled: a 2.5 s delay to land, curve fees, and failed orders.</sub>
+<sub>Real market, pretend money, 2026-10-03 to 10-06. Fills are modelled: a 2.5 s delay to land, curve fees, and failed orders. The paper account hit its drawdown kill switch on 10-06; testing goes on without it (below).</sub>
 
-Why "promising" and not more:
-- the best three graduation trades made 92% of its profit, so one missed runner changes the picture;
-- it covers only 1.5 days, and the settings changed 8 times in that span;
-- a replay of 16 h of earlier development data with realistic order delay **lost** 0.4–1.0 SOL. The two results disagree, which is why a frozen test decides.
+### What four days of data say (2026-10-06, [build log #56–#60](docs/BUILD_LOG.md))
+
+- **The edge on new coins is speed, and a 2.5 s bot doesn't have it.**
+  - A gradient-boosted model (36 features, trained and graded on different days) sorts new coins well: AUC 0.86, against 0.83 for the first model. Its estimates match what happens.
+  - Its picks made +11% to +16% a trade with instant fills on two unseen days. Filled 0.5–2.5 s late, they made about nothing.
+  - Live since 10-06, 155 picks followed in the exit lab have lost 9–25% a pick, instant fills included. It's a small evening sample, and it agrees with the rest.
+- **About 3,000 entry rules lost on every day tested.** That includes the owner's own manual style turned into rules (buy the dip on a half-full curve with heavy buying, sell fast), 540 variants of it. Coins 5–30 minutes old lost too.
+  - At this speed the bonding curve looks efficient: buying loses roughly the fees plus a little.
+- **The bots' exits aren't the problem; the entries are.** Of the last 37 coins the bots sold, 24 are 20%+ lower now (median −35% since the sell).
+- **The AI team (four personas on Claude) hasn't picked better coins yet.** Over 153 scored calls, its buys did 10 points worse than its passes at the median.
+  - It practices whenever the bot can't buy, and each persona reads its own record at every vote.
+  - Since 10-06 each persona must name who is selling to the bot, and why they're wrong, before voting buy.
+- **What's being collected for the next tests:**
+  - who posted each coin's X link, their reach and how fresh it is;
+  - the minute-by-minute price of every coin after it graduates, a slower market with lower fees where seconds matter less.
 
 **The frozen test.** The research process ([docs/RESEARCH.md](docs/RESEARCH.md)) confirms or rejects one strategy at a time:
 - the strategy is written down and frozen first;
@@ -39,13 +50,16 @@ Why "promising" and not more:
 
 `graduation-v1` is collecting its holdout; its verdict is due around 2026-10-17. A second candidate, `wallets-v1`, tests "follow wallets that were early on several runners" on coins at least 14 days old, with its rules registered before any data ([docs/WALLETS.md](docs/WALLETS.md)).
 
-What's known so far:
+Earlier findings:
 - **About 8% of launches double within minutes.** The hard part is telling them apart from the ~92% that don't. The safety gates reject far more losers than winners: of 574 "serial deployer" rejects, 7% doubled before falling 30%, while 27% fell 30% first.
-- **Completeness isn't enough: a feed must also be on time.** The free on-chain feed was complete, but PublicNode delivered it ~12 s behind the chain; the public RPC is 1–2 s behind. The watchdog checks both and remembers which endpoint was fastest.
+- **Completeness isn't enough: a feed must also be on time.**
+  - The free on-chain feed is complete when it's up, but it drops and lags: up to 207 unreliable minutes a day by 10-06.
+  - A flat-rate paid websocket (RPC Fast) has run 1.3–1.6 s behind the chain with no drops.
+  - The watchdog checks completeness and lag, tolerates trades delivered out of order, and remembers which endpoint was fastest.
 
 ## What it does
 
-- **Sees every launch.** New tokens come from PumpPortal's free stream. Every trade is decoded from pump.fun's own on-chain logs over a Solana websocket. No paid data or API key is needed.
+- **Sees every launch.** New tokens come from PumpPortal's free stream. Every trade is decoded from pump.fun's own on-chain logs over a Solana websocket. No paid data or API key is needed; a flat-rate paid websocket makes it steadier (see Configuration).
 - **Screens for rugs.** It rejects a token if:
   - the creator bought a large share of their own token, or has sold;
   - the creator is a serial deployer, or the ticker is a copycat;
@@ -60,6 +74,9 @@ What's known so far:
   - a model on your own machine (Ollama, LM Studio).
 
   The dashboard shows what a review costs (about 2 cents on Claude Opus) and has a Test button. They also read every note you save, and answer questions like "what's holding us back?" from the bot's real numbers.
+  - **Every vote is scored:** what the coin did next, on the bot's own exits, whether the team said buy or pass (Analytics → The AI team's record).
+  - Each persona reads its own record at every vote.
+  - When the bot can't buy (a strategy off, the kill switch, the daily limit), the team keeps **practicing** on paper.
 - **Manages risk:**
   - one **risk dial** (Cautious to Max) scales trade size, open positions and the daily loss limit together;
   - a dollar hard cap per buy, a daily loss limit and a **drawdown kill switch**;
@@ -70,7 +87,9 @@ What's known so far:
   - the **edge check**: per strategy, a 90% range, the result without its best 3 trades, and day by day;
   - the **exit lab**: every other exit rule, run in the shadows on the same entries with fees;
   - expectancy, profit factor, and a gate audit that checks whether each rejection rule costs more than it saves;
-  - a calibrated P(2×) model, plus backtests, walk-forward sweeps and A/B comparisons on recorded data.
+  - a calibrated P(2×) model, and a stronger gradient-boosted one whose picks are followed live in the exit lab. Each pick is filled twice, instantly and as late as the bot lands, to measure what speed is worth;
+  - backtests, walk-forward sweeps and A/B comparisons on recorded data, and a lab that tests one setting at a time on the last 24 h;
+  - **After you sold:** where each coin is now, against the price you sold at.
 - **Keeps a record nobody can rewrite.** Every 📣 call goes into a hash-chained ledger and is scored after costs at fixed horizons. You can publish the ledger's head to X or Telegram ([EDGE_PROOF.md](docs/EDGE_PROOF.md)).
 
 ## Trading by hand
@@ -102,7 +121,7 @@ Manual trading is yours: the bot never blocks or resizes your trades.
 ```mermaid
 flowchart LR
   PP["PumpPortal<br/>new launches + migrations<br/>(free)"] --> F[Feed]
-  RPC["Solana RPC websocket<br/>pump.fun TradeEvent logs<br/>(free)"] --> F
+  RPC["Solana RPC websocket<br/>pump.fun TradeEvent logs<br/>(free, or flat-rate paid)"] --> F
   F --> T["Token tracker<br/>curve, holders, flow"]
   T --> G{"Safety gates"}
   G -- pass --> S["Strategies<br/>graduation · sniper · copy"]
@@ -181,17 +200,19 @@ cd ~/meme_traderv1 && claude
 
 ## Screenshots
 
-| Analytics: the edge check | Trade panel: live chart, metrics, red flags |
+| Live: the paper account, as it is (halted by its kill switch) | Charts: graduation watch and market pulse |
 |---|---|
-| ![Edge check](docs/img/analytics.png) | ![Trade panel with chart](docs/img/trade.png) |
-| **Desk: the trading room** | **Token detail: every gate, live** |
-| ![Desk view](docs/img/desk.png) | ![Token detail with gate checklist](docs/img/token-detail.png) |
+| ![Live tab](docs/dashboard.png) | ![Charts tab](docs/img/charts.png) |
+| **Analytics: the AI team's record, every call scored** | **Exit lab: the stronger model's picks, instant vs 2.5 s late** |
+| ![The AI team's record](docs/img/team.png) | ![Model picks in the exit lab](docs/img/picks.png) |
+| **After you sold: where each coin is now** | **Analytics: the edge check** |
+| ![After you sold](docs/img/after-exit.png) | ![Edge check](docs/img/analytics.png) |
 | **AI desk model: Claude, or cheaper** | **Terminal** |
 | ![AI desk model panel](docs/img/desk-model.png) | ![Terminal](docs/img/terminal.png) |
 | **Chat: ask, approve actions, paste a contract address** | |
 | ![Chat with Claude](docs/img/chat.png) | |
 
-Most screenshots are from the real-market paper bot (pretend money). The terminal and AI-model panel are from the built-in demo (`scripts/start.sh demo`, a simulated market), whose numbers aren't results.
+Most screenshots are from the real-market paper bot (pretend money), taken 2026-10-06. The terminal and AI-model panel are from the built-in demo (`scripts/start.sh demo`, a simulated market), whose numbers aren't results.
 
 ## Configuration
 
@@ -200,7 +221,7 @@ Most screenshots are from the real-market paper bot (pretend money). The termina
 
 | Variable | Used for |
 |---|---|
-| `SOLANA_WS_URL` | Trade data websocket (default: free public endpoints). The stream is ~20 GB/day: a plan billed by data or credits can run out fast. |
+| `SOLANA_WS_URL` | Trade data websocket (default: free public endpoints, which drop and lag at busy hours). A flat-rate paid plan is steadier: RPC Fast's Focus plan ran 1.3–1.6 s behind with no drops (2026-10-06). The stream is ~40 GB/day (1.5–1.7 GB an hour), so avoid plans billed by data or credits. |
 | `SOLANA_RPC_URL` | Lookups, balances, the Portfolio tab and live trading. Helius: `https://mainnet.helius-rpc.com/?api-key=…` (set for you when you save a Helius key). |
 | `HELIUS_API_KEY` | Wallet-funding lookups with exchange labels (insider clusters) |
 | `ANTHROPIC_API_KEY` | AI desk on Claude, and the post-mortem review agent |
