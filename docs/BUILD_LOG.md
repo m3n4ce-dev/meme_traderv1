@@ -4,6 +4,38 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #61: An external review's findings fixed, and no Mayhem coins for the bots
+
+**Source:** a review of commit 2b31f6a that the owner ran through "Astra". Each finding was checked against the code here and reproduced from the description; its zip wasn't on this machine, and no code from it was run.
+
+| | Finding | Fixed |
+|---|---|---|
+| A | An order whose outcome was unknown became "never landed" after 150 s, even when the RPC had only errored or couldn't find the transaction. That could free a buy's cash, or let a second sell go out, for a transaction that had landed (live only). | "Never landed" now needs proof. The chain's signature history (`searchTransactionHistory`) must not have it, and it must be unable to land: its blockhash, recorded from the signed transaction, is no longer valid (`isBlockhashValid`), or, with no blockhash recorded, it's older than any blockhash lives. Landed-and-failed books the fee. Landed with amounts not yet visible keeps waiting. An RPC error proves nothing: the order stays open, its cash reserved and its coin's sells paused, and after 10 minutes the owner is told once. |
+| B | Take profits were spent when the rule fired, before any sell: a failed sell, or one skipped because another order was in flight, used up the manual take profit or the bots' 2x partial. | The rules only ask. `Engine._apply_sell` spends a take profit when a sell fills, so a failed one retries. |
+| C | `TokenState.on_trade` set the price in arrival order, so a late trade rolled it back. This matters now that RPC Fast reorders trades within a slot. | Chain order instead. A trade from an older slot doesn't move the price. Within a slot, trades chain by reserves and the newest state is the one no other trade starts from. While a link is missing, the current state stays. Flow, holders and buyers still count every trade. |
+| D | A paper sell's net proceeds were clamped at 0, hiding the fee on a near-worthless remainder (live allows negative). | Not clamped: the fee comes off cash and the trade's P&L, as live. |
+| E | Holder, dev, bundle, sniper, insider and top-10 shares divided by 1B even for Mayhem coins (2B minted): **19% of launches** (Oct 5). Concentration read double on those, in the gates and the models' features. | Each share is now of the coin's own supply (`TokenState.supply`), the insider-cluster share too. The prediction models are retrained on the corrected features. |
+
+**The owner: "we dont want coins in mayhem mode".** `market.skip_mayhem` (default on):
+- the sniper, graduation plays and copy trades never buy a Mayhem coin;
+- a graduation candidate seen to be one is passed over for good;
+- a bot position whose coin turns out to be one is sold;
+- the stronger model's picks skip them too.
+
+Your own trades and $1 callout bags aren't affected. A coin is known as Mayhem once the Mayhem agent first trades it; nothing at launch shows it.
+
+**Measurement, from the same review:**
+- **Edge check:** the 90% range now resamples by day, then by trade within each day, so same-day trades no longer count as independent. With few days the range is wider, which is honest.
+- **Research:** freezes record the git revision (`code_revision`, "+dirty" if the engine or config differ), and every eval and final logs it. The report warns when the code changed since the freeze. `graduation-v1` was frozen before revisions were recorded, and its holdout isn't rewritten: new versions get this.
+
+**Not done yet, from the review:**
+- The DexScreener/Jupiter momentum bot's executor needs the same order lifecycle before any live use.
+- The public example config still defaults to instant paper fills plus a 3% haircut; the live bot uses a 2.5 s landing.
+- Paper fees are fixed (1.25% + 0.5%) where the recordings carry each trade's actual protocol and creator fee.
+- The prediction label ("doubles before −30%") should become the executable net return under a fixed exit. The day's research (#57–#58) showed why: a good ranker still picked negative trades at our speed.
+
+---
+
 ## 2026-10-06 — Entry #60: The feed's downtime is the free servers, not the owner's internet; sniper off; "who's selling?"
 
 **Owner's questions:** "how can we fix the downtime? seems like my internet may be getting throttled", "what does Axiom use?", "turn off sniper if it's adding latency or anything", and whether anything in the day's X posts was good.

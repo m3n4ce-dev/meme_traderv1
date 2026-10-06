@@ -27,11 +27,17 @@ class SniperFill:
     rent_reclaimed: float = 0.0  # sell: SOL back from closing the emptied token account (net of its fee)
     fees_lost: float = 0.0       # SOL burned by attempts that landed on-chain but failed
     unknown: bool = False        # sent, but whether it landed isn't known yet (see Engine.unresolved)
+    blockhash: str = ""          # the signed transaction's recent blockhash: proves when it can no longer land
+    expired: bool = False        # unknown, with proof it never landed: not in the chain's history and past expiry
+    landed: bool = False         # unknown amounts, but the chain shows it landed: keep waiting, never re-send
     timing: dict | None = None   # live: seconds to build / send / confirm, landing slot and block time
 
     @property
     def price(self) -> float:
         return self.sol / self.tokens if self.tokens else 0.0
+
+
+UNKNOWN_EXPIRES_S = 150    # older than any blockhash lives (~60-90 s): with no blockhash recorded, the age proves it
 
 
 class PaperExecutor:
@@ -52,7 +58,8 @@ class PaperExecutor:
 
     async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None,
                    steps: list | None = None) -> SniperFill:
-        sol = max(curve.quote_sell(tokens, self.fee) * (1 - self.slip) - self._tx_cost(priority), 0.0)
+        # not clamped at 0: selling a near-worthless remainder can cost more in fees than it fetches, as it does live
+        sol = curve.quote_sell(tokens, self.fee) * (1 - self.slip) - self._tx_cost(priority)
         return SniperFill(True, sol=sol, tokens=tokens)
 
 
@@ -134,6 +141,10 @@ class LiveExecutor:
             if why:
                 return SniperFill(False, error=why)
             raw, sig = w.sign(tx_b64)
+            try:
+                bh = w.blockhash_of(raw)
+            except Exception:
+                bh = ""
             timing["build_s"] = round(time.time() - t0, 3)
         except Exception as e:                       # nothing was sent
             return SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
@@ -143,9 +154,9 @@ class LiveExecutor:
         except RuntimeError as e:                    # the RPC answered with an error (e.g. preflight): not sent
             if str(e).startswith("RPC sendTransaction"):
                 return SniperFill(False, signature=sig, error=str(e)[:240])
-            return SniperFill(False, unknown=True, signature=sig, error=f"send: {e}"[:240])
+            return SniperFill(False, unknown=True, signature=sig, blockhash=bh, error=f"send: {e}"[:240])
         except Exception as e:                       # timeout / connection: it may or may not be out there
-            return SniperFill(False, unknown=True, signature=sig, error=f"send: {type(e).__name__}: {e}"[:240])
+            return SniperFill(False, unknown=True, signature=sig, blockhash=bh, error=f"send: {type(e).__name__}: {e}"[:240])
         try:
             landed = confirm(sig, timeout_s=30)
         except Exception:
@@ -168,7 +179,7 @@ class LiveExecutor:
             fill.timing = timing
             return fill
         if not landed:                               # not confirmed and not found: we don't know yet
-            return SniperFill(False, unknown=True, signature=sig, error="not confirmed yet - outcome unknown")
+            return SniperFill(False, unknown=True, signature=sig, blockhash=bh, error="not confirmed yet - outcome unknown")
         # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
         if action == "buy":
             try:
@@ -176,7 +187,7 @@ class LiveExecutor:
             except Exception:
                 tokens = 0.0
             if tokens <= 0:
-                return SniperFill(False, unknown=True, signature=sig,
+                return SniperFill(False, unknown=True, landed=True, signature=sig, blockhash=bh,
                                   error="confirmed but token balance not visible yet")
             return SniperFill(True, sol=float(amount), tokens=tokens, signature=sig, error="estimated")
         return SniperFill(True, sol=estimate_sol, tokens=float(amount), signature=sig, error="estimated")
@@ -225,16 +236,41 @@ class LiveExecutor:
             return fill
         return await asyncio.to_thread(run)
 
-    async def resolve(self, sig: str, mint: str, action: str) -> SniperFill:
-        """What happened to a sent transaction whose outcome was unknown: a fill, a failure (with its
-        fees), or still unknown (not visible on-chain yet)."""
+    async def resolve(self, sig: str, mint: str, action: str, blockhash: str = "", age_s: float = 0.0) -> SniperFill:
+        """What happened to a sent transaction whose outcome was unknown: a fill, a failure (with its fees), or still
+        unknown. "Never landed" (expired=True) needs proof: the chain's signature history (searched, not just recent
+        status) doesn't have it AND it can't land anymore (its blockhash is no longer valid; without a recorded
+        blockhash, older than any blockhash lives). An RPC error, a missing transaction body or a still-valid
+        blockhash prove nothing: the order stays unresolved, so its cash stays reserved and no sell is re-sent."""
+        def unknown(why: str, **kw) -> SniperFill:
+            return SniperFill(False, unknown=True, signature=sig, blockhash=blockhash, error=why[:240], **kw)
+
         def run() -> SniperFill:
             try:
                 d = self.wallet.tx_deltas(sig, mint)
             except Exception as e:
-                return SniperFill(False, unknown=True, signature=sig, error=f"{type(e).__name__}: {e}"[:240])
+                return unknown(f"transaction lookup failed: {type(e).__name__}: {e}")
             if d is None:
-                return SniperFill(False, unknown=True, signature=sig, error="not on-chain (yet)")
+                try:
+                    st = self.wallet.signature_status(sig)
+                except Exception as e:
+                    return unknown(f"status lookup failed: {type(e).__name__}: {e}")
+                if st is not None:
+                    if st.get("err"):                # landed and failed: no tokens moved, its fee is gone
+                        return SniperFill(False, signature=sig, error="failed on-chain (details not retrievable yet)",
+                                          fees_lost=self.ex.priority_fee_sol + 0.000005)
+                    return unknown("landed; its amounts aren't retrievable yet", landed=True)
+                if blockhash:
+                    try:
+                        valid = self.wallet.blockhash_valid(blockhash)
+                    except Exception as e:
+                        return unknown(f"blockhash check failed: {type(e).__name__}: {e}")
+                    if valid:
+                        return unknown("not on-chain yet; it can still land")
+                    return unknown("not in the chain's history and its blockhash has expired: it never landed", expired=True)
+                if age_s >= UNKNOWN_EXPIRES_S:
+                    return unknown("not in the chain's history, long past any blockhash's life: it never landed", expired=True)
+                return unknown("not on-chain yet")
             fill = self._fill_from(d, action, sig)
             if fill.ok and action == "sell":
                 try:

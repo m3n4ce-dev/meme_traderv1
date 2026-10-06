@@ -156,7 +156,7 @@ class Unknown:
         self.sent.append(("sell", mint))
         return SniperFill(False, unknown=True, signature=f"s{len(self.sent)}")
 
-    async def resolve(self, sig, mint, side):
+    async def resolve(self, sig, mint, side, blockhash="", age_s=0.0):
         return self.chain.get(sig, SniperFill(False, unknown=True, signature=sig))
 
 
@@ -189,7 +189,11 @@ def test_r03_late_buy_becomes_a_managed_position_and_expired_orders_release():
         assert eng.book.sol == pytest.approx(P.sniper.capital.starting_sol - 0.052)   # principal + locked rent
         sb = token(eng, B)
         await eng._buy(sb, 70, 0.05, ["x"])
-        eng.unresolved["b2"]["sent_at"] -= 1_000                # long past any blockhash expiry, still unseen
+        eng.unresolved["b2"]["sent_at"] -= 1_000                # long past any blockhash expiry, still unseen...
+        await eng._resolve_unresolved()
+        assert B in eng.pending and B in eng.book.reserved     # ...but "can't find it" proves nothing: still held
+        assert any("still unknown" in x["text"] for x in eng.log if x["level"] == "error")
+        ex.chain["b2"] = SniperFill(False, unknown=True, expired=True, signature="b2")   # the chain's proof
         await eng._resolve_unresolved()
         assert B not in eng.pending and B not in eng.book.reserved and B not in eng.positions
     asyncio.run(go())
