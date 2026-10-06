@@ -179,7 +179,7 @@ def test_dump_profile_filters_skip_young_and_one_sided_entries():
     red = {**e._late_red(s), "max_bundle_pct": 100, "max_early_sold_ratio": 99.0, "max_creator_launches_24h": 10**6,
            "max_cluster_pct": 100}
     L.update(min_curve_pct=0, max_curve_pct=100, max_age_s=10**9, min_net_flow_sol=-1e9, min_buyers=0,
-             min_buy_sell_ratio=0, min_near_high=0)
+             min_buy_sell_ratio=0, min_near_high=0)                                  # (it qualifies on momentum)
     now = e.now
     base_ok, _ = evaluate_late_entry(s, now, L, red)
     L.update(min_age_s=s.age(now) + 5)
@@ -189,3 +189,36 @@ def test_dump_profile_filters_skip_young_and_one_sided_entries():
     L.update(min_recent_sells=0)
     assert evaluate_late_entry(s, now, L, red)[0] == base_ok                     # off by default: nothing changes
     assert {"late.min_age_s", "late.min_recent_sells"} <= set(labmod.TESTABLE) and "late.min_recent_sells" in e.lab_baseline()
+
+
+
+def test_a_coin_matching_the_dump_profile_is_passed_over_for_good():
+    """Waiting for a first sell / an older coin tested worse (replays, 2026-10-05): it's skipped once, for good."""
+    from meme_trader.sniper.strategy import SKIP_FOR_GOOD
+    assert set(SKIP_FOR_GOOD) == {"too young", "one-sided buying"}
+    e = market(launches=40)
+    e.p.late.update(enabled=True, min_curve_pct=0, max_curve_pct=100, max_age_s=10**9, min_net_flow_sol=-1e9, min_buyers=0,
+                    min_buy_sell_ratio=0, min_near_high=0, min_recent_sells=10**6)
+    e.p.entry.update(max_bundle_pct=100, max_early_sold_ratio=99.0)
+    from meme_trader.sniper.strategy import evaluate_late_entry
+    for s in e.tokens.values():
+        s.late_tried = False
+    cand = [s for s in e.tokens.values() if s.decided and s.price_known and s.mint not in e.positions
+            and evaluate_late_entry(s, e.now, e.p.late, e._late_red(s))[1] == "one-sided buying"]
+    asyncio.run(e._maybe_late())
+    assert cand and all(s.late_tried for s in cand) and not any(p.source == "late" for p in e.positions.values())
+
+
+
+def test_a_queued_test_is_run_against_the_settings_of_the_moment(tmp_path, monkeypatch):
+    e = market(launches=2)
+    e.persist = True
+    e.xlab = Lab(tmp_path / "lab")
+    x, _ = e.xlab.add("late.stall_s", 60, "", "team", 1000.0, {"late.stall_s": 45})        # queued with an old baseline
+    e.p.lab = {**(e.p.get("lab") or {}), "detach": False}
+
+    async def fake_exec(*a, **k):
+        raise OSError("no subprocess in this test")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    asyncio.run(e._lab_run(x))
+    assert "execution.paper_delay_s" in x["baseline"] and x["now"] == e.p.late.stall_s

@@ -36,9 +36,9 @@ from .notify import Notifier
 from .predictor import LogisticModel, expected_value_pct, kelly
 from .signals import CallerBook
 from .sizing import SolPrice, size_usd, strength
-from .strategy import (SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry, evaluate_late_exit,
-                       evaluate_manual_exit, evaluate_ride_exit, exit_watch, gate_checklist, initials_fraction,
-                       late_checklist)
+from .strategy import (SKIP_FOR_GOOD, SniperPosition, evaluate_entry, evaluate_exit, evaluate_late_entry,
+                       evaluate_late_exit, evaluate_manual_exit, evaluate_ride_exit, exit_watch, gate_checklist,
+                       initials_fraction, late_checklist)
 from .tracker import TokenState
 
 # handed-over positions: half out at 2x, trail the rest 30% off its peak once it's run 30%, stop 40% down
@@ -1842,6 +1842,8 @@ class Engine:
                 "max_creator_launches_24h": en.max_creator_launches_24h,
                 "max_cluster_pct": en.funding.max_cluster_pct})
             if not ok:
+                if why in SKIP_FOR_GOOD:                   # it qualified but looks like the dump profile: never this coin
+                    s.late_tried = True
                 continue
             s.late_tried = True
             await self._enter(s, kind="late", score=max(s.score, 60.0), buy_sol=self.p.capital.buy_sol,
@@ -3094,6 +3096,8 @@ class Engine:
 
         cfg = self.p.get("lab") or {}
         x["status"], x["started"] = "running", time.time()
+        x["baseline"] = self.lab_baseline()              # compared with the settings as they are now, landing like the bot
+        x["now"] = x["baseline"].get(x["key"], x["now"])
         out = DATA / "lab" / f"{x['id']}.result.json"
         out.unlink(missing_ok=True)
         cmd = [sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"]]
