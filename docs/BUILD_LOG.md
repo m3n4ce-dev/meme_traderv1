@@ -18,6 +18,10 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Floor shadows** under furniture.
 - **The room's weather line** says the day's P&L and whether defense mode is on, instead of "Clouds rolling in."
 
+**A wider view of any coin** (owner: "look at different tickers or time periods").
+- **Timeframes:** the chat's coin card has 1m, 5m, 15m, 1h, 4h and 1D buttons. Each fetches that pool's candles (`/api/candles`) through the other-chains GeckoTerminal pacer: one call every 2 s, cached 30 s, sharing the 429 back-off, so clicks can't starve the other-chain trader. Daily charts label the axis with dates.
+- **Tickers:** `$WIF` in the chat opens the most liquid Solana coin trading as WIF (DexScreener search, exact symbol), and lists the copies with Copy CA.
+
 ---
 
 ## 2026-10-06 — Entry #51: Risk to Normal, twice the lab tests, and two new ideas for it to test
