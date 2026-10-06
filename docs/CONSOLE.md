@@ -227,6 +227,9 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **Two dump filters it can test** (off until a test supports them):
   - **Min recent sells** (`late.min_recent_sells`): skip coins with no sells in the last 20 seconds.
   - **Min age** (`late.min_age_s`): skip coins younger than this many seconds.
+- **Two more it can test** (also off until a test supports them):
+  - **Dev already sold** (`late.max_dev_sold_pct`): let a coin in when its creator has sold up to this % of the supply. At 0, any creator sale skips the coin. A held coin still sells if the creator sells again after the buy.
+  - **Runner mode** (`late.runner_after_pct`, `late.runner_trail_pct`): once a play has been up this much, momentum decay and the stall stop stop selling it; a trailing stop this far under its peak does instead.
 
   Replays found graduation dumps were young coins with heavy buying and nobody selling.
 - **"Better" is promising, not proven:** the panel counts every test run, and the best of many tries always looks better than it is. Nothing changes the bot until you Apply a change.

@@ -284,6 +284,9 @@ sniper:
     max_curve_pct: 85            # window end: curve at most this % full
     max_age_s: 900               # token at most this old (seconds)
     min_age_s: 0                 # ... and at least this old (0 = off). Dumps were younger at entry (median 20 s vs 31 s)
+    max_dev_sold_pct: 0          # skip coins whose creator has sold more than this % of the supply (0 = any sale skips;
+                                 #   the lab can test letting them through). A held coin still sells if the creator
+                                 #   sells again after the buy
     min_recent_sells: 0          # skip when the last 20 s had fewer sells than this (0 = off): heavy buying with nobody
                                  #   selling was the dump profile (2026-10-05 replays of 3 days, 322 trades; see BUILD_LOG #49)
     flow_window_s: 30            # seconds of trades the momentum checks look at
@@ -298,6 +301,9 @@ sniper:
     stop_loss_pct: 15            # graduation-play stop loss (%)
     stall_s: 45                  # sell if no new high for this long while held (seconds)
     max_hold_s: 600              # sell after this long regardless (seconds)
+    runner_after_pct: 0          # once a play has been up this much, let it run: momentum decay and the stall stop
+                                 #   selling it and a trailing stop takes over (0 = off; the lab can test it)
+    runner_trail_pct: 25         # ... the runner's trailing stop: sell this far under its peak
 
   predict:                       # learned probability model: `train` writes a candidate, `promote` deploys it
     enabled: true                # used only once a PROMOTED model file exists
