@@ -11,13 +11,20 @@ import os
 
 class Notifier:
     def __init__(self, levels: list[str]):
-        self.token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        self.chat = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
         self.levels = set(levels)
         self.queue: asyncio.Queue | None = None
         self.sent = 0
         self.failed = 0
         self.last_error = ""
+
+    # read each time: keys saved from the dashboard (Controls -> API keys) work at once, no restart
+    @property
+    def token(self) -> str:
+        return os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+    @property
+    def chat(self) -> str:
+        return os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
 
     @property
     def enabled(self) -> bool:

@@ -209,3 +209,14 @@ def test_daily_digest_and_the_daily_loss_alert():
     said.clear()
     asyncio.run(tick())
     assert any(lv == "digest" for lv, _ in said) and any(t.startswith("Entries open again") for _, t in said)
+
+
+def test_telegram_alert_keys_work_without_a_restart(monkeypatch):
+    from meme_trader.sniper.notify import Notifier
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_ALERT_CHAT_ID", raising=False)
+    n = Notifier(["error", "digest"])
+    assert not n.enabled
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")                 # what saving it on the Keys panel does
+    monkeypatch.setenv("TELEGRAM_ALERT_CHAT_ID", "42")
+    assert n.enabled and n.chat == "42"
