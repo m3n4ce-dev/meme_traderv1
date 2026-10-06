@@ -541,6 +541,43 @@ def test_kol_tracker_and_hot_names():
 
 
 
+def test_kol_tracker_in_depth_tracks_their_coins_and_scores_them():
+    """Owner: the KOL tracker's "MC first buy -> now" showed "-" everywhere, and they wanted it more in depth. A coin
+    was forgotten ~16 min after launch (so no "now"), and KOL trades on older coins were dropped."""
+    from meme_trader.sniper.events import Trade
+
+    e = market()
+    k1, k2 = "K" * 44, "J" * 44
+    e.kols = {"kols": {k1: "Cooker", k2: "Jam"}}
+    e._known_cache = None
+    s = live_coin(e)
+    t0 = s.trades[-1][0]
+    old = "O" * 40 + "pump"                                          # a coin whose launch the bot never saw
+
+    async def go():
+        for ts, who, side, sol in ((t0 + 10, k1, "buy", 2.0), (t0 + 20, k2, "buy", 1.0), (t0 + 40, k1, "sell", 3.0)):
+            await e.handle(Trade(mint=s.mint, ts=ts, trader=who, side=side, sol=sol, tokens=1e6,
+                                 v_sol=s.curve.v_sol, v_tokens=s.curve.v_tokens, new_balance=-1.0))
+        await e.handle(Trade(mint=old, ts=t0 + 50, trader=k2, side="buy", sol=0.5, tokens=1e6, v_sol=0, v_tokens=0,
+                             new_balance=-1.0, pool="pump-amm", mcap_sol=3000.0))
+    asyncio.run(go())
+    o = e.tokens[old]                                                # tracked now, but never a strategy candidate
+    assert o.price_known and o.migrated and o.late_tried and o.decided
+    v = e.kol_view()
+    c = next(x for x in v["coins"] if x["mint"] == s.mint)
+    assert c["still_in"] == ["Jam"] and c["sold_out"] == ["Cooker"] and c["mc_now"] and not c["mc_stale"]
+    assert c["avg_entry_mc"] > 0
+    b = {x["name"]: x for x in v["kols"]}
+    assert b["Cooker"]["trips"] == 1 and b["Cooker"]["trips_won"] == 1 and b["Cooker"]["trip_avg_pct"] == 50.0
+    assert b["Jam"]["coins"] == 2 and b["Jam"]["trips"] == 0 and b["Jam"]["in_sol"] == 1.5
+    assert any(x["mint"] == old for x in v["coins"])
+    e.now += 3 * 3600                                                # long after: forgotten, the last market cap kept
+    e._last_cleanup = 0
+    asyncio.run(e._tick())
+    assert s.mint not in e.tokens and e._kol_last_mc.get(s.mint)
+    assert e.kol_view(minutes=24 * 60)["coins"] and next(x for x in e.kol_view(24 * 60)["coins"] if x["mint"] == s.mint)["mc_stale"]
+
+
 def test_bot_trades_keep_what_the_bot_saw_at_entry():
     """Research: each bot trade carries its entry features, so dumps can be told from winners later."""
     e = market(launches=40)
@@ -554,3 +591,30 @@ def test_bot_trades_keep_what_the_bot_saw_at_entry():
     asyncio.run(go())
     pos = e.positions.get(s.mint)
     assert pos is not None and pos.feat and pos.feat["curve_progress_pct"] == f["curve_progress_pct"]
+
+
+def test_a_full_curve_asks_dexscreener_before_a_manual_buy(monkeypatch):
+    """Seen 2026-10-06: SLOP's curve sold out but the move to its pool wasn't seen; it sat in Final stretch for 3 h at
+    $49.2K and every buy failed "curve full". Now a full curve is checked against DexScreener first."""
+    from meme_trader.sniper.curve import FINAL_V_TOKENS, Curve
+    e = market()
+    e.feed.realtime = True
+    s = live_coin(e)
+    s.curve = Curve(115.0, FINAL_V_TOKENS)                             # sold out, migration not seen
+    assert s.curve.progress >= 0.999
+    assert s.mint not in [x["mint"] for x in e.pulse_view()["stretch"]]   # not "final stretch" any more
+    asked = []
+
+    async def still_on_the_curve(mints):
+        asked.append(mints)
+        return set(mints)
+    monkeypatch.setattr(e, "_dex_price", still_on_the_curve)
+    why = asyncio.run(e.manual_buy(s.mint, 0.1))
+    assert asked and "moving to its PumpSwap pool" in why and s.mint not in e.positions
+
+    async def graduated(mints):
+        s.migrated, s.curve = True, Curve(s.curve.price * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
+        return set(mints)
+    monkeypatch.setattr(e, "_dex_price", graduated)
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
+    assert e.positions[s.mint].source == "manual" and e.positions[s.mint].tokens > 0
