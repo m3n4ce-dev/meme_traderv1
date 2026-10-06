@@ -48,11 +48,14 @@ def _sniper_variants(x) -> dict[str, dict]:
     }
 
 
+LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass")   # followed on the graduation-play exits
+
 class ExitLab:
     def __init__(self, path: Path | None, fee_pct: float):
         self.path = Path(path) if path else None
         self.fee = fee_pct
         self.open: dict[str, list[dict]] = {}          # mint -> shadows still running
+        self.on_close = None                            # called with each closed row (the engine scores team votes)
         self.done: list[dict] = []                      # closed shadows (also in the file)
         if self.path and self.path.exists():
             rows = []
@@ -70,10 +73,11 @@ class ExitLab:
     def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p, only: tuple | None = None) -> None:
         """A bot entry at `price` (p: params.sniper). kind 'late' runs the graduation-play exits, else the sniper's.
         kind 'desk-pass': a graduation coin the AI desk turned down, followed with the bot's own exits ("as now")
-        so Analytics can show what the desk's passes would have made."""
+        so Analytics can show what the desk's passes would have made. 'practice-buy' / 'practice-pass': a team vote
+        that bought nothing (practice, or an approval that couldn't be sized), followed the same way."""
         if not price or mint in self.open:
             return
-        late = kind in ("late", "desk-pass")
+        late = kind in LATE_KINDS
         variants = _late_variants(p.late) if late else _sniper_variants(p.exit)
         if only:
             variants = {k: v for k, v in variants.items() if k in only}
@@ -138,6 +142,8 @@ class ExitLab:
                "held_s": round(now - sh["opened"])}
         sh["closed"] = True
         self.done.append(row)
+        if self.on_close is not None:
+            self.on_close(row)
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a") as f:
@@ -145,7 +151,7 @@ class ExitLab:
 
     def view(self, kind: str = "late") -> dict:
         """Per variant: entries, mean and median P&L % per entry, win rate; sorted by mean, best first."""
-        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in ("late", "desk-pass"))]
+        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS)]
         by: dict[str, list[float]] = {}
         for r in rows:
             by.setdefault(r["variant"], []).append(r["pnl_pct"])

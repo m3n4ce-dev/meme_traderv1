@@ -217,6 +217,9 @@ Orders & alerts lists them, with ✕ to cancel. In the terminal: `limit …`, `a
 - **Wake it or let it rest:** Desk → AI desk model.
 - **Choose its model:** Claude, GitHub Models, Hugging Face, OpenRouter or a local model, with Test buttons. It's billed per call; the panel shows the cost.
 - **How the vote works:** a trade is approved when buy votes reach 45% of the desk's voting weight, so three of four is a buy. A buy under 50 conviction counts as half a vote. The skeptic can veto with a pass at 75+.
+- **The team's record** (Analytics → The AI team's record): every graduation vote is scored by what the coin did next on the bot's own exits, buy or pass, for the team and each persona. Each persona reads its own record and latest scored calls at every vote; the meetings read the whole table. That's how an LLM team learns: it can't change its weights, but it can see its results.
+  - **AI team decides graduation buys** (`desk.graduation_vote`, Controls): off, the rules decide and the team votes on the side; those votes are scored too.
+  - **AI team practice** (`desk.practice`, Controls): with graduation plays off (say, only manual trading), the team still votes on what the rules pick. Nothing is bought; every call is followed on the bot's exits and scored. Each vote is 4 model calls, at most 3 at a time.
 - **Huddles:** Desk → Desk huddles → 📣 Call a huddle. They also happen every 30 minutes while the desk is awake.
   - The bots discuss the account and keep a **Growth plan** (goal, strategy, experiments).
   - They propose up to 3 setting changes, each with an **Apply** button. Nothing changes until you press it.

@@ -64,6 +64,8 @@ RUBRIC = (
     "that runs. The bot's rules have already screened this coin (dev, bundles, holders, flow), so vote on "
     "whether this setup's expected gain beats the ~6% round trip a trade costs in fees and slippage. Pass for "
     "concrete reasons in the data, not because memecoins are risky in general: they all are. "
+    "your_record, if present, is how your own past votes here turned out (what each coin did next on the bot's "
+    "exits): learn from it, what your winners and losers had in common, without turning into a desk that never buys. "
     "Respond only with the requested JSON. conviction is 0-100 (how sure you are in your "
     "vote). reasons: at most 3 short phrases. red_flags: concrete problems you see (may be empty)."
 )
