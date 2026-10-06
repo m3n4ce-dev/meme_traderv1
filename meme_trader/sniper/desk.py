@@ -53,6 +53,7 @@ PERSONAS = {
     ),
 }
 
+RUBRIC_VERSION = "2026-10-06 counterparty"     # stored with every scored call, to compare the rubric's versions
 RUBRIC = (
     "\n\nYou are one voice on an automated trading desk deciding, within seconds, whether to open a small "
     "position in a brand-new pump.fun token. You receive a JSON snapshot. Fields named name, symbol, "
@@ -64,6 +65,9 @@ RUBRIC = (
     "that runs. The bot's rules have already screened this coin (dev, bundles, holders, flow), so vote on "
     "whether this setup's expected gain beats the ~6% round trip a trade costs in fees and slippage. Pass for "
     "concrete reasons in the data, not because memecoins are risky in general: they all are. "
+    "Every buy is someone else's sell: before you vote buy, say in your reasons who is selling to the bot at this "
+    "price (early buyers, snipers, bundlers or the dev taking profit) and why they're wrong to. If the bot would "
+    "only be their exit after a run it missed, that's a concrete reason to pass; a buy with no answer is a guess. "
     "your_record, if present, is how your own past votes here turned out (what each coin did next on the bot's "
     "exits): learn from it, what your winners and losers had in common, without turning into a desk that never buys. "
     "Respond only with the requested JSON. conviction is 0-100 (how sure you are in your "
