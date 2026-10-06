@@ -25,7 +25,9 @@ TESTABLE = {"late.min_net_flow_sol": (0.5, 20), "late.min_buyers": (3, 60), "lat
             "late.max_age_s": (120, 3600), "late.flow_window_s": (10, 120), "late.stop_loss_pct": (5, 50),
             "late.stall_s": (15, 300), "late.max_hold_s": (60, 3600), "late.exit_curve_pct": (86, 99),
             "late.min_age_s": (0, 120), "late.min_recent_sells": (0, 10), "late.runner_after_pct": (0, 200),
-            "late.runner_trail_pct": (5, 60), "late.max_dev_sold_pct": (0, 100)}
+            "late.runner_trail_pct": (5, 60), "late.max_dev_sold_pct": (0, 100),
+            # the red flags the graduation play shares with the early sniper (off in paper since 2026-10)
+            "entry.max_bundle_pct": (5, 100), "entry.max_early_sold_ratio": (0.1, 5.0)}
 # when nobody has proposed anything, the team works through these: one step either side of where it is now
 AUTO_STEPS = {"late.min_net_flow_sol": 1.0, "late.min_buyers": 4, "late.min_buy_sell_ratio": 0.3, "late.min_near_high": 0.05,
               "late.min_curve_pct": 5, "late.max_age_s": 300, "late.stop_loss_pct": 5, "late.stall_s": 15,

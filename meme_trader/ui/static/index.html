@@ -2138,6 +2138,7 @@ function viewBody(k) {
     const fresh = r => !LV.fresh || (r.age_s != null && r.age_s < 7 * 86400);                // memecoin-young: under a week
     const nets = Object.keys(d.chains || {}), pool = (d[LV.chainKind] || {}), rows = (LV.chain === "all" ? nets.flatMap(n => (pool[n] || []).filter(fresh).slice(0, 8)) : (pool[LV.chain] || []).filter(fresh))
       .slice().sort((a, b) => (b.vol_h1 || 0) - (a.vol_h1 || 0)).slice(0, 24);
+    const hidden = LV.fresh ? (LV.chain === "all" ? nets.flatMap(n => pool[n] || []) : pool[LV.chain] || []).filter(r => !fresh(r)).length : 0;
     const chip = (v, l, key) => `<button class="small ${(key === "kind" ? LV.chainKind : LV.chain) === v ? "primary" : "ghost"}" data-lvchain="${key}:${v}">${l}</button>`;
     const pc = v => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${fx(v, 1)}%</span>`;
     return `<div class="lv-chips">${chip("all", "All", "net")}${nets.map(n => chip(n, esc(d.chains[n]), "net")).join("")}<span class="spacer"></span><button class="small ${LV.fresh ? "primary" : "ghost"}" data-lvchain="fresh:${LV.fresh ? 0 : 1}" title="Only pools under a week old">Fresh only</button>${chip("trending", "🔥 Trending", "kind")}${chip("new", "🌱 New", "kind")}</div>
@@ -2147,14 +2148,15 @@ function viewBody(k) {
         <td class="r num">${pc(r.chg_m5)}</td><td class="r num">${pc(r.chg_h1)}</td><td class="r num">${pc(r.chg_h24)}</td>
         <td class="r num"><span class="up">${r.buys_h1 ?? "–"}</span>/<span class="down">${r.sells_h1 ?? "–"}</span></td><td class="r note">${ageShort(r.age_s)}</td>
         <td><a class="small" href="${esc(r.dex)}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">${d.loading ? "Loading other chains from GeckoTerminal…" : LV.fresh ? "Nothing under a week old here right now: turn off Fresh only, or try New." : "Nothing listed right now."}</div>`}
-      <p class="note">Read-only, from GeckoTerminal (refreshed every 90 s). The bot trades pump.fun only: other chains are watched, not traded, until the Solana bot proves an edge (docs/MULTICHAIN.md).${d.error ? ` · ${esc(d.error)}` : ""}</p>`;
+      ${hidden ? `<p class="note">${hidden} older than a week hidden by Fresh only.</p>` : ""}
+      <p class="note">From GeckoTerminal (refreshed every 90 s). The other-chain bot paper-trades BNB Chain, Base and Solana DEX coins from these lists (its positions are on the Live tab); Ethereum is watched only (docs/MULTICHAIN.md).${d.error ? ` · ${esc(d.error)}` : ""}</p>`;
   }
   if (k === "pulse") return svgPulse(s.pulse || [], s.pulse_since || 0, 150);
   if (k === "equity") { const eh = (s.equity_hist || []).slice(-300).map(e => e[1]);
     return eh.length > 1 ? `<div class="note">${sol(eh[eh.length - 1])}${U()} now · ${signed(eh[eh.length - 1] - eh[0])}${U()} over this chart</div>${svgSpark(eh, eh[eh.length - 1] >= eh[0] ? "var(--good)" : "var(--bad)", 110, 600)}` : `<div class="empty">Collecting…</div>`; }
   return "";
 }
-function renderViews() {
+function renderViews(clicked = false) {               // clicked: the owner pressed something in a view: redraw it now
   const box = $("lc-views"); if (!box) return;
   const on = VIEWS.filter(([k]) => LV.on.has(k));
   if (box.dataset.k !== on.map(v => v[0]).join()) {
@@ -2162,7 +2164,7 @@ function renderViews() {
     box.innerHTML = on.map(([k, l]) => `<section class="lc-view${k === "kol" || k === "chains" ? " wide" : ""}" data-view-k="${k}"><div class="lc-h"><b>${l}</b><span class="spacer"></span><button class="small ghost" data-lcview="${k}" title="Hide this view">✕</button></div><div class="lv-body"></div></section>`).join("");
   }
   for (const [k] of on) {
-    const body = box.querySelector(`[data-view-k="${k}"] .lv-body`); if (!body || body.matches(":hover") && k !== "pulse" && k !== "equity") continue;   // (lists don't jump under the mouse)
+    const body = box.querySelector(`[data-view-k="${k}"] .lv-body`); if (!body || !clicked && body.matches(":hover") && k !== "pulse" && k !== "equity") continue;   // (lists don't jump under the mouse)
     const html = viewBody(k); if (LV.keys[k] !== html) { LV.keys[k] = html; body.innerHTML = html; }
   }
 }
@@ -3090,57 +3092,6 @@ document.addEventListener("pointerup", () => {
 
 // ---- what the bots say when nothing's happening: big pools, never the same line twice (remembered in this
 // browser); when a pool runs dry they talk about live numbers instead
-const LINES = {
-  lounge: ["Ping-pong break.", "New high score on the arcade.", "Fridge raid.", "Five minutes on the beanbag.", "Watching the pulse on the big screen.",
-    "Back on the floor in a minute.", "Who left pizza in the fridge?", "Stretching my legs.", "Bunk beds are surprisingly comfy."],
-  lab: ["Checking the study boards.", "The data decides, not the vibes.", "Promising isn't proven.", "Logging this for the research.",
-    "Hindsight always looks smart.", "Reading the rack's logs.", "Writing it down before I forget."],
-  coffee: ["Refill time.", "Third coffee today.", "Decaf? Never.", "The curve can wait 30 seconds.", "Who drank the last oat milk?",
-    "This machine is older than Bitcoin.", "Espresso, double. It's a volatile day.", "Coffee's the only thing here that never dumps.",
-    "If the machine beeps twice, it's a buy signal.", "Brewing. Don't buy anything without me.", "Black, like the night shift.",
-    "One sugar for every red candle.", "This mug says HODL. I didn't buy it.", "The coffee tastes like slippage.",
-    "Grinding beans and grinding entries.", "Cold brew. Patience is a strategy."],
-  cooler: ["Hydrating.", "Stay liquid.", "Water's colder than this market.", "Liquidity check: still wet.", "Ice-cold, like my stops.",
-    "Two cups. One for me, one for the drawdown.", "The cooler gurgles like a rug pull.", "Refreshing. Unlike the order book.",
-    "Water: zero fees, zero slippage.", "Drink water, check holders.", "Cooler talk: who's holding what?", "Hydrated traders take initials."],
-  window: ["Nice view.", "Charts look better from up here.", "Is that a green candle in the sky?", "Somewhere out there a dev is selling.",
-    "Clouds look like a head and shoulders.", "The city never sleeps. Neither does pump.fun.", "Sunlight. I forgot about that.",
-    "That building's at all-time highs.", "Counting cars like counting buyers.", "Rain makes the curve fill slower. Probably.",
-    "Watching birds. They move in bundles too.", "One day I'll trade from a beach."],
-  board: ["Checking the numbers.", "Board says we're alive.", "Don't look at the drawdown.", "The board doesn't lie. People do.",
-    "Profit factor looks healthy.", "Every trade on the board, wins and losses.", "Who wrote that note? Good call though.",
-    "The equity line has a nice slope today.", "Reading the board like tea leaves.", "Numbers first, opinions second."],
-  plant: ["Watering the plant.", "Plants don't get rugged.", "This plant has diamond leaves.", "Growing slow and steady, like a good chart.",
-    "Even the plant takes profits in sunlight.", "Talking to the plant. It's a better listener than the skeptic.",
-    "New leaf. Bullish.", "Photosynthesis: the original passive income."],
-  night: ["Night shift.", "Coffee number five.", "Asia's waking up.", "Quiet hours are when coins sneak up.", "Lights low, feed on.",
-    "The moon's out. So are the degens.", "Graveyard shift, but nothing dies on my watch.", "3 a.m. launches hit different.",
-    "Night mode: fewer coins, cleaner reads.", "The city's lit up like a green day."],
-};
-// each bot's own voice
-const VOICE = {
-  scanner: ["Fifty coins near the window and none of them ready.", "Buyers first, everything else second.", "I check every rule, every two seconds.",
-    "Curve at 54%? Not yet. Patience.", "If it's not net inflow, it's noise.", "Twelve fresh buyers. That's my number.",
-    "I don't chase. I wait for the window.", "A coin near 85% with no buyers is a trap."],
-  exits: ["Initials first, then let it ride.", "A trailing stop is a promise to yourself.", "Selling into strength never hurt anyone.",
-    "Momentum decay is the quiet exit.", "Graduation exit: sell before the pool, not after.", "The best exit is the one you planned."],
-  risk: ["The loss limit is a seatbelt.", "Size down when you're cold.", "Kill switch armed. Hope we never need it.",
-    "Defense mode isn't fear. It's math.", "Every position has a worst case. I know them all.", "Max risk? Then max discipline."],
-  feed: ["Every trade, in order, on time.", "Lag under two seconds. Happy.", "A gap in the feed is a blindfold.", "I count every trade twice.",
-    "If the feed stalls, we stop. Simple.", "Mainnet-beta's quick tonight."],
-  operator: ["Ask me anything in Chat.", "I only act with your OK.", "I read the memory board every morning.", "Want a desk check? Just ask.",
-    "I keep notes so you don't have to.", "Paper first, always."],
-  recorder: ["Recording every graduated pool.", "The wallet study needs fourteen quiet days.", "Disk's fine. Plenty of room.",
-    "Smart wallets leave footprints.", "Period A, day one. Slow and honest."],
-  veteran: ["Seen a thousand of these. Most die in minutes.", "Real demand doesn't need a hype thread.", "Order flow tells the truth.",
-    "Back in my day we sniped with our bare hands.", "If the dev buys 30%, I walk.", "Clean chart, clean holders, then we talk."],
-  narrative: ["Memes are attention with a ticker.", "Is the story bigger than the first wave?", "A real X account beats a pretty logo.",
-    "Copycats never outrun the original.", "Culture moves first, charts follow.", "That ticker would trend. Maybe."],
-  skeptic: ["Bundled supply. Again.", "Who are these 20 wallets buying in one block?", "I'm not negative, I'm early.",
-    "Every pump has a seller somewhere.", "Show me the holders, then the chart.", "I'd veto that in my sleep. Actually, I am asleep."],
-  quant: ["About 1% of launches graduate. Base rates matter.", "Expected value beats vibes.", "Fees eat 5% of every round trip.",
-    "A win rate means nothing without the average win.", "Small sample. Ask me again in a hundred trades.", "Variance is the tax on excitement."],
-};
 const RL = {used: null, recent: []};
 function linesUsed() {
   if (!RL.used) { try { RL.used = new Set(JSON.parse(localStorage.getItem("room.lines") || "[]")); } catch { RL.used = new Set(); } }
@@ -3166,11 +3117,24 @@ function dataLine(id) {                                // fresh sentences from l
     sm.closed ? `${sm.closed} trades closed, ${Math.round((sm.win_rate || 0) * 100)}% won.` : "",
   ].filter(x => x && !linesUsed().has(x));
 }
-function nextLine(id, place) {
-  const pool = [...(LINES[place] || []), ...(VOICE[id] || [])].filter(t => !linesUsed().has(t));
-  const pick = pool.length ? pool[Math.floor(Math.random() * pool.length)] : (dataLine(id)[0] || "");
-  if (pick) markUsed(pick);
-  return pick;
+function voteLine(id) {                               // a persona's own last vote, in its own words
+  for (const rv of (((DK.data || {}).desk || {}).reviews || [])) {
+    const v = (rv.votes || []).find(x => x.persona === id && !x.error);
+    if (!v) continue;
+    const said = id === "skeptic" ? (v.red_flags || [])[0] || (v.reasons || [])[0] : (v.reasons || [])[0];
+    return said ? `${rv.symbol}: ${v.vote} at ${v.conviction}. ${said}` : "";
+  }
+  return "";
+}
+function nextLine(id) {                                // something true about its corner of the bot, never filler (or nothing)
+  const line = [voteLine(id), leaderAnswer(id), ...dataLine(id)].find(t => t && t !== "All good here." && !linesUsed().has(t)) || "";
+  if (line) markUsed(line);
+  return line;
+}
+function labNowLine() {
+  const LB = (snap || {}).lab || {}, r = LB.running && LB.running.key ? LB.running : null, l = LB.last && LB.last.key ? LB.last : null;
+  return r ? `Lab: testing ${labName(r.key)} ${r.now} → ${r.value}, day by day.`
+    : l ? `Lab: ${labName(l.key)} ${l.now} → ${l.value} came back ${l.status === "failed" ? "failed" : l.verdict || "done"}.` : "";
 }
 function seatOf(id) {
   if (DESK_AT[id]) { const [dx, dy] = DESK_AT[id]; return [dx + 1, dy - .3]; }
@@ -3514,7 +3478,7 @@ function errand2(b) {
   goTo(b, STOPS[kind].map(v => v + (Math.random() - .5) * .5), () => {
     if (["window", "board"].includes(kind)) { b.view = "back"; drawBot(b); }     // looking out, reading the board
     setProp(b, {coffee: "☕", cooler: "🥤", plant: "🪴", board: "", window: ""}[kind]);
-    const line = nextLine(b.id, night && Math.random() < .5 ? "night" : kind);
+    const line = nextLine(b.id);
     if (line) hsay(b.id, esc(line), {force: true});
     setTimeout(() => { if (b.busy === kind) goHome(b); }, 5000 + Math.random() * 5000);
   });
@@ -3526,7 +3490,7 @@ function meet(a, b) {
   let n = 0;
   const arrived = () => { if (++n < 2) return;
     a.face = b.x > a.x ? 1 : -1; b.face = -a.face; drawBot(a); drawBot(b);
-    hsay(a.id, l1, {force: true}); setTimeout(() => hsay(b.id, l2, {force: true}), 2200);
+    if (l1) { hsay(a.id, l1, {force: true}); if (l2) setTimeout(() => hsay(b.id, l2, {force: true}), 2200); }
     setTimeout(() => { if (a.busy === "chat") goHome(a); if (b.busy === "chat") goHome(b); }, 6500); };
   goTo(a, [mx - .55, my], arrived); goTo(b, [mx + .55, my], arrived);
 }
@@ -3534,20 +3498,14 @@ function chatLines(a, b) {
   const d = DK.data || {}, L = d.late || {}, f = d.feed || {}, r = d.risk || {}, s = snap || {};
   const top = (L.candidates || []).find(c => ["wait", "buy", "early"].includes(c.verdict));
   const p = (s.positions || [])[0], now = new Date(), hh = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const lim = (d.limits || {}).daily_loss_sol, LB = s.lab || {}, ll = LB.last && LB.last.key ? LB.last : null, last = (s.closed || [])[0];
   const pairs = [
-    f.host ? [`How's the feed at ${hh}?`, `${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing. Clean.`] : null,
-    [`Dial's on ${r.name || "?"} at ${hh}. Nervous?`, `Never. The stops are set.`],
+    f.host ? [`How's the feed at ${hh}?`, `${fx(f.lag_s, 1)} s behind, ${fx(f.gap_pct, 1)}% missing.`] : null,
+    lim ? [`Where are we on the limit?`, `${signed(d.day_pnl || 0)}${U()} today of a ${sol(lim, 2)}${U()} limit, dial on ${r.name || "?"}.`] : null,
     top ? [`Seen ${top.symbol}? ${fx(top.progress, 0)}% full.`, `Watching it. ${String(top.why || "").slice(0, 60)}`] : null,
-    p ? [`${p.symbol} is ${pct(p.gain_pct, 0)}. Selling?`, p.gain_pct > 50 ? `Initials, then let it ride.` : `Not yet. The plan says hold.`] : null,
-    [`Today: ${signed(d.day_pnl || 0)}${U()} so far (${hh}).`, (d.day_pnl || 0) >= 0 ? `Green day. Don't jinx it.` : `It's not over till 00:00 UTC.`],
-    ["Coffee machine's broken again.", "It's not broken. It got rugged."], ["Did you see that bundle earlier?", "Twenty wallets, one block. Classic."],
-    ["What's the best trade you ever skipped?", "The one that went to zero an hour later."], ["Initials or full send?", "Initials. Always initials."],
-    ["Do you ever sleep?", "Only when the feed is clean."], ["Why do devs always sell at 80%?", "Because that's where the buyers are."],
-    ["Lunch?", "After this coin graduates. Or doesn't."], ["Is the skeptic ever happy?", "Once. It was a typo."],
-    ["What's a good win rate?", "Depends how big the wins are."], ["Should we tell the quant about the snacks?", "It already knows the expected value."],
-    ["Who renamed me in the wardrobe?", "Not me. Nice hat though."], ["You ever look at the P&L board and smile?", "Every green day."],
-    ["Big launch coming?", "There's always a big launch coming."], ["Did the narrative pick a meme yet?", "Three. They all have dogs."],
-    ["Think we'll graduate one today?", "If the buyers keep coming."], ["What did the recorder find?", "Fourteen days. Ask again later."],
+    p ? [`${p.symbol} is ${pct(p.gain_pct, 0)}. Selling?`, `In at ${mcUsd(p.entry_mcap_sol)} MC. The exits decide, not me.`] : null,
+    last ? [`How did ${last.symbol} go?`, `${signed(+last.pnl)}${U()}: ${String(last.exit || "").slice(0, 50)}.`] : null,
+    ll ? [`Anything from the lab?`, `${labName(ll.key)} ${ll.now} → ${ll.value}: ${ll.status === "failed" ? "failed" : ll.verdict || "done"}.`] : null,
   ].filter(x => x && !linesUsed().has(x[0] + "|" + x[1]));
   if (!pairs.length) { const x = dataLine(a.id), y = dataLine(b.id); return [x[0] || "", y[1] || y[0] || ""].map(esc); }
   const pk = pairs[Math.floor(Math.random() * pairs.length)];
@@ -3570,7 +3528,7 @@ setInterval(() => {
     if (b.busy || b.path.length || !DESK_AT[b.id] && b.mood === "sleep") continue;
     const act = actOf(b.id), p = (b.mood === "idle" ? 1 / 24 : b.mood === "work" ? 1 / 70 : 0) * (MOVE_F[act.move] ?? 1);
     if (Math.random() < p && busyCount() < 3) errand2(b);
-    else if (act.talk === "chatty" && Math.random() < 1 / 40) { const line = nextLine(b.id, pick(["coffee", "board", "window", "cooler"])); if (line) hsay(b.id, esc(line), {force: true}); }
+    else if (act.talk === "chatty" && Math.random() < 1 / 40) { const line = nextLine(b.id); if (line) hsay(b.id, esc(line), {force: true}); }
   }
 }, 1000);
 // ---- real hand-offs between the bots
@@ -3920,7 +3878,7 @@ function houseTrip(b, room) {                         // a break in the lounge, 
   goTo(b, [x, y], () => {
     b.view = view; b.sit = ["sofa", "bag1", "bag2", "bench", "bench2"].includes(k); if (k === "pongR") b.face = -1; if (k === "pongL") b.face = 1;
     drawBot(b); setProp(b, prop);
-    const line = room === "lab" ? labLine(b, k) : nextLine(b.id, "lounge");
+    const line = room === "lab" ? labLine(b, k) : "";
     if (line) hsay(b.id, esc(line), {force: true});
     setTimeout(() => { if (b.spot === room + ":" + k) { b.spot = null; goHome(b); } }, 9000 + Math.random() * 9000);
   }, 2.2, room);
@@ -3929,24 +3887,23 @@ function houseTrip(b, room) {                         // a break in the lounge, 
 // ---- tasks around the house: a few steps each in the lab and the lounge, so the other rooms aren't empty
 const TASKS = {
   lab: [
-    {name: "running a backtest", steps: [["bench", 9, "⌨️", () => "Backtesting yesterday's tape: same rules, new data."],
-      ["rack", 5, "🛠", () => "Pulling the recorder's files."], ["edge", 7, "", b => labLine(b, "edge")]]},
-    {name: "reading the wallet study", steps: [["wallets", 8, "", b => labLine(b, "wallets")], ["table", 6, "📄", () => "Writing up which wallets move together."]]},
-    {name: "servicing the rack", steps: [["rack", 9, "🛠", () => "Checking the rack: every trade still landing on disk."], ["bench2", 6, "⌨️", () => "Disk's fine. Logs look clean."]]},
-    {name: "comparing exits", steps: [["bench2", 9, "⌨️", () => exitLabLine()], ["table", 5, "📄", () => "Same entries, different exits: the data decides."]]},
+    {name: "running a backtest", steps: [["bench", 9, "⌨️", () => labNowLine()], ["rack", 5, "🛠", () => ""], ["edge", 7, "", b => labLine(b, "edge")]]},
+    {name: "reading the wallet study", steps: [["wallets", 8, "", b => labLine(b, "wallets")], ["table", 6, "📄", () => ""]]},
+    {name: "servicing the rack", steps: [["rack", 9, "🛠", () => ""], ["bench2", 6, "⌨️", () => ""]]},
+    {name: "comparing exits", steps: [["bench2", 9, "⌨️", () => exitLabLine()], ["table", 5, "📄", () => ""]]},
   ],
   lounge: [
     {name: "playing ping-pong", pair: true},
-    {name: "on the arcade", steps: [["arcade", 12, "🕹", () => pick(["New high score.", "One more game.", "This cabinet eats quarters.", "Level 9. Don't talk to me."])]]},
-    {name: "grabbing a snack", steps: [["fridge", 4, "🧃", () => pick(["Fridge raid.", "Who took my yogurt?", "Last cold drink."])], ["sofa", 10, "🍿", () => tvLine()]]},
-    {name: "napping", steps: [["bag1", 14, "💤", () => "Five minutes on the beanbag."]]},
+    {name: "on the arcade", steps: [["arcade", 12, "🕹", () => ""]]},
+    {name: "grabbing a snack", steps: [["fridge", 4, "🧃", () => ""], ["sofa", 10, "🍿", () => tvLine()]]},
+    {name: "napping", steps: [["bag1", 14, "💤", () => ""]]},
     {name: "watching the pulse", steps: [["bag2", 12, "🍿", () => tvLine()]]},
   ],
 };
-function tvLine() { const r = ((snap && snap.pulse) || []).slice(-1)[0]; return r ? `The big TV says ${r[1]} launches this minute.` : "Watching the market pulse on the big TV."; }
+function tvLine() { const r = ((snap && snap.pulse) || []).slice(-1)[0]; return r ? `${r[1]} launches this minute.` : ""; }
 function exitLabLine() {
   const v = ((((S.analytics || {}).exit_lab || {}).late || {}).variants || []).filter(x => x.n).sort((a, b) => b.mean_pct - a.mean_pct)[0];
-  return v ? `Exit lab: "${v.variant}" leads, ${pct(v.mean_pct, 1)} a trade over ${v.n}.` : "Comparing exits on the same entries.";
+  return v ? `Exit lab: "${v.variant}" leads, ${pct(v.mean_pct, 1)} a trade over ${v.n}.` : "";
 }
 const freeStop = (room, k) => !Object.values(IO.bots).some(o => o.spot === room + ":" + k);
 const canRoam = b => !b.busy && !b.path.length && b.mood !== "sleep" && actOf(b.id).move !== "still" && !["alert", "act"].includes(b.mood);
@@ -3959,14 +3916,12 @@ function startTask(b, room) {
 }
 // ---- Claude leads the team: hands out the tasks, makes the rounds, chairs the meetings at the head of the table
 const LEAD = {nextRound: Date.now() + 30000, said: 0};
-const TASK_ASK = {"running a backtest": "go run a backtest on yesterday's tape", "reading the wallet study": "check the wallet study boards",
-  "servicing the rack": "give the recorder's rack a look", "comparing exits": "compare the exits in the lab",
-  "on the arcade": "take ten on the arcade", "grabbing a snack": "grab a snack, you've earned it", "napping": "five minutes on the beanbag",
-  "watching the pulse": "keep an eye on the pulse from the lounge"};
-function leaderAssign(b, task, room) {
-  if (Date.now() - LEAD.said < 20000 || !IO.bots.operator) return;
+const TASK_ASK = {"running a backtest": "check what the lab is testing", "reading the wallet study": "check the wallet study boards",
+  "comparing exits": "compare the exits in the lab"};
+function leaderAssign(b, task, room) {                 // work only: nobody needs telling to take a break
+  if (Date.now() - LEAD.said < 20000 || !IO.bots.operator || !TASK_ASK[task.name]) return;
   LEAD.said = Date.now();
-  hsay("operator", esc(`${botLook(b.id).name}, ${TASK_ASK[task.name] || "take a break in the " + room}.`), {force: true});
+  hsay("operator", esc(`${botLook(b.id).name}, ${TASK_ASK[task.name]}.`), {force: true});
 }
 function leaderAsk(id) {
   const n = botLook(id).name;
@@ -4028,8 +3983,6 @@ function pingPong(a) {
   const others = Object.values(IO.bots).filter(o => o !== a && canRoam(o) && (!DESK_AT[o.id] || o.mood === "idle"));
   if (!others.length || !freeStop("lounge", "pongL") || !freeStop("lounge", "pongR")) return false;
   const b = pick(others), len = 15000 + Math.random() * 9000;
-  if (IO.bots.operator && a.id !== "operator" && b.id !== "operator" && Date.now() - LEAD.said > 20000) {
-    LEAD.said = Date.now(); hsay("operator", esc(`${botLook(a.id).name}, ${botLook(b.id).name}: ping-pong, best of five. Then back to it.`), {force: true}); }
   let here = 0;
   const done = () => { IO.ppOn = false; ppBall(); for (const p of [a, b]) if (p.busy === "task" && p.task === "playing ping-pong") { p.spot = null; p.task = null; goHome(p); } };
   for (const [p, k, face] of [[a, "pongL", 1], [b, "pongR", -1]]) {
@@ -4039,8 +3992,6 @@ function pingPong(a) {
       p.view = "front"; p.face = face; p.sit = false; drawBot(p); setProp(p, "🏓");
       if (++here === 2) {
         IO.ppOn = true; ppBall();
-        hsay(a.id, esc(pick(["Rally!", "Best of five?", "Serve's mine.", "Loser buys coffee."])), {force: true});
-        setTimeout(() => { if (IO.ppOn) hsay(b.id, esc(pick(["Match point.", "Nice spin.", "Rematch later.", "That was in!"])), {force: true}); }, 6000);
         setTimeout(done, len);
       }
     }, 2.2, "lounge");
@@ -4064,7 +4015,7 @@ function labLine(b, k) {
     k === "edge" && late && late.n ? `Graduation plays: ${pct(late.ret_pct, 1)} per SOL over ${late.n} trades. ${late.level === "promising" ? "Promising, not proven." : ""}` : "",
     k === "rack" ? "The recorder rack is humming. Every PumpSwap trade, on disk." : "",
   ].filter(Boolean);
-  return lines[0] || nextLine(b.id, "lab");
+  return lines[0] || nextLine(b.id);
 }
 let houseDataAt = 0;
 function renderHouseBoards() {
@@ -4086,7 +4037,7 @@ function renderHouseBoards() {
       <text x="8" y="70" class="pb-s">freeze ${new Date(w.freeze_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})} · verdict ~${new Date(w.verdict_after * 1000).toLocaleDateString([], {month: "short", day: "numeric"})}</text>`
       : `<text x="8" y="34" class="pb-s">loading the recorder's data…</text>`}`);
     const strat = e ? (e.strategies || []).filter(s => s.n && s.source !== "manual").slice(0, 3) : [];
-    const LB = (snap || {}).lab || {}, lr = LB.running, ll = LB.last;
+    const LB = (snap || {}).lab || {}, lr = LB.running && LB.running.key ? LB.running : null, ll = LB.last && LB.last.key ? LB.last : null;
     const labTop = lr ? `<text x="8" y="14" class="pb-t">LAB: TESTING</text><text x="8" y="28" class="pb-s">${esc(labName(lr.key).slice(0, 26))}</text><text x="8" y="40" class="pb-s">${lr.now} → ${lr.value} · day by day</text>`
       : ll ? `<text x="8" y="14" class="pb-t">LAB: LAST RESULT</text><text x="8" y="28" class="pb-s">${esc(labName(ll.key).slice(0, 26))} ${ll.now} → ${ll.value}</text><text x="8" y="40" class="pb-s">${esc(ll.status === "failed" ? "run failed" : ll.verdict || "")} · ${LB.tries || 0} tests so far</text>` : "";
     if (labTop) { setHTML(b2, labTop + `<text x="8" y="58" class="pb-t">EDGE</text>${strat.slice(0, 1).map(s => `<text x="8" y="70" class="pb-s ${cls(s.ret_pct)}">${esc(s.label.slice(0, 14))} ${pct(s.ret_pct, 1)} per SOL</text>`).join("")}`); return; }
@@ -5578,7 +5529,10 @@ const LABV = {at: 0, data: null, seenRun: null, seenDone: null};
 const LAB_NAMES = {"late.min_net_flow_sol": "Net inflow needed (SOL / 30 s)", "late.min_buyers": "Unique buyers needed", "late.min_buy_sell_ratio": "Buys/sells ratio",
   "late.min_near_high": "Within this much of its high", "late.min_curve_pct": "Window opens at curve %", "late.max_curve_pct": "Window closes at curve %",
   "late.max_age_s": "Max coin age (s)", "late.flow_window_s": "Flow window (s)", "late.stop_loss_pct": "Stop loss %", "late.stall_s": "Exit after no new high (s)",
-  "late.max_hold_s": "Max hold (s)", "late.exit_curve_pct": "Exit at curve %"};
+  "late.max_hold_s": "Max hold (s)", "late.exit_curve_pct": "Exit at curve %", "late.min_age_s": "Min coin age (s)",
+  "late.min_recent_sells": "Sells needed in the last 20 s", "late.max_dev_sold_pct": "Dev may have sold (% of supply)",
+  "late.runner_after_pct": "Runner mode from +%", "late.runner_trail_pct": "Runner trail %",
+  "entry.max_bundle_pct": "Max bundled supply %", "entry.max_early_sold_ratio": "Max early-buyer dump (1 = 100%)"};
 const labName = k => LAB_NAMES[k] || k;
 const labTest = x => `${labName(x.key)}: ${x.now} → <b>${x.value}</b>`;
 async function loadLab() {
@@ -6065,7 +6019,7 @@ document.addEventListener("click", e => {
   if (d.lcview) { toggleView(d.lcview); return; }
   if (d.lvchain) { const [key, v] = d.lvchain.split(":");
     if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
-    LV.keys = {}; renderViews(); return; }
+    LV.keys = {}; renderViews(true); return; }
   if (d.labdrop) { send({action: "lab_drop", id: d.labdrop}); LABV.at = 0; setTimeout(loadLab, 600); return; }
   if (d.labadd) { const v = $("lab-val").value; if (v === "") { $("lab-val").focus(); return; }
     send({action: "lab_add", key: $("lab-key").value, value: +v}); $("lab-val").value = ""; t.blur(); LABV.at = 0; setTimeout(loadLab, 600); return; }

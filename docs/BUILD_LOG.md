@@ -29,6 +29,17 @@ A running record of decisions, research, parameters and status. Newest entries a
   - this hour's copycat waves, the last 2 hours' graduates, and X feed posts naming the coin.
 - **Its instructions** tell it to find the story, leave flow and holder numbers to the others, and pass on no hook, a dead or fake link, or a copy that isn't the biggest of its name.
 
+**The room says only useful things** (owner: "just actual useful stuff, don't want it corny").
+- The scripted filler is gone: coffee, plant and window jokes, ping-pong quips, and Claude sending bots on breaks.
+- What a bot says now comes from the bot: its own status, a persona's real last vote and reason, the lab's actual test, the last close. With nothing true to say, it says nothing; the bots still move around.
+- **Fixed:** with no finished lab test, the page read an empty list as a result ("Lab: undefined → undefined").
+
+**Charts → Other chains: the chain buttons work.**
+- **The bug:** a list doesn't redraw while the mouse is over it (so rows don't jump), and a click is always over it. A chain button only took effect after the mouse left and the 30 s refresh came.
+- **Also:** "Fresh only" hid 19 of Base's 20 trending pools; the panel now says how many it hides. The note no longer says other chains aren't traded.
+
+**Lab: the shared red flags are testable** (owner: "these are the params holding us back"): `entry.max_bundle_pct` (15) and `entry.max_early_sold_ratio` (0.35). The graduation play and the early sniper share them. Of the gate checklist's red rows, "dev initial buy" and "net inflow 20s" gate only the early sniper, which is off.
+
 **Two new settings, off by default, for the lab to test:**
 - **`late.runner_after_pct`** (0 = off) and **`late.runner_trail_pct`** (25): once a play has been up this much, momentum decay and the stall stop no longer sell it; a trailing stop does.
 - **`late.max_dev_sold_pct`** (0 = any creator sale skips, as before): the owner saw coins passed for "dev holding: sold" whose charts kept climbing; four of ten on the graduation watch at once. A coin let in this way still sells if the creator sells again after the buy.
