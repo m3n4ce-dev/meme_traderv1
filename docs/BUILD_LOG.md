@@ -4,6 +4,50 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #57: A stronger model, an edge that turned out to be speed, and a live follow of its picks
+
+**Owner's question:** "would stronger agents help? we have hours and hours of data to train on". Then: "We have to be able to find an edge because they are there".
+
+**Answer:** the AI team's models can't train on data, and it isn't their judgement that's failing: its buys did worse than its passes. What does train is the prediction model, so the work went there. Everything below is offline, on the recordings, with train and test on separate days.
+
+**1. Stronger model.** Gradient-boosted trees (LightGBM, 36 features, label: +100% before −30% within 10 min, snapshots at 15 s to 3 min of age), against the live logistic model:
+
+| Held-out day | Logistic AUC | Trees AUC | Trees calibration |
+|---|---|---|---|
+| Oct 5 (trained Oct 3–4) | — | 0.860 | — |
+| Oct 6 (trained Oct 3–5) | 0.826 | 0.864 | matched (23% said, 23.5% happened) |
+
+The logistic model's hit rate stops near 20% however picky it gets (top 10%, 2% and 0.5% all double ~20% of the time); the trees reach 24–27%.
+
+**2. Picks as trades.** One buy per coin, at its first checkpoint at or over a threshold, after 3.5% round-trip fees.
+- **Instant fills, trees ≥30%:** +11% to +16% per trade on both unseen days (396 and 134 coins). At ≥25%: +2% to +4%.
+- **The working exits:** stop 40%, no fixed take profit, and a 25–30% trail once up 30–50%. The +100%/−30% bracket the label uses did worse.
+- **How the exits were chosen:** on the first half of Oct 6, then checked on the second half; then locked for Oct 5 with a model that never saw it.
+
+**3. The catch: speed.** The same trades with the buy and every sell landing late:
+
+| Trees ≥30%, best exit | instant | 0.5 s | 1 s | 1.5 s | 2.5 s (paper bot today) |
+|---|---|---|---|---|---|
+| Oct 5 | +15% | +2% | 0% | +2% | 0% |
+| Oct 6 | +16% | +6% | +4% | +4% | +5% |
+
+At ≥25% every delay loses 1–3% per trade. The model spots coins that are moving now, and most of the move is in the first half second. "Instant" isn't reachable: the recordings are timestamped when we receive a trade, and our feed is 1.3–2 s behind the chain.
+
+**4. Two ideas that didn't fix it:**
+- **Retrained on the price 2.5 s later** (the label counted from when a buy would land): AUC 0.86 on that label, but trades still lose at every threshold. ≥30% is +1% to +2.5% on Oct 5 (233 coins, standard error ±6) and −1% to −11% on Oct 6 (52 coins).
+- **Holding high conviction longer:** ≥30–40% picks, up to an hour, wider or no stops, 2.5 s fills. Every variant was within noise of zero. Held an hour, the median pick is down 66%.
+
+**Verdict:** no edge on brand-new coins at our speed. The model is real (it sorts coins well), but what it sees is priced in before a 1–2.5 s order lands. Faster infrastructure alone wouldn't clearly fix it either: even 0.5 s gave back most of it.
+
+**Built:**
+- `TreeModel` (predictor.py): trees fitted offline, run in plain Python (0.07 ms a coin, exact match with LightGBM); `train --kind trees` writes `data/model-trees.json`.
+- **Model picks, live (Analytics → Exit lab → Model picks):** the trees look at every new coin at the ages they were trained on. Picks at 25%+ are followed in the exit lab on the four exits above, each filled instantly and `paper_delay_s` late, split by P(2x) band. Nothing is bought; it runs whatever the switches or kill switch say. It shows the speed gap on live data and checks the live features against the recordings.
+- **Exit lab:** a coin can carry follows of several kinds at once (`model-pick` beside a team vote's follow); late fills (`_delay`); rows carry extra fields (P(2x), age).
+
+**Next, slower coins:** coins 5–30 minutes old, near graduation or just after, where a 2.5 s delay matters less. Same method: trees at later checkpoints, a late-fill label, held-out days.
+
+---
+
 ## 2026-10-06 — Entry #56: The AI team practices whenever the bot can't buy
 
 **Owner's request:** "the team should always be practicing and working to find an edge".

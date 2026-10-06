@@ -323,6 +323,10 @@ sniper:
     min_p: 0.0                   # entry gate on P(2x first) (needs display_only: false)
     kelly_fraction: 0.25         # quarter-Kelly into the sizing agent's strength (needs display_only: false)
     require_positive_ev: false   # skip entries the model says lose money after costs (needs display_only: false)
+    picks:                       # the stronger model (gradient-boosted trees: `train --kind trees`, needs lightgbm). Each
+      enabled: true              #   new coin at or over min_p at a checkpoint age is followed in the exit lab on stop /
+      model_path: data/model-trees.json   # trail / time exits, filled instantly and as late as paper_delay_s. Nothing
+      min_p: 0.25                #   is bought: Analytics -> Exit lab -> Model picks
 
   lab:                           # the team's lab: one setting at a time replayed on the last 24 h of recordings
     enabled: true                #   (a separate low-priority process; results go to the next huddle)

@@ -327,6 +327,23 @@ def _train(args, params) -> None:
     source = _source(args, params)
     events = load_events(source)
     print(f"{len(events):,} events loaded; building labelled snapshots...")
+    if getattr(args, "kind", "logistic") == "trees":            # the stronger model: its picks are followed live
+        from .predictor import train_trees
+        model, info = train_trees(events, params, args.train, source=source)
+        pk = params.sniper.predict.get("picks") or {}
+        out = Path(args.out or pk.get("model_path", "data/model-trees.json"))
+        out = out if out.is_absolute() else ROOT / out
+        model.save(out)
+        t = info["test"]
+        if t.get("n"):
+            print(f"\n=== trees: P({info['label']}) ===  {info['trees']} trees, {info['seconds']}s")
+            print(f"test      AUC {t['auc']:.3f}  base rate {t['base_rate']:.1%}  top decile {t['top_decile_rate']:.1%} "
+                  f"({t['top_decile_lift']:.1f}x lift)")
+            for b in t["calibration"]:
+                print(f"  {b['lo']:.0%}-{b['hi']:.0%}  n={b['n']:<6} {b['predicted']:.0%} -> {b['actual']:.0%}")
+        print("strongest features:", ", ".join(f"{k}" for k, _ in info["importance"][:8]))
+        print(f"\nsaved {out}: the bot follows its picks in the exit lab (picked up within a minute; nothing is traded)")
+        return
     model, info = train(events, params, args.train, source=source)
     out = Path(args.out) if args.out else candidate_path(params)
     out = out if out.is_absolute() else ROOT / out
@@ -542,6 +559,8 @@ def main() -> None:
     tr = sub.add_parser("train", help="fit and grade the P(2x first) model on recorded data")
     tr.add_argument("--train", type=float, default=0.7, help="share of launches used for fitting (rest grades it)")
     tr.add_argument("--out", help="candidate model file (default: <model_path>-candidate.json)")
+    tr.add_argument("--kind", choices=("logistic", "trees"), default="logistic",
+                    help="trees = gradient-boosted (needs lightgbm); saved to predict.picks.model_path, followed live")
     pm = sub.add_parser("promote", help="deploy the trained candidate model (recorded data + skill required)")
     pm.add_argument("--model", dest="file_model", help="candidate file (default: <model_path>-candidate.json)")
     pm.add_argument("--force", action="store_true", help="promote even with low held-out skill")
