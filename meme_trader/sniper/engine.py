@@ -190,7 +190,11 @@ class Engine:
         self.desk_failures = 0                                   # reviews in a row where no persona answered
         self.manual_queue: dict[str, tuple[float, float]] = {}   # mint -> (SOL, when): buy at its first price
         self.hand_after: dict[str, float] = {}       # "Buy & give to bots": mint -> when; handed over once the buy fills
-        self.kol_tape: deque = deque(maxlen=600)     # trades by KOLs and the wallet study's wallets, any coin (Charts tab)
+        self.kol_tape: deque = deque(maxlen=6000)    # trades by KOLs and the wallet study's wallets, any coin (Charts tab)
+        self._kol_keep: dict[str, float] = {}           # mint -> last KOL trade: the coin stays tracked (priced) a while
+        self._kol_last_mc: dict[str, float] = {}         # mint -> market cap when the bot stopped tracking it
+        self.coin_names: dict[str, str] = {}            # tickers of coins first met through a KOL trade (DexScreener)
+        self._last_kol_names = 0.0
 
         self._kol_first: dict[tuple[str, str], float] = {}   # (wallet, mint) -> its first buy: how long they held
         from .memory import Memory
@@ -703,11 +707,14 @@ class Engine:
         known = e.trader in self.leaders.leaders            # paused leaders still matter: we follow their sells
         lead = known and self.leaders.is_leader(e.trader)
         if s is None:
-            if not lead:
+            kol = None if lead else self._known_wallets().get(e.trader)
+            if not lead and not kol:
                 return
-            s = self.tokens[e.mint] = TokenState(e.mint, None, e.ts)   # token we only know via a leader
+            s = self.tokens[e.mint] = TokenState(e.mint, None, e.ts)   # token we only know via a leader or a KOL
             if e.v_sol and e.v_tokens:
                 s.curve = Curve(e.v_sol, e.v_tokens)
+            if kol:                      # its launch wasn't seen, so its age is unknown: never a strategy candidate
+                s.decided, s.late_tried = "seen through a KOL's trade", True
             await self._watch(e.mint)
         s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
         kw = self._known_wallets().get(e.trader)        # a KOL or a study wallet: the Charts tab's tracker
@@ -1065,9 +1072,9 @@ class Engine:
                                               "launch_order": fam["rank"], "seconds_after_first": fam["after_og_s"],
                                               "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
         only: dict = {}
-        if kind == "late":
+        if kind in ("late", "sniper"):                   # each persona's record on this strategy's calls
             for p in self.p.desk.personas:
-                rec = desk_record.persona_record(self.desk_calls, p)
+                rec = desk_record.persona_record(self.desk_calls, p, strategy=kind)
                 if rec:
                     only[p] = {"your_record": rec}
         only["narrative"] = {**only.get("narrative", {}), "narrative_context": self.narrative_context(s)}
@@ -1091,13 +1098,15 @@ class Engine:
                                   "Entries continue on the rules alone.")
         else:
             self.desk_failures, self.desk_error = 0, ""
-            if kind == "late":
-                self._open_call(s, v, "live")
+            if kind in ("late", "sniper"):
+                self._open_call(s, v, "live", kind)
         if not v.approve:
             self.rejects["desk passed"] += 1
             if kind == "sniper":
                 s.decided = "rejected: desk passed"
                 self._audit_start(s, "desk passed")
+                if self.feed.realtime and v.votes and not all(x.error for x in v.votes):   # scored like a buy would be
+                    self.lab.start(s.mint, s.symbol, "sniper-pass", s.curve.price, self.now, self.p, only=("as now",))
             elif v.votes and not all(x.error for x in v.votes):
                 # follow what the passed coin does next, split by how many personas said buy, so the gate
                 # audit shows whether an outvoted majority (3 of 4) does better than a unanimous pass
@@ -1118,8 +1127,9 @@ class Engine:
             self.say("info", f"desk approved {s.symbol} but skipped: {why}", s.mint)
             if kind == "sniper" and not why.startswith(("max positions", "paused", "low SOL")):
                 s.decided = "skipped: " + why          # don't pay for a fresh desk review every tick
-            if kind == "late" and self.feed.realtime:      # the call still gets its score
-                self.lab.start(s.mint, s.symbol, "practice-buy", s.curve.price, self.now, self.p, only=("as now",))
+            if kind in ("late", "sniper") and self.feed.realtime:      # the call still gets its score
+                self.lab.start(s.mint, s.symbol, "practice-buy" if kind == "late" else "sniper-skip", s.curve.price,
+                               self.now, self.p, only=("as now",))
             return
         await self._buy(s, score, size, notes, source, leader)
 
@@ -1615,6 +1625,7 @@ class Engine:
             self.book.halted = f"drawdown {dd:.0f}%"
             self.say("error", f"KILL SWITCH: {self.book.halted} - selling everything")
         await self._price_fallback()
+        await self._kol_names()
         self._maybe_huddle()
         cleanup = self.now - self._last_cleanup >= 10       # deletions only need a 10 s cadence
         if cleanup:
@@ -1633,7 +1644,10 @@ class Engine:
                     await self._check_exit(s)
             elif not s.decided:
                 await self._check_entry(s)
-            elif cleanup and self.now - s.created_ts > keep_s and mint not in recent_calls:
+            elif cleanup and self.now - s.created_ts > keep_s and mint not in recent_calls \
+                    and self.now - self._kol_keep.get(mint, -1e18) > self.KOL_KEEP_S:
+                if mint in self._kol_keep and s.price_known:  # the KOL tracker shows it as last seen
+                    self._kol_last_mc[mint] = round(s.market_cap_sol, 1)
                 del self.tokens[mint]                       # (calls keep their token priced until the 1h result)
                 if not self.record_file:
                     await self._unwatch(mint)
@@ -1956,11 +1970,11 @@ class Engine:
         elif s.mint in self.positions:
             self.positions[s.mint].desk = f"side vote: {v.summary}"
 
-    def _open_call(self, s, v, mode: str) -> None:
+    def _open_call(self, s, v, mode: str, strategy: str = "late") -> None:
         from .desk_record import call_votes
         if len(self._calls_open) > 300:                  # never scored (a buy that didn't land): let them go
             self._calls_open = {m: c for m, c in self._calls_open.items() if self.now - c["ts"] < 7200}
-        self._calls_open[s.mint] = {"ts": self.now, "mint": s.mint, "symbol": s.symbol, "mode": mode,
+        self._calls_open[s.mint] = {"ts": self.now, "mint": s.mint, "symbol": s.symbol, "mode": mode, "strategy": strategy,
                                     "approve": bool(v.approve), "votes": call_votes(v.votes)}
 
     def _score_call(self, row: dict) -> None:
@@ -1980,8 +1994,10 @@ class Engine:
                 f.write(json.dumps(c) + "\n")
 
     def desk_scorecard(self) -> dict:
+        """The team's record per strategy (graduation plays, the early sniper)."""
         from .desk_record import scorecard
-        return scorecard(self.desk_calls, self.p.desk.personas)
+        return {"late": scorecard(self.desk_calls, self.p.desk.personas, "late"),
+                "sniper": scorecard(self.desk_calls, self.p.desk.personas, "sniper")}
 
     def _read_x_link(self, s) -> None:
         """Read a coin's X link once, as it nears the graduation window, so the narrative persona has the story
@@ -2324,8 +2340,12 @@ class Engine:
         if s is None:
             s = self.tokens[mint] = TokenState(mint, None, self.now)
             await self._watch(mint)
-        if not s.price_known and self.feed.realtime:      # not seen trading yet: maybe it graduated long ago
+        if self.feed.realtime and (not s.price_known or (not s.migrated and s.curve.progress >= 0.999)):
+            # not seen trading yet (maybe it graduated long ago), or its curve sold out and the move to its pool
+            # wasn't seen: ask DexScreener. Seen 2026-10-06: SLOP sat "full" for 3 h and every buy failed "curve full"
             await self._dex_price([mint])
+            if s.price_known and not s.migrated and s.curve.progress >= 0.999:
+                return "its bonding curve is full and it's moving to its PumpSwap pool: try again in a minute"
         if s.migrated:
             why = await self._graduated_ok(s)
             if why:
@@ -2662,7 +2682,7 @@ class Engine:
         usd = self.sol_price.usd
         new, stretch = [], []
         for s in self.tokens.values():
-            if not s.price_known or s.migrated:
+            if not s.price_known or s.migrated or s.curve.progress >= 0.999:   # (a full curve has left the stretch)
                 continue
             (stretch if s.curve.progress >= 0.5 else new).append(s)
         new.sort(key=lambda s: -s.created_ts)
@@ -3393,6 +3413,7 @@ class Engine:
     def _note_known(self, e, s: TokenState, kind: str, name: str) -> None:
         held = None
         k = (e.trader, e.mint)
+        self._kol_keep[e.mint] = e.ts
         if e.side == "buy":
             self._kol_first.setdefault(k, e.ts)
             if len(self._kol_first) > 20000:
@@ -3401,31 +3422,95 @@ class Engine:
         elif k in self._kol_first:
             held = round(e.ts - self._kol_first.pop(k))
         self.kol_tape.append({"t": round(e.ts, 1), "wallet": e.trader, "kind": kind, "name": name, "mint": e.mint,
-                              "symbol": s.symbol, "side": e.side, "sol": round(e.sol, 3),
+                              "symbol": self.coin_names.get(e.mint) or s.symbol, "side": e.side, "sol": round(e.sol, 3),
                               "mc": round(s.market_cap_sol, 1) if s.price_known else None, "held_s": held})
 
+    KOL_KEEP_S = 2 * 3600            # a coin a KOL traded stays tracked (live price) this long after their last trade
+
+    async def _kol_names(self) -> None:
+        """Tickers for coins first met through a KOL's trade (their launch wasn't seen): DexScreener, 30 a minute."""
+        if not self.feed.realtime or self.now - self._last_kol_names < 60:
+            return
+        self._last_kol_names = self.now
+        want = [m for m in self._kol_keep if m not in self.coin_names and m in self.tokens and self.tokens[m].launch is None][:30]
+        if not want:
+            return
+        from ..clients import dexscreener
+        try:
+            pairs = await asyncio.to_thread(dexscreener.best_pair_by_mint, want)
+        except Exception:
+            return
+        for m, p in pairs.items():
+            sym = str((p.get("baseToken") or {}).get("symbol") or "")[:20]
+            if sym:
+                self.coin_names[m] = sym
+        if len(self.coin_names) > 5000:
+            self.coin_names = {m: n for m, n in self.coin_names.items() if m in self._kol_keep}
+
     def kol_view(self, minutes: float = 60) -> dict:
-        """The Charts tab's KOL tracker: their latest trades on any coin the bot sees, and the coins they're in."""
+        """The Charts tab's KOL tracker over the last `minutes`: the coins they're in (who's still in, their average
+        entry against now), a scoreboard per wallet (round trips: what they sold against what they bought), and the
+        tape. Every coin a KOL trades is tracked for KOL_KEEP_S after, so "now" is live."""
         cut = self.now - minutes * 60
+        horizon = self.now - self.KOL_KEEP_S - 24 * 3600
+        self._kol_keep = {m: t for m, t in self._kol_keep.items() if t >= horizon}
+        self._kol_last_mc = {m: v for m, v in self._kol_last_mc.items() if m in self._kol_keep}
         recent = [x for x in self.kol_tape if x["t"] >= cut]
         coins: dict[str, dict] = {}
+        per: dict[tuple, dict] = {}                     # (wallet, mint) -> SOL in and out
         for x in recent:
-            c = coins.setdefault(x["mint"], {"mint": x["mint"], "symbol": x["symbol"], "names": [], "buys": 0, "sells": 0,
-                                              "net_sol": 0.0, "first_t": x["t"], "first_mc": x["mc"], "kols": 0})
+            sym = self.coin_names.get(x["mint"]) or x["symbol"]
+            c = coins.setdefault(x["mint"], {"mint": x["mint"], "symbol": sym, "names": [], "buys": 0, "sells": 0,
+                                              "net_sol": 0.0, "first_t": x["t"], "first_mc": x["mc"], "kols": 0,
+                                              "_bmc": 0.0, "_bsol": 0.0})
             if x["name"] not in c["names"]:
                 c["names"].append(x["name"])
                 c["kols"] += x["kind"] == "kol"
             c["buys" if x["side"] == "buy" else "sells"] += 1
             c["net_sol"] = round(c["net_sol"] + (x["sol"] if x["side"] == "buy" else -x["sol"]), 3)
+            if x["side"] == "buy" and x["mc"]:
+                c["_bmc"] += x["mc"] * x["sol"]
+                c["_bsol"] += x["sol"]
+            r = per.setdefault((x["wallet"], x["mint"]), {"name": x["name"], "kind": x["kind"], "in": 0.0, "out": 0.0})
+            r["in" if x["side"] == "buy" else "out"] += x["sol"]
+        by_mint: dict[str, list] = {}
+        by_wallet: dict[str, list] = {}
+        for (w, m), r in per.items():                    # (indexed once: a 24 h window has thousands of pairs)
+            by_mint.setdefault(m, []).append(r)
+            by_wallet.setdefault(w, []).append(r)
         for c in coins.values():
             s = self.tokens.get(c["mint"])
-            c["mc_now"] = round(s.market_cap_sol, 1) if s is not None and s.price_known else None
+            live = s is not None and s.price_known
+            c["mc_now"] = round(s.market_cap_sol, 1) if live else self._kol_last_mc.get(c["mint"])
+            c["mc_stale"] = not live and c["mc_now"] is not None
+            c["avg_entry_mc"] = round(c.pop("_bmc") / c["_bsol"], 1) if c["_bsol"] else None
+            c.pop("_bsol")
             c["migrated"] = bool(s and s.migrated)
+            rs = by_mint.get(c["mint"], [])
+            c["still_in"] = sorted({r["name"] for r in rs if r["in"] > r["out"] * 1.05})
+            c["sold_out"] = sorted({r["name"] for r in rs if r["out"] and r["in"] <= r["out"] * 1.05})
             f = self.family(c["mint"])
             c["fam"] = f and {k: f.get(k) for k in ("n", "rank", "og", "og_symbol", "after_og_s", "og_known")}
+        board: dict[str, dict] = {}
+        for x in recent:
+            b = board.setdefault(x["wallet"], {"wallet": x["wallet"], "name": x["name"], "kind": x["kind"], "trades": 0,
+                                               "coins": set(), "in_sol": 0.0, "out_sol": 0.0, "holds": [], "last_t": 0.0})
+            b["trades"] += 1
+            b["coins"].add(x["mint"])
+            b["in_sol" if x["side"] == "buy" else "out_sol"] += x["sol"]
+            if x["held_s"] is not None:
+                b["holds"].append(x["held_s"])
+            b["last_t"] = max(b["last_t"], x["t"])
+        for b in board.values():                         # a round trip: a coin they both bought and sold in the window
+            trips = [r["out"] / r["in"] - 1 for r in by_wallet.get(b["wallet"], []) if r["in"] > 0 and r["out"] > 0]
+            b.update(coins=len(b["coins"]), in_sol=round(b["in_sol"], 3), out_sol=round(b["out_sol"], 3), trips=len(trips),
+                     trips_won=sum(1 for t in trips if t > 0), trip_avg_pct=round(sum(trips) / len(trips) * 100, 1) if trips else None,
+                     median_hold_s=sorted(b["holds"])[len(b["holds"]) // 2] if b["holds"] else None)
+            del b["holds"]
         held = [x["held_s"] for x in recent if x["held_s"] is not None]
-        return {"tape": [x for x in reversed(recent)][:80],
-                "coins": sorted(coins.values(), key=lambda c: (-len(c["names"]), -c["buys"]))[:15],
+        return {"tape": [x | {"symbol": self.coin_names.get(x["mint"]) or x["symbol"]} for x in reversed(recent)][:200],
+                "coins": sorted(coins.values(), key=lambda c: (-len(c["names"]), -c["buys"]))[:30],
+                "kols": sorted(board.values(), key=lambda b: (-b["trades"], -b["in_sol"]))[:40],
                 "active": len({x["wallet"] for x in recent}), "known": len(self._known_wallets()),
                 "kols_loaded": len(self.kols.get("kols") or {}), "median_hold_s": sorted(held)[len(held) // 2] if held else None,
                 "minutes": minutes}

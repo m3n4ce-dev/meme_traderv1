@@ -6,6 +6,8 @@ Three kinds of vote count:
   * shadow    the rules decide, and the team votes on the side (desk.graduation_vote: false);
   * practice  the graduation play is off, so nothing is bought, and the team still votes (desk.practice).
 
+Graduation calls and early-sniper calls are kept apart ("strategy": late | sniper): what makes a good coin differs.
+
 An LLM can't change its weights, so this is how the team learns: each persona reads its own record and its latest
 scored calls at every vote, and the meetings read the whole scorecard.
 """
@@ -16,7 +18,8 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-FOLLOWED = ("late", "desk-pass", "practice-buy", "practice-pass")   # exit-lab kinds that score a graduation vote
+FOLLOWED = ("late", "desk-pass", "practice-buy", "practice-pass",   # exit-lab kinds that score a vote: graduation ...
+            "sniper", "sniper-pass", "sniper-skip")                  # ... and the early sniper
 
 
 def stat(xs: list[float]) -> dict:
@@ -37,8 +40,14 @@ def call_votes(votes) -> list[list]:
     return out
 
 
-def scorecard(calls: list[dict], personas) -> dict:
-    """The team's buy calls against its passes, each persona's too, and how many calls of each kind."""
+def _of(calls: list[dict], strategy: str | None) -> list[dict]:
+    return calls if strategy is None else [c for c in calls if c.get("strategy", "late") == strategy]
+
+
+def scorecard(calls: list[dict], personas, strategy: str | None = None) -> dict:
+    """The team's buy calls against its passes, each persona's too, and how many calls of each kind (strategy: late |
+    sniper | None for all; records from before strategies were kept are graduation calls)."""
+    calls = _of(calls, strategy)
     out = {"calls": len(calls), "buy": stat([c["pnl_pct"] for c in calls if c["approve"]]),
            "pass": stat([c["pnl_pct"] for c in calls if not c["approve"]]),
            "by_mode": dict(Counter(c.get("mode", "live") for c in calls)), "personas": {}}
@@ -48,9 +57,9 @@ def scorecard(calls: list[dict], personas) -> dict:
     return out
 
 
-def persona_record(calls: list[dict], persona: str, last: int = 6) -> dict | None:
-    """What one persona reads at a vote: how its buys and passes turned out, and its latest scored calls."""
-    mine = [(c, v) for c in calls for v in c["votes"] if v[0] == persona]
+def persona_record(calls: list[dict], persona: str, last: int = 6, strategy: str | None = None) -> dict | None:
+    """What one persona reads at a vote: how its buys and passes turned out on this strategy, and its latest calls."""
+    mine = [(c, v) for c in _of(calls, strategy) for v in c["votes"] if v[0] == persona]
     if len(mine) < 8:
         return None
     return {"what_this_is": "how your past votes on this desk turned out: what each coin did next on the bot's own exits",
@@ -94,7 +103,7 @@ def backfill(data: Path) -> list[dict]:
             votes = call_votes(r["votes"])
             if row is None or not votes:
                 continue
-            calls.append({"ts": r["ts"], "mint": r["mint"], "symbol": r["text"].split(":")[0][:20], "mode": "live",
+            calls.append({"ts": r["ts"], "mint": r["mint"], "symbol": r["text"].split(":")[0][:20], "mode": "live", "strategy": "late",
                           "approve": approve, "votes": votes, "pnl_pct": row["pnl_pct"], "held_s": row.get("held_s"),
                           "exit": row.get("why", "")})
     return sorted(calls, key=lambda c: c["ts"])

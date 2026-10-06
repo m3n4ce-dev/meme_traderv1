@@ -335,8 +335,12 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             "machine": {"disk_free_gb": round(du.free / 1e9, 1), "disk_used_pct": round(du.used / du.total * 100), "mem_free_mb": round(free_mb() or 0)},
         })
 
-    async def kols_view(_):                     # the Charts tab's KOL tracker
-        return _json(engine.kol_view())
+    async def kols_view(request):               # the Charts tab's KOL tracker (?minutes=15..1440)
+        try:
+            minutes = min(max(float(request.query.get("minutes", 60)), 5.0), 1440.0)
+        except ValueError:
+            minutes = 60.0
+        return _json(engine.kol_view(minutes))
 
     async def hot_names(_):                     # the Charts tab's copycat waves
         return _json({"names": engine.hot_names()})
