@@ -1301,6 +1301,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div id="an-edge"></div></section>
     <section class="panel" id="wallet-study"><h2>Wallet study <small>wallets-v1: do wallets that were early on several runners, buying together, make money?</small></h2>
       <div id="an-wallets"><div class="empty">Loading…</div></div></section>
+    <section class="panel" id="team-rec"><h2>The AI team's record <small>what its calls did next, on the bot's own exits</small></h2>
+      <div id="an-team"></div></section>
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
@@ -2326,7 +2328,7 @@ function groupTable(rows, keyLabel = "") {
       <td class="r ${cls(r.pnl_sol)}">${signed(r.pnl_sol)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function renderAnalytics(a) {
-  S.analytics = a; renderExitLab(); renderEdge();
+  S.analytics = a; renderExitLab(); renderEdge(); renderTeamRecord();
   const k = a.kpis || {}, dd = a.drawdown || {}, mc = a.monte_carlo;
   $("an-status").textContent = `Updated ${new Date().toLocaleTimeString([], {hour12: false})} · ${k.n || 0} closed trades (callout bags kept separate: ${a.callouts?.n || 0})`;
   const card = (l, v, sub = "", c = "") => `<div class="kpi"><div class="label">${l}</div><div class="value num ${c}">${v}</div><div class="sub">${sub}</div></div>`;
@@ -5671,6 +5673,23 @@ function playHuddle(h) {
   }
   h.lines.forEach((l, i) => setTimeout(() => { const b = IO.bots[l.who]; if (b) hsay(l.who, esc(l.say), {force: true}); }, 4500 + i * 3600));
   setTimeout(() => { for (const id of speakers) { const b = IO.bots[id]; if (b && b.busy === "huddle") goHome(b); } }, 4500 + h.lines.length * 3600 + 3000);
+}
+function renderTeamRecord() {                          // every graduation vote, scored (desk_record.py)
+  const t = S.analytics && S.analytics.team_record; if (!t || !$("an-team")) return;
+  if (!t.calls) { setHTML($("an-team"), `<div class="empty">No scored calls yet: each graduation vote is scored when the bot's exits would have closed it.</div>`); return; }
+  const cell = x => x && x.n ? `<td class="r num">${x.n}</td><td class="r num ${cls(x.avg_pct)}">${pct(x.avg_pct, 1)}</td><td class="r num ${cls(x.median_pct)}">${pct(x.median_pct, 1)}</td><td class="r num">${x.won_pct}%</td>` : `<td class="r num">0</td><td></td><td></td><td></td>`;
+  const edge = (b, s2) => b && s2 && b.n && s2.n ? b.median_pct - s2.median_pct : null;
+  const row = (name, r) => { const e = edge(r.buy, r.pass);
+    return `<tr><td><b>${esc(name)}</b></td>${cell(r.buy)}${cell(r.pass)}<td class="r num ${e == null ? "" : cls(e)}">${e == null ? "–" : pct(e, 1)}</td></tr>`; };
+  const modes = Object.entries(t.by_mode || {}).map(([k, n]) => `${n} ${({live: "deciding", shadow: "side votes", practice: "practice"})[k] || k}`).join(" · ");
+  const e0 = edge(t.buy, t.pass);
+  setHTML($("an-team"), `<p class="note">${t.calls} scored calls (${esc(modes)}). Each coin is followed on the bot's own exits from the vote, whether the team said buy or pass.
+      Each persona reads its own record at every vote, and the meetings read this table: that's how the team learns.</p>
+    <p>${e0 == null ? "" : e0 > 0 ? `Its buy calls beat its passes by <b class="up">${fx(e0, 1)} points</b> at the median: the vote is picking better coins.`
+      : `Its buy calls did <b class="down">${fx(-e0, 1)} points worse</b> than its passes at the median: so far the vote isn't picking better coins.`}${t.calls < 100 ? " Small sample." : ""}</p>
+    <div class="tablewrap"><table><thead><tr><th></th><th class="r" colspan="4">When it said buy</th><th class="r" colspan="4">When it said pass</th><th class="r">Buy vs pass</th></tr>
+      <tr><th></th><th class="r">Calls</th><th class="r">Avg</th><th class="r">Median</th><th class="r">Won</th><th class="r">Calls</th><th class="r">Avg</th><th class="r">Median</th><th class="r">Won</th><th class="r">median</th></tr></thead><tbody>
+      ${row("The team", t)}${Object.entries(t.personas || {}).map(([p, r]) => row(p[0].toUpperCase() + p.slice(1), r)).join("")}</tbody></table></div>`);
 }
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
