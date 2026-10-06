@@ -319,6 +319,9 @@ sniper:
     min_free_mb: 8000            # start a test only with this much memory free
     detach: true                 # run each test as its own short-lived user service (survives bot restarts)
     memory_max_mb: 6000          # ... capped at this much memory
+    days: 5                      # each test replays this many recent completed days, one at a time (the current
+                                 #   settings' replay of a day is kept and reused: about 10 min a day per test after that)
+    timeout_min: 180             # stop a test that runs longer than this
 
   xchain:                        # paper trading on other chains: young DEX coins (sniper/xchain.py). Paper only.
     enabled: true

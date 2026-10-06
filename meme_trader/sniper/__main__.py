@@ -595,7 +595,12 @@ def main() -> None:
 
         out = DATA / "lab" / f"{args.id}.result.json"
         try:
-            res = lab_run(args.id, DATA)
+            from ..config import load as load_config
+            try:
+                days = int((load_config()["sniper"].get("lab") or {}).get("days", 5))
+            except Exception:
+                days = 5
+            res = lab_run(args.id, DATA, days=days)
         except Exception as e:                       # the bot reads the error and marks the experiment failed
             res = {"error": f"{type(e).__name__}: {e}"}
         out.parent.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,7 @@ import json
 import math
 import random
 import secrets
+import time
 from pathlib import Path
 
 # what the team may test: the graduation play's own entry and exit rules (keys under sniper.late)
@@ -200,8 +201,31 @@ def _last_ts(path: Path) -> float:
     return best
 
 
-def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1, hours: float = 24) -> dict:
-    """One replay worker at a time: measured 2026-10-05, a replay of 3 days holds ~4.8 GB per worker."""
+# what a replay's result depends on besides the settings: the code that trades (a change there invalidates the cache)
+REPLAY_CODE = ("strategy.py", "engine.py", "research.py", "tracker.py", "execution.py", "curve.py", "sizing.py", "feeds.py")
+
+
+def code_hash() -> str:
+    import hashlib
+    h = hashlib.sha1()
+    for name in REPLAY_CODE:
+        p = Path(__file__).with_name(name)
+        h.update(p.read_bytes() if p.exists() else b"")
+    return h.hexdigest()[:10]
+
+
+def day_files(feed: list[Path], days: int, today: str | None = None) -> list[Path]:
+    """The most recent completed UTC days of recordings (one file each), oldest first. Today's file is still growing."""
+    today = today or time.strftime("%Y-%m-%d", time.gmtime())
+    done = [f for f in feed if f.name[5:15] < today]
+    return done[-days:]
+
+
+def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1, hours: float = 24, days: int = 5) -> dict:
+    """Replay the change and the current settings on each recorded day (one replay at a time: measured 2026-10-05, a
+    day holds ~2.5 GB). The current settings' replay of a day is kept and reused (data/lab/base/) until the settings
+    or the trading code change, so a test costs one replay per day after the first. Verdict: all days' 6-hour blocks
+    pooled, plus how many days the change won (a single day flipped a verdict more than once on 2026-10-05)."""
     from . import research
 
     lab = Lab(data / "lab")
@@ -212,16 +236,51 @@ def run(exp_id: str, data: Path, files: list[Path] | None = None, jobs: int = 1,
     pol.pop("frozen_at", None)
     base_sets = [f"{k}={json.dumps(v)}" for k, v in (x.get("baseline") or {}).items() if k in TESTABLE or k in EXECUTION]
     base_sets += NO_STOPS
-    # the last 24 hours of recordings (measured 2026-10-05: three days took over 30 minutes per pair of replays), and
+    change_sets = base_sets + [f"{x['key']}={json.dumps(x['value'])}"]
     # only coins that got far enough up their curve for the graduation play to touch them
-    files = files or research.feed_files()[-2:]
-    last = _last_ts(files[-1]) if files else 0.0
     lo = min(float(x["baseline"].get("late.min_curve_pct", 55)), float(x["value"]) if x["key"] == "late.min_curve_pct" else 99) - 3
-    events, stats = research.load_events(files, start=last - hours * 3600 if last else None, min_progress_pct=lo)
-    span = (stats["first"] or 0, stats["last"] or 0)
-    res = research.run_variants(pol, events, [("now", pol, base_sets), ("change", pol, base_sets + [f"{x['key']}={json.dumps(x['value'])}"])],
-                                jobs=jobs)
-    out = compare(res["now"]["trades"], res["change"]["trades"], span)
-    out["files"] = [p.name for p in files]
-    out["account_stops"] = "off (rules compared on their own)"
+    files = files or day_files(research.feed_files(), days)
+    if not files:                                      # a fresh install: no completed day yet, the last 24 hours instead
+        recent = research.feed_files()[-2:]
+        last = _last_ts(recent[-1]) if recent else 0.0
+        events, stats = research.load_events(recent, start=last - hours * 3600 if last else None, min_progress_pct=lo)
+        span = (stats["first"] or 0, stats["last"] or 0)
+        res = research.run_variants(pol, events, [("now", pol, base_sets), ("change", pol, change_sets)], jobs=jobs)
+        out = compare(res["now"]["trades"], res["change"]["trades"], span)
+        out.update(files=[p.name for p in recent], account_stops="off (rules compared on their own)", per_day=[])
+        return out
+    import hashlib
+    cache = data / "lab" / "base"
+    cache.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1((json.dumps(base_sets) + json.dumps(pol.get("overrides") or {}, sort_keys=True) + code_hash()).encode()).hexdigest()[:12]
+    base_all, change_all, per_day, first, last = [], [], [], None, None
+    for f in files:
+        cf = cache / f"{f.name.split('.')[0]}-{key}.json"
+        cached = None
+        if cf.exists():
+            try:
+                cached = json.loads(cf.read_text())
+            except ValueError:
+                cached = None
+        events, stats = research.load_events([f], min_progress_pct=lo)
+        span = (stats["first"] or 0, stats["last"] or 0)
+        jl = [("change", pol, change_sets)] + ([] if cached else [("now", pol, base_sets)])
+        res = research.run_variants(pol, events, jl, jobs=1)
+        del events
+        base = cached["trades"] if cached else res["now"]["trades"]
+        if not cached:
+            cf.write_text(json.dumps({"trades": base, "span": span, "file": f.name}))
+        change = res["change"]["trades"]
+        c = compare(base, change, span)
+        per_day.append({"day": f.name[5:15], "now": c["now"], "change": c["change"], "verdict": c["verdict"],
+                        "better_blocks": c["better_blocks"], "blocks": c["blocks"], "base_cached": bool(cached)})
+        base_all += base
+        change_all += change
+        first = span[0] if first is None else min(first, span[0])
+        last = span[1] if last is None else max(last, span[1])
+    out = compare(base_all, change_all, (first or 0, last or 0))
+    out.update(files=[p.name for p in files], account_stops="off (rules compared on their own)", per_day=per_day,
+               days_better=sum(d["change"]["pnl_sol"] > d["now"]["pnl_sol"] for d in per_day), days=len(per_day))
+    if out["verdict"] == "better" and out["days_better"] * 2 <= out["days"]:
+        out["verdict"] = "no clear difference"         # better overall but not on most days: one day carried it
     return out
