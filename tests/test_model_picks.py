@@ -117,3 +117,12 @@ def test_the_bot_picks_at_the_trained_ages_once_and_never_in_replays():
     r.tokens[s.mint], r.now = priced(), 16.0
     r._model_picks()
     assert not r.lab.open                                         # replays: no picks
+
+
+def test_train_trees_end_to_end_on_a_synthetic_market():
+    pytest.importorskip("lightgbm")                               # optional: only `train --kind trees` needs it
+    from meme_trader.sniper.predictor import train_trees
+    from meme_trader.sniper.sweep import load_events
+    events = load_events({"synthetic": 2000, "seed": 3})
+    m, info = train_trees(events, P, source={"synthetic": 2000})
+    assert info["trees"] >= 1 and info["source"] == "synthetic" and 0 <= m.predict({}) <= 1
