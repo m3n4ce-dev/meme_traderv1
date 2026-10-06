@@ -243,3 +243,47 @@ def test_lab_replays_compare_rules_without_the_accounts_stops(tmp_path, monkeypa
         assert "capital.daily_loss_limit_sol=1000000" in sets and "capital.max_drawdown_pct=100" in sets
         assert "risk_adapt.enabled=false" in sets and "execution.paper_delay_s=2.5" in sets
     assert "late.min_age_s=30" in seen["change"] and out["account_stops"].startswith("off")
+
+
+def test_tests_replay_each_recorded_day_and_reuse_the_baseline(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from meme_trader.sniper import research
+    files = [Path(f"feed-2026-10-0{d}.jsonl.gz") for d in (1, 2, 3, 4, 5)] + [Path("feed-2026-10-06.jsonl")]
+    assert [f.name[5:15] for f in labmod.day_files(files, 3, today="2026-10-06")] == ["2026-10-03", "2026-10-04", "2026-10-05"]
+
+    lab = Lab(tmp_path / "lab")
+    x, _ = lab.add("late.min_age_s", 30, "", "team", 1000.0, {"late.min_age_s": 0, "execution.paper_delay_s": 2.5})
+    D = 86400.0
+    day0 = {"feed-2026-10-03.jsonl.gz": 0.0, "feed-2026-10-04.jsonl.gz": D, "feed-2026-10-05.jsonl.gz": 2 * D}
+    calls = []
+
+    def tr(ts, pnl, n=0):
+        return {"mint": f"m{ts}{n}", "opened": ts, "pnl": pnl, "pnl_pct": pnl * 100}
+
+    def fake_events(fs, **k):
+        t0 = day0[fs[0].name]
+        return [t0], {"first": t0, "last": t0 + D - 1}
+
+    def fake_run(pol, events, jobs_list, jobs=0):
+        t0 = events[0]
+        calls.append([j[0] for j in jobs_list])
+        out = {"now": {"trades": [tr(t0 + 3600 * h, 0.0) for h in range(0, 24, 6)]}}
+        if t0 == 0.0:                                          # day 1: the change wins every block, by a lot
+            out["change"] = {"trades": [tr(t0 + 3600 * h, 1.0, 1) for h in range(0, 24, 6)]}
+        else:                                                   # days 2 and 3: a little worse
+            out["change"] = {"trades": [tr(t0 + 3600, -0.01, 1)]}
+        return out
+    monkeypatch.setattr(research, "load_policy", lambda name: {"name": name})
+    monkeypatch.setattr(research, "load_events", fake_events)
+    monkeypatch.setattr(research, "run_variants", fake_run)
+    days = [Path(n) for n in day0]
+    out = labmod.run(x["id"], tmp_path, files=days)
+    assert out["days"] == 3 and out["days_better"] == 1 and len(out["per_day"]) == 3
+    assert out["p_better"] >= 0.9 and out["better_blocks"] > out["worse_blocks"]   # pooled alone says "better" ...
+    assert out["verdict"] == "no clear difference"             # ... but one day carried it
+    assert all("now" in c for c in calls)                       # first run: each day's baseline replayed ...
+    calls.clear()
+    labmod.run(x["id"], tmp_path, files=days)
+    assert calls and all(c == ["change"] for c in calls)        # ... and then reused
+    assert len(list((tmp_path / "lab" / "base").glob("*.json"))) == 3
