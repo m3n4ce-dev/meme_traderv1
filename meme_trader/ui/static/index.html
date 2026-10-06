@@ -138,6 +138,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); 
 .log .error b { color: var(--bad); } .log .signal b, .log .desk b, .log .agent b { color: var(--accent); }
 .log .callout b { color: var(--good); }
 .log [data-open] { cursor: pointer; } .log [data-open]:hover { background: var(--surface-2); }
+.log .digest > span { white-space: pre-line; }   /* the day's summary keeps its lines */
 .co { padding: 8px 0; border-bottom: 1px solid var(--grid); display: block !important; }
 .co .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .co p { margin: 4px 0 6px; color: var(--ink-2); font-size: 12.5px; white-space: pre-wrap; }
@@ -2630,7 +2631,7 @@ function renderDesk() {
   setHTML($("dk-votes"), (k.reviews || []).map(reviewHTML).join("") || `<div class="empty">${awake ? "No reviews yet: the desk votes when the rules pick a trade." : "The personas (" + k.personas.map(p => (PERSONA[p] || [0, p])[1]).join(", ") + ") vote only while the desk is awake."}</div>`);
   // thoughts
   const items = (d.thoughts || []).map(t => ({ts: t.ts, ic: "🔭", mood: t.mood, mint: t.mint, sym: t.symbol, text: t.text}))
-    .concat((d.log || []).map(l => ({ts: l.ts, mint: l.mint, text: l.text, ic: {buy: "🟢", sell: "💸", close: "🏁", desk: "🧠", agent: "✦", error: "⚠️"}[l.level] || "•",
+    .concat((d.log || []).map(l => ({ts: l.ts, mint: l.mint, text: l.text, ic: {buy: "🟢", sell: "💸", close: "🏁", desk: "🧠", agent: "✦", error: "⚠️", digest: "📊"}[l.level] || "•",
       mood: {buy: "act", sell: "act", desk: "spot", agent: "spot", error: "bad"}[l.level] || (/ \+\d/.test(l.text) ? "act" : "bad")})))
     .sort((a, b) => b.ts - a.ts).slice(0, 90);
   setHTML($("dk-thoughts"), items.map(t => `<div class="th m-${t.mood}" ${t.mint ? `data-open="${esc(t.mint)}"` : ""}><time>${hhmmss(t.ts)}</time><span>${t.ic}</span>
