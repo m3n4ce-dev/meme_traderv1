@@ -639,7 +639,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
             return {"ok": not err, "text": err or "Sold (paper)"}
         if action == "lab_add":                           # the owner queues a test for the lab
             x, err = engine.lab_add(str(cmd.get("key") or ""), cmd.get("value"), str(cmd.get("why") or "the owner's idea"), "you")
-            return {"ok": not err, "text": err or f"Queued: {x['key']} {x['now']} → {x['value']}. The team replays the last 24 hours with it."}
+            return {"ok": not err, "text": err or f"Queued: {x['key']} {x['now']} → {x['value']}. The team replays each recorded day with it."}
         if action == "lab_drop":
             before = len(engine.xlab.items)
             engine.xlab.items = [x for x in engine.xlab.items if not (x["id"] == cmd.get("id") and x["status"] == "queued")]
