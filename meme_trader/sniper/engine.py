@@ -2769,7 +2769,8 @@ class Engine:
         done = [x for x in self.xlab.items if x.get("finished") and time.strftime("%Y-%m-%d", time.gmtime(x["finished"])) == day]
         for x in done[:3]:
             r = x.get("result") or {}
-            lines.append(f"Lab: {x['key']} {x['now']} → {x['value']}: {r.get('verdict') or r.get('error') or '?'}")
+            lines.append(f"Lab: {x['key']} {x['now']} → {x['value']}: {r.get('verdict') or r.get('error') or '?'}"
+                         + (f" (better on {r['days_better']} of {r['days']} days)" if r.get("days") else ""))
         try:
             rd = self.xchain.readiness()
             lines.append(f"Other chains real-money checklist: {rd['passed']} of {len(rd['checks'])}")
@@ -3102,7 +3103,8 @@ class Engine:
         """Wait for a run in its own service: its result file, or the service stopping without one."""
         out = DATA / "lab" / f"{x['id']}.result.json"
         gone = 0
-        while time.time() - (x.get("started") or time.time()) < 3600:
+        limit = float((self.p.get("lab") or {}).get("timeout_min", 180)) * 60    # a test replays several days
+        while time.time() - (x.get("started") or time.time()) < limit:
             if out.exists():
                 try:
                     return json.loads(out.read_text())
@@ -3115,7 +3117,7 @@ class Engine:
             await asyncio.sleep(10)
         stop = await asyncio.create_subprocess_exec("systemctl", "--user", "stop", x["unit"])
         await stop.wait()
-        return {"error": "took over an hour: stopped"}
+        return {"error": f"took over {limit / 60:.0f} minutes: stopped"}
 
     async def _lab_finish(self, x: dict, work) -> None:
         try:
@@ -3172,7 +3174,7 @@ class Engine:
         try:
             proc = await asyncio.create_subprocess_exec("nice", "-n", "19", sys.executable, "-m", "meme_trader.sniper", "lab-run", x["id"],
                                                         cwd=str(ROOT), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-            _, err = await asyncio.wait_for(proc.communicate(), timeout=3600)
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=float(cfg.get("timeout_min", 180)) * 60)
             res = json.loads(out.read_text()) if out.exists() else {"error": (err or b"").decode(errors="replace")[-300:] or f"exit {proc.returncode}"}
         except Exception as e:                          # never leave it "running"
             res = {"error": f"{type(e).__name__}: {e}"}
@@ -3197,6 +3199,7 @@ class Engine:
                     "verdict": r.get("verdict"), "now": r.get("now"), "change": r.get("change"),
                     "blocks_better_of": f"{r.get('better_blocks')} of {r.get('blocks')}" if r.get("blocks") else None,
                     "error": r.get("error"),
+                    "days_better_of": f"{r.get('days_better')} of {r.get('days')}" if r.get("days") else None,
                     "caveat": None if landed_like_bot(x) else "judged with instant fills (before replays landed orders like the bot): weaker"}
         v = self.xlab.view()
         return {"testable": {k: f"{lo:g}-{hi:g}" for k, (lo, hi) in TESTABLE.items()}, "current": self.lab_baseline(),
