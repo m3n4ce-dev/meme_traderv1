@@ -4,6 +4,48 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #58: Slower coins, and the owner's own style as a rule: no edge at our speed
+
+**Owner's request:** "yes pls" to (1) the stronger model on slower coins and (2) checking what their own manual trades do that the bots don't. All replays fill the buy and every sell 2.5 s late, as the paper bot lands, after 3.5% round-trip fees.
+
+**1. Slower coins (5–30 minutes old).**
+- **Model:** trees at ages 5, 10, 15, 20 and 30 min. The label is +100% before −30% within 30 min, counted from the late fill.
+- **Trained Oct 3–4, graded Oct 5:** AUC 0.97, inflated by dead coins (base rate 0.4%). Most pick levels lost 3–9% per trade. Half-full coins (curve 50–80%) at ≥0.25 made +12% to +29%, but on only 24 coins.
+- **Trained Oct 3–5, graded Oct 6:** lost at every level (−4% to −22%). The half-full slice didn't repeat (−13% to +5%).
+- **Verdict:** no edge.
+
+**2. The owner's manual trades.**
+- **The real record is the 29 from Oct 4 20:29 on:** +0.07 SOL, 45% won. All 45 since Oct 4 are −2.1 SOL; the first 16 were a burst while trying the buttons.
+- **At the decision (medians), against the bots' 183 graduation entries:**
+
+| | Owner (29) | Bots, graduation (183) |
+|---|---|---|
+| Curve filled | 57% | 59% |
+| Off its high | 16% (a dip) | 0% (the top) |
+| Change over the last 5 min | +29% | +134% |
+| Holders | 55 | 40 |
+| Held | 169 s | 19 s |
+
+- **The owner's winners against their losers:** 81 vs 25 buyers in the last minute, and held 97 vs 216 s. After a winning sell the coin rose a median 18% more, then was 36% lower 30 minutes later.
+- **The owner's own account:** some buys were "random, I saw the chart going up".
+
+**3. That style as a rule, on all four days.**
+- **Rule:** buy the first moment a coin is in a curve band with enough buyers in the last minute, a dip off its high, and a rise over the last minute.
+- **Grid:** 3 buyer floors × 4 dip bands × 3 one-minute rises × 3 curve bands × 5 exits = 540 rules, each over all four days (3,000–5,000 trades per rule).
+- **Result:** none of the 540 had a positive average. Every one lost 3–7% per trade on every day. The owner's centre (50+ buyers/min, 10–35% off the high, +20% in a minute, curve 50–70%) lost 5–7%. The bots' style (at the high) lost about the same, 5–7%. Dip or top made no difference (−5.7% to −6.7% across the dip bands).
+- **Verdict:** the owner's 29 trades (+0.07 SOL) are break-even within noise. What they did right shows in the exits (quick profits), not in a pattern of coins a rule can find.
+
+**Where this leaves the bonding curve:** across about 3,000 entry rules and model thresholds tested today, buying on the curve with a 2.5 s fill loses roughly the fees plus a little. For a trader this slow the market there is efficient. An edge would need one of:
+- real speed: even 0.5 s gave most of it back, so not obviously enough;
+- information the market doesn't have yet;
+- a slower venue or timescale.
+
+**Two X posts reviewed today (data, nothing run or signed up for):**
+- **@RohOnChain:** an Opus 5.5 + Minara AI article, mostly a promotion. Its useful lessons: "name who loses on the other side", "fees kill frequent strategies", and a five-gate test. The bot's research already does held-out days, delay stress and paper forward tests.
+- **@Hrundel75:** 26 free sites, 6 agents and Jev, also a promotion. The +$8,420 claim can't be checked. Its sites are for big coins and perps; the one sound idea is that no single signal should trigger a trade, which the bot's gates and team quorum already do.
+
+---
+
 ## 2026-10-06 — Entry #57: A stronger model, an edge that turned out to be speed, and a live follow of its picks
 
 **Owner's question:** "would stronger agents help? we have hours and hours of data to train on". Then: "We have to be able to find an edge because they are there".
