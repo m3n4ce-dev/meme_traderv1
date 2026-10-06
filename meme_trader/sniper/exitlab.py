@@ -49,6 +49,7 @@ def _sniper_variants(x) -> dict[str, dict]:
 
 
 LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass")   # followed on the graduation-play exits
+SNIPER_CALLS = ("sniper-pass", "sniper-skip")      # sniper votes that bought nothing: followed on the sniper's exits
 
 class ExitLab:
     def __init__(self, path: Path | None, fee_pct: float):
@@ -151,7 +152,7 @@ class ExitLab:
 
     def view(self, kind: str = "late") -> dict:
         """Per variant: entries, mean and median P&L % per entry, win rate; sorted by mean, best first."""
-        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS)]
+        rows = [r for r in self.done if r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS + SNIPER_CALLS)]
         by: dict[str, list[float]] = {}
         for r in rows:
             by.setdefault(r["variant"], []).append(r["pnl_pct"])

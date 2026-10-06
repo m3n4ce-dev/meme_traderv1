@@ -4,6 +4,29 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #54: Sniper back on, a trained model, sniper votes scored, the KOL tracker in depth
+
+**Owner:** turned the early sniper back on ("better for the model to learn what to look for on each ... just paper trading right now").
+
+**The P(2x) model is trained and live (display-only).** `train` on Oct 3–5 (7.07M events, 177K/38K/44K walk-forward snapshots, label: +100% before −30% within 10 min):
+- **Held-out:** AUC 0.823 (train 0.821, no overfitting), Brier skill +0.066, top decile 19.0% against a 5.1% base rate (3.7x).
+- **Calibration:** honest up to ~30%. Above that it reads high (34% predicted → 23% actual, 44% → 15%; small bins).
+- **Strongest features:** log holders, 60 s volatility, log market cap, real SOL (−), age (−), curve %.
+- **Promoted** to `data/model.json`, hot-loaded with no restart. `display_only: true`, so it shows P(2x) and changes no trades. Bot CPU unchanged (~4–5%).
+
+**Sniper votes join the team's record.** A sniper vote is scored the same way: bought → the trade's "as now", passed → `sniper-pass`, approved but not acted on → `sniper-skip`. Graduation and sniper records are kept apart (`strategy`). Each persona reads its record for the strategy it's voting on. Analytics → The AI team's record has a Graduation / Sniper switch.
+
+**Fixed: a full curve whose move to its pool wasn't seen.** SLOP sat in Final stretch for 3 h at $49.2K, the price of a sold-out curve, and every buy failed "curve full". Now a manual buy of a full curve asks DexScreener first: a pool means a graduated buy at the pool price; still on the curve means "try again in a minute". Full curves leave Final stretch.
+
+**The KOL tracker, in depth** (owner: "MC first buy → now" showed "–" everywhere).
+- **Why "–":** a coin was forgotten ~16 min after launch, and KOL trades on coins the bot wasn't tracking were dropped.
+- **Now:** any coin a KOL trades is tracked for 2 h after their last trade, and its ticker comes from DexScreener when its launch wasn't seen. Such coins are never strategy candidates, since their age is unknown. Afterwards the tracker shows the last market cap seen, marked *.
+- **Windows:** 15 min, 1 h, 4 h, 24 h.
+- **Coins:** who's still in (●) and who sold out (○), their SOL-weighted average entry → now, and the change since.
+- **Scoreboard:** per wallet, trades, coins, SOL in and out, round trips won (a coin bought and sold in the window), average trip, median hold, last trade. Click a wallet for its trades and Solscan.
+
+---
+
 ## 2026-10-06 — Entry #53: The AI team gets a track record, practice, and side votes
 
 **Owner's requests:** "are they learning?", "add an option for them to just train if all modes are off other than manual", and yes to a switch that lets graduation trades skip the vote.
