@@ -53,7 +53,7 @@ def _card(spec: str) -> bytes | None:
 
 
 def main() -> None:
-    from .ui.social import Social, SocialError, x_cost, x_length
+    from .ui.social import Social, x_cost, x_length
 
     ap = argparse.ArgumentParser(prog="python -m meme_trader.social", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
