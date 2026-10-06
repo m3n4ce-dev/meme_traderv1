@@ -4,6 +4,28 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #60: The feed's downtime is the free servers, not the owner's internet; sniper off; "who's selling?"
+
+**Owner's questions:** "how can we fix the downtime? seems like my internet may be getting throttled", "what does Axiom use?", "turn off sniper if it's adding latency or anything", and whether anything in the day's X posts was good.
+
+**The connection, measured 2026-10-06 evening:**
+- **Line:** wired (enp3s0), no interface errors or drops. Ping 15–33 ms to 1.1.1.1 and 8.8.8.8 (0–5% loss over 20 pings). Downloads at 74 Mbit/s while the bot streams. Solana RPC round trips 0.14–0.16 s.
+- **The failures are server-side:** `connection closed (CLOSE)` frames from api.mainnet-beta, PublicNode going silent for 70–230 s, and both falling 5–37 s behind the chain. A throttled line would slow everything, the speed test included.
+- **Unreliable minutes per day** (`research data`): 16 on Oct 3, 121 on Oct 4, 192 on Oct 5, 207 on Oct 6 (21 h). Free endpoints shed heavy subscribers, and the pump.fun log stream is about 1.5 GB/h.
+- **Volume for the ISP:** the machine downloads ~47 GB/day now and averaged ~86 GB/day since boot, about 1.5–2.5 TB a month. On a capped plan (some are ~1.2 TB) that means overage, not throttling.
+
+**Fixes, all flat-rate or published prices (a signup is the owner's call; the bot needs a feed adapter for anything that isn't a Solana websocket):**
+- **Anaxer Pro, $99/mo:** decoded pump.fun and PumpSwap launches, graduations and trades over a websocket, unmetered. It claims under 450 ms from confirmation. It would also give the graduated-coin study real trades and cut the bandwidth. Check its trade fields (trader, reserves, fees) before relying on it.
+- **Helius Developer, $49/mo:** its websockets now run on LaserStream. gRPC needs Business ($499). The owner's Helius key already backs up the free feed, within 1200 MB/day.
+- **Flat-rate RPCs from build log #13:** NoLimitNodes Pro $49, RPC Fast $45.
+- **Axiom, per public write-ups:** geographically distributed RPC infrastructure of its own, leader-aware routing, and three ways to send a trade (public, Jito bundle, private mempool). Users often pair it with Helius. That's an execution edge for its users' orders, not a data edge for a strategy.
+
+**Sniper off (saved):** it doesn't add feed lag, but the `edge` check calls it "losing, and not by bad luck" (−13.4% per SOL, 0 of 3 days up). Every coin is still recorded and the team still practices on sniper coins, so nothing is lost for learning.
+
+**From the X posts:** the useful idea was "name who loses on the other side". The AI team's rubric now asks each persona, before voting buy, who is selling to the bot at this price and why they're wrong. Every scored call now carries `rubric` ("2026-10-06 counterparty"), so its record can be compared before and after.
+
+---
+
 ## 2026-10-06 — Entry #59: Collecting the data for the next studies: X links and graduated coins
 
 **Owner's request:** "whatever is needed to bring us to the next level". After today's findings (no edge on the bonding curve at our speed), the two places left to look need data the bot doesn't keep.
