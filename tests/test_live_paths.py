@@ -112,7 +112,7 @@ def test_live_errors_become_failed_fills_not_crashes(fake_net, monkeypatch):
 
 
 def test_close_empty_token_accounts_builds_close_instruction(monkeypatch):
-    solders = pytest.importorskip("solders")
+    pytest.importorskip("solders")
     from solders.keypair import Keypair
     from solders.transaction import VersionedTransaction
 

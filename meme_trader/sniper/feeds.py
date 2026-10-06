@@ -1088,7 +1088,6 @@ class SyntheticFeed(Feed):
                 self.funded.add(w)
                 sched.append((t0 + rng.uniform(3, 55), w, "buy", rng.uniform(0.6, 2.0)))
         sched.sort()
-        leaders = set(self.leader_labels) | set(insiders)
         pool: list[str] = []          # organic (non-dev/bundler/leader) wallets that may hold tokens
 
         def run_sched(until: float) -> None:
