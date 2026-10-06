@@ -45,7 +45,7 @@ Facts to keep in mind (paper results, 2026-10-03 to 10-04; see BUILD_LOG #32 and
   GeckoTerminal's free API 429s quickly: ui/chains.py paces it; don't add bursts of calls.
 - The risk dial scales size, positions and the daily loss limit; it never changes which coins are picked.
 - Research replays (2026-10-05, 3 days): graduation dumps were young coins (~20 s) with few sellers; late.min_age_s=30
-  (skip for good) beat the baseline all 3 days (lab-queued, off). Landing 1-1.5 s faster: mixed (+2 days, -1 day).
+  (skip for good) beat the baseline all 3 days: ON since 2026-10-05 (lab per-day verdict). Landing 1-1.5 s faster: mixed.
   Compare rules without account stops (lab.NO_STOPS): a halted side stops trading and skews the result.
 - Most pump.fun tokens go to zero. A token whose creator sold, or that is about to graduate, is refused.
 - Manual trading is the owner's: never resize or block it. Positions the owner hands to the bots "ride"
