@@ -618,3 +618,34 @@ def test_a_full_curve_asks_dexscreener_before_a_manual_buy(monkeypatch):
     monkeypatch.setattr(e, "_dex_price", graduated)
     assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
     assert e.positions[s.mint].source == "manual" and e.positions[s.mint].tokens > 0
+
+
+def test_manual_exits_sell_when_the_creator_sells_and_choose_the_take_profit_size():
+    """From traders' posts (2026-10-06): "the dev is your last take profit" and "close it, don't take a little"."""
+    from meme_trader.sniper.strategy import evaluate_manual_exit
+    e = market()
+    s = live_coin(e)
+    s.dev_sold = 1e6                                                  # the creator sold BEFORE the buy: doesn't count
+    assert asyncio.run(e.manual_buy(s.mint, 0.1)) == ""
+    pos = e.positions[s.mint]
+    assert pos.dev_sold_at_entry == 1e6 and e._manual_cfg().sell_on_dev_sell is False
+    assert e.set_manual_exits(s.mint, dev="1", tp=30, tp_frac=1) == ""
+    assert pos.manual["dev"] is True and pos.manual["tp_frac"] == 1.0
+    assert evaluate_manual_exit(pos, s, {**pos.manual}) is None
+    s.dev_sold += 5e6                                                 # and again after: out, all of it
+    assert evaluate_manual_exit(pos, s, {**pos.manual}) == (1.0, "manual: the creator sold")
+    assert e.set_manual_exits(s.mint, dev="0") == "" and pos.manual["dev"] is False
+    assert evaluate_manual_exit(pos, s, {**pos.manual}) is None
+
+
+def test_after_you_sold_compares_now_with_the_sell():
+    e = market()
+    s = live_coin(e)
+    e.book.closed.append({"mint": s.mint, "symbol": "SOLD", "source": "manual", "closed": e.now, "pnl_pct": 12.0,
+                          "exit_mcap_sol": s.market_cap_sol / 2, "pnl": .01, "cost": .1})
+    e.book.closed.append({"mint": "Z" * 44, "symbol": "GONE", "source": "late", "closed": e.now, "pnl_pct": -20.0,
+                          "exit_mcap_sol": 50.0, "pnl": -.02, "cost": .1})
+    a = asyncio.run(e.after_exit())
+    r = {x["symbol"]: x for x in a["trades"]}
+    assert r["SOLD"]["since_exit_pct"] == 100.0 and r["SOLD"]["who"] == "you" and r["GONE"]["now_mcap_sol"] is None
+    assert a["you"]["doubled"] == 1 and a["you"]["higher"] == 1 and a["bots"]["priced"] == 0

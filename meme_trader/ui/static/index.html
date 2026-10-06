@@ -1312,6 +1312,8 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
       <div id="an-edge"></div></section>
     <section class="panel" id="wallet-study"><h2>Wallet study <small>wallets-v1: do wallets that were early on several runners, buying together, make money?</small></h2>
       <div id="an-wallets"><div class="empty">Loading…</div></div></section>
+    <section class="panel" id="after-exit"><h2>After you sold <small>where the coins are now, against the market cap at the sell</small></h2>
+      <div id="an-after"><div class="empty">Loading…</div></div></section>
     <section class="panel" id="team-rec"><h2>The AI team's record <small>what its calls did next, on the bot's own exits</small></h2>
       <div class="seg" id="team-kind" role="group" aria-label="Which strategy"><button data-teamkind="late" aria-pressed="true">Graduation plays</button><button data-teamkind="sniper" aria-pressed="false">Sniper</button></div>
       <div id="an-team" style="margin-top:10px"></div></section>
@@ -2277,6 +2279,7 @@ async function loadAnalytics() {
   try {
     const r = await fetch("/api/analytics", {cache: "no-store"});
     S.analytics = await r.json();
+    if (!S.afterAt || Date.now() - S.afterAt > 120000) { S.afterAt = Date.now(); fetch("/api/after-exit", {cache: "no-store"}).then(r => r.json()).then(x => { S.afterExit = x; renderAfterExit(); }).catch(() => {}); }
     renderAnalytics(S.analytics);
     if (!S.wTimer || Date.now() - S.wTimer > 60000) { S.wTimer = Date.now(); loadWallets(); }
   } catch (e) { $("an-status").textContent = "Couldn't load analytics (" + e + ")"; }
@@ -4336,7 +4339,9 @@ function exitsForm(p) {
   return `<div class="mexits" data-mexits="${esc(p.mint)}"><span class="note">Your exits</span>
     <label>stop −<input type="number" min="0" max="99" step="1" data-k="sl" value="${esc(v("sl", "stop_loss_pct"))}" placeholder="off">%</label>
     <label>take profit +<input type="number" min="0" step="5" data-k="tp" value="${esc(v("tp", "take_profit_pct"))}" placeholder="off">%</label>
+    <label title="How much the take profit sells"><select data-k="tp_frac">${[[0.25, "sells ¼"], [0.5, "sells half"], [1, "sells all"]].map(([f, l]) => `<option value="${f}" ${+v("tp_frac", "take_profit_frac") === f || (!v("tp_frac", "take_profit_frac") && f === 0.5) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     <label>trail <input type="number" min="0" max="99" step="1" data-k="trail" value="${esc(v("trail", "trail_pct"))}" placeholder="off">%</label>
+    <label title="Sell everything if the coin's creator sells after you bought"><input type="checkbox" data-k="dev" ${(m.dev != null ? m.dev : d.sell_on_dev_sell) ? "checked" : ""}> sell if the creator sells</label>
     <button class="small" data-msave="${esc(p.mint)}">Save</button></div>`;
 }
 function renderTradePanel(s) {
@@ -5736,6 +5741,18 @@ function playHuddle(h) {
   h.lines.forEach((l, i) => setTimeout(() => { const b = IO.bots[l.who]; if (b) hsay(l.who, esc(l.say), {force: true}); }, 4500 + i * 3600));
   setTimeout(() => { for (const id of speakers) { const b = IO.bots[id]; if (b && b.busy === "huddle") goHome(b); } }, 4500 + h.lines.length * 3600 + 3000);
 }
+function renderAfterExit() {                         // "look at where the coins you traded are now"
+  const a = S.afterExit, box = $("an-after"); if (!a || !box) return;
+  const line = (who, sm) => !sm.n ? "" : `<p><b>${who}</b>: of the last ${sm.n} coins sold, <b class="up">${sm.higher}</b> are 20%+ higher now${sm.doubled ? ` (${sm.doubled} doubled or more)` : ""},
+    <b class="down">${sm.lower}</b> are 20%+ lower${sm.median_pct != null ? `, median ${pct(sm.median_pct, 0)} since the sell` : ""}.
+    <span class="note">${sm.higher > sm.lower * 1.5 ? "Most kept running: the exits are early." : sm.lower > sm.higher * 1.5 ? "Most fell after: the exits are fine; the entries are the thing to work on." : "Mixed."}${sm.priced < sm.n ? ` ${sm.n - sm.priced} have no price.` : ""}</span></p>`;
+  const rows = (a.trades || []).slice(0, 24).map(r => `<tr class="click" data-open="${esc(r.mint)}"><td>${logo(r.mint, r.symbol)}<b>${esc(r.symbol || short(r.mint))}</b></td>
+    <td><span class="tag">${r.who === "you" ? "you" : esc(r.source)}</span></td><td class="note num">${ago(r.closed)}</td><td class="r num ${cls(r.pnl_pct)}">${pct(r.pnl_pct, 0)}</td>
+    <td class="r num">${mcUsd(r.exit_mcap_sol)}</td><td class="r num">${r.now_mcap_sol ? mcUsd(r.now_mcap_sol) : "–"}</td>
+    <td class="r num ${r.since_exit_pct == null ? "" : cls(r.since_exit_pct)}">${r.since_exit_pct == null ? "–" : pct(r.since_exit_pct, 0)}</td></tr>`).join("");
+  setHTML(box, ((line("You", a.you) + line("The bots", a.bots)) || `<div class="empty">No sells yet.</div>`)
+    + (rows ? `<div class="tablewrap"><table><thead><tr><th>Coin</th><th>Who</th><th>Sold</th><th class="r">Result</th><th class="r">MC at the sell</th><th class="r">MC now</th><th class="r">Since the sell</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""));
+}
 function renderTeamRecord() {                          // every graduation vote, scored (desk_record.py)
   const all = S.analytics && S.analytics.team_record; if (!all || !$("an-team")) return;
   const kind = S.teamKind || "late", t = all[kind] || all;
@@ -6221,7 +6238,8 @@ document.addEventListener("click", e => {
   if (d.msell) { e.stopPropagation(); trSell(d.msell, +d.frac); return; }
   if (d.minit) { e.stopPropagation(); if (liveConfirm("Take initials")) send({action: "m_initials", mint: d.minit}); return; }
   if (d.msave) { e.stopPropagation(); const f = document.querySelector(`[data-mexits="${d.msave}"]`), v = k => f.querySelector(`[data-k="${k}"]`).value;
-    send({action: "m_exits", mint: d.msave, sl: v("sl"), tp: v("tp"), trail: v("trail")}); return; }
+    send({action: "m_exits", mint: d.msave, sl: v("sl"), tp: v("tp"), tp_frac: v("tp_frac"), trail: v("trail"),
+          dev: f.querySelector('[data-k="dev"]').checked ? "1" : "0"}); return; }
   if (d.memdel) { send({action: "mem_del", id: d.memdel}); return; }
   if (d.corkadd) { corkAdd(); return; }
   if (d.corkboard) { send({action: "mem_board", id: d.corkboard, on: d.on === "1"}); t.blur(); return; }
