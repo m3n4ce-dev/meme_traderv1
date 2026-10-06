@@ -50,6 +50,7 @@ tab) through its `console_help` tool, and can do the screen actions marked **(ch
 
 - **In the chat:** paste a contract address, or type its ticker (`$WIF`). A metrics card appears with its chart, red flags and holders.
   - **A ticker** finds the most liquid Solana coin trading as it (DexScreener). Copies sharing the ticker are listed under the card, each with Copy CA.
+  - **Charts are clickable:** on a position's chart, a buy/sell marker opens that wallet on Solscan and anywhere else opens the coin. Other chains rows open the coin (Solana) or its DexScreener page.
   - **The chart's timeframe:** press 1m, 5m, 15m, 1h, 4h or 1D for that coin's candles from its pool (GeckoTerminal). It starts on 1m for coins under 2 hours old, 5m under a day, 15m after that. Requests share GeckoTerminal's free allowance with the other-chain bot, so they're paced and cached for 30 s.
 
 ## Buy a coin by hand
