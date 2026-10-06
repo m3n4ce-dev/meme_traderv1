@@ -75,13 +75,49 @@ def _buckets(rows: list[dict], key: str, edges: list[float]) -> list[dict]:
 MCAP_BINS_K = [5, 10, 20, 40, 80, 160]       # entry market cap, $K
 
 
+def _mcap_label(k: str) -> str:
+    return f"<${k[1:]}K" if k.startswith("<") else f"${k[:-1]}K+" if k.endswith("+") else "${}K–${}K".format(*k.split("-"))
+
+
 def by_entry_mcap(rows: list[dict]) -> list[dict]:
     """Results by the market cap a trade was entered at ($K buckets); trades from before it was recorded are left out."""
     out = _buckets([{**c, "_mck": c["entry_mcap_usd"] / 1000} for c in rows if c.get("entry_mcap_usd")], "_mck", MCAP_BINS_K)
     for r in out:
-        k = r["key"]
-        r["key"] = f"<${k[1:]}K" if k.startswith("<") else f"${k[:-1]}K+" if k.endswith("+") else "${}K–${}K".format(*k.split("-"))
+        r["key"] = _mcap_label(r["key"])
     return out
+
+
+# the key each Analytics table groups a trade by (compute() uses the same ones): a table row's trades (trades_in)
+GROUP_KEYS = {
+    "source": lambda c: c["source"].split(":")[0],
+    "exit": lambda c: exit_key(c.get("exit", "")),
+    "hour": lambda c: time.gmtime(c["opened"]).tm_hour,
+    "day": lambda c: time.strftime("%Y-%m-%d", time.gmtime(c["closed"])),
+    "score": lambda c: _bucket(c["score"], SCORE_BINS) if c.get("score") is not None else None,
+    "p": lambda c: _bucket(c["p"], P_BINS) if c.get("p") is not None else None,
+    "mcap": lambda c: _mcap_label(_bucket(c["entry_mcap_usd"] / 1000, MCAP_BINS_K)) if c.get("entry_mcap_usd") else None,
+}
+
+
+def trades_in(closed: list[dict], table: str, key: str, who: str = "all", limit: int = 200) -> list[dict]:
+    """The trades behind one row of an Analytics table (newest first). who: all | manual | bots (the market-cap table)."""
+    keyfn = GROUP_KEYS.get(table)
+    if keyfn is None:
+        return []
+    out = []
+    for c in closed:
+        if c.get("source") == "callout" or (who == "manual" and c["source"] != "manual") or (who == "bots" and c["source"] == "manual"):
+            continue
+        try:
+            k = keyfn(c)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if k is not None and str(k) == str(key):
+            out.append({"mint": c.get("mint"), "symbol": c.get("symbol", ""), "source": c.get("source", ""), "opened": c.get("opened"),
+                        "closed": c.get("closed"), "pnl": round(c.get("pnl", 0.0), 6), "pnl_pct": round(c.get("pnl_pct", 0.0), 2),
+                        "peak_pct": round(c.get("peak_gain_pct") or 0.0, 1), "exit": str(c.get("exit", ""))[:80],
+                        "entry_mcap_usd": c.get("entry_mcap_usd"), "chain": c.get("chain"), "url": c.get("url")})
+    return sorted(out, key=lambda r: -(r["closed"] or 0))[:limit]
 
 
 def _hist(values: list[float], edges: list[float]) -> list[dict]:
@@ -328,10 +364,10 @@ def compute(closed: list[dict], equity_hist: list, start_sol: float, max_drawdow
     trades = [c for c in closed if c.get("source") != "callout"]
     bags = [c for c in closed if c.get("source") == "callout"]
     k = kpis(trades, start_sol, fee_pct)
-    by_source = _group(trades, lambda c: c["source"].split(":")[0])
-    by_exit = _group(trades, lambda c: exit_key(c.get("exit", "")))
-    by_hour = sorted(_group(trades, lambda c: time.gmtime(c["opened"]).tm_hour), key=lambda r: r["key"])
-    by_day = sorted(_group(trades, lambda c: time.strftime("%Y-%m-%d", time.gmtime(c["closed"]))), key=lambda r: r["key"])
+    by_source = _group(trades, GROUP_KEYS["source"])
+    by_exit = _group(trades, GROUP_KEYS["exit"])
+    by_hour = sorted(_group(trades, GROUP_KEYS["hour"]), key=lambda r: r["key"])
+    by_day = sorted(_group(trades, GROUP_KEYS["day"]), key=lambda r: r["key"])
     by_score = _buckets(trades, "score", SCORE_BINS)
     by_mcap = {who: by_entry_mcap([c for c in trades if pick(c)]) for who, pick in
                (("all", lambda c: True), ("manual", lambda c: c["source"] == "manual"), ("bots", lambda c: c["source"] != "manual"))}

@@ -315,6 +315,16 @@ body.on-chat .toasts { bottom: auto; top: 200px; }   /* below the buddy */
 .tc-name { min-width: 0; flex: 1; } .tc-name b { font-size: 17px; } .tc-name small { color: var(--ink-2); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-body { padding: 12px 14px; display: grid; gap: 14px; }
 .tc-body h5 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.tick-up { animation: tick-up 1.1s ease-out; } .tick-down { animation: tick-down 1.1s ease-out; }
+@keyframes tick-up { 0% { color: var(--good-mark, #16a34a); text-shadow: 0 0 12px rgba(34,197,94,.45); } 100% { text-shadow: none; } }
+@keyframes tick-down { 0% { color: var(--bad, #dc2626); text-shadow: 0 0 12px rgba(239,68,68,.45); } 100% { text-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .tick-up, .tick-down, .grp-box { animation: none; } }
+.grp-x > td { padding: 0 !important; background: var(--surface-2, rgba(127,127,127,.06)); }
+.grp-box { max-height: 340px; overflow: auto; padding: 6px 8px 8px; animation: grp-in .18s ease-out; }
+.grp-tbl { width: 100%; font-size: 12.5px; } .grp-caret { display: inline-block; width: 1em; color: var(--muted); }
+@keyframes grp-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.hb.click { cursor: pointer; border-radius: 6px; } .hb.click:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.sc-dot { cursor: pointer; transition: r .12s; } .sc-dot:hover { r: 6; opacity: 1; }
 .tc-tf { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: -8px; } .tc-tf .note { margin-left: 6px; }
 .big { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; }
 .big .fact .v { font-size: 16px; }
@@ -1602,6 +1612,17 @@ function renderChrome(s) {
   if ($("banners").dataset.h !== bh) { $("banners").dataset.h = bh; $("banners").innerHTML = bh; }
 }
 
+// a headline number that really moved flashes green (up) or red (down): at least `min` since its last flash, and
+// at most every 4 s (equity is marked to market every second: flashing on every tick would just flicker)
+const TICK = {};
+function tickNum(id, v, min = 1e-6) {
+  const el = $(id); if (!el || v == null || !isFinite(v)) return;
+  const t = TICK[id] || (TICK[id] = {v, at: 0});
+  if (Math.abs(v - t.v) < min || Date.now() - t.at < 4000) return;
+  el.classList.remove("tick-up", "tick-down"); void el.offsetWidth;   // restart the animation
+  el.classList.add(v > t.v ? "tick-up" : "tick-down");
+  t.v = v; t.at = Date.now();
+}
 // ---------------------------------------------------------------- live view
 const XURL = {};                                   // other-chain coins open on DexScreener, not the pump.fun drawer
 const openCoin = m => XURL[m] ? window.open(XURL[m], "_blank", "noopener") : openDrawer(m);
@@ -1655,10 +1676,10 @@ function render(s) {
   renderTradePanel(s);
   const sm = s.summary;
   const eqd = s.equity - sm.start_sol;
-  $("k-eq").textContent = sol(s.equity) + U();
+  tickNum("k-eq", s.equity, Math.abs(s.equity) * .005); $("k-eq").textContent = sol(s.equity) + U();
   $("k-eq-sub").innerHTML = `<span class="${cls(eqd)}">${signed(eqd)}${U()} (${pct(eqd / sm.start_sol * 100, 1)})</span> vs start`;
-  $("k-pnl").innerHTML = `<span class="${cls(sm.realized_pnl_sol)}">${signed(sm.realized_pnl_sol)}</span>`;
-  $("k-day").innerHTML = `<span class="${cls(s.day_pnl)}">${signed(s.day_pnl)}</span>`;
+  tickNum("k-pnl", sm.realized_pnl_sol); $("k-pnl").innerHTML = `<span class="${cls(sm.realized_pnl_sol)}">${signed(sm.realized_pnl_sol)}</span>`;
+  tickNum("k-day", s.day_pnl); $("k-day").innerHTML = `<span class="${cls(s.day_pnl)}">${signed(s.day_pnl)}</span>`;
   $("k-win").textContent = sm.closed ? Math.round(sm.win_rate * 100) + "%" : "–";
   $("k-win-sub").textContent = `${sm.closed} closed · avg win ${pct(sm.avg_win_pct)} / loss ${pct(sm.avg_loss_pct)}`;
   $("k-pf").textContent = sm.closed ? fx(sm.profit_factor) : "–";
@@ -2089,7 +2110,7 @@ function tickChart(cv, c, o = {}) {
   }
 }
 // ---------------------------------------------------------------- Charts tab: optional views (remembered here)
-const LV = {on: new Set((() => { try { return JSON.parse(store.get("lc-views") || "[]"); } catch { return []; } })()), data: {}, timer: 0, keys: {}};
+const LV = {on: new Set((() => { try { const v = store.get("lc-views"); return v == null ? ["grad", "pulse"] : JSON.parse(v); } catch { return ["grad", "pulse"]; } })()), data: {}, timer: 0, keys: {}};   // (first visit: two views, not an empty page)
 const VIEWS = [["kol", "👑 KOL tracker"], ["chains", "🌐 Other chains"], ["hot", "🔥 Copycat waves"], ["grad", "🎓 Graduation watch"], ["pulse", "⚡ Market pulse"], ["equity", "💼 Equity"]];
 LV.chain = store.get("lv-chain") || "all"; LV.chainKind = store.get("lv-chainkind") || "trending"; LV.fresh = store.get("lv-fresh") !== "0";
 const ageShort = s => s == null ? "–" : s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 172800 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
@@ -2294,7 +2315,7 @@ function svgScatter(pts) {
   const X = scale(Math.min(...xs, 0.7), Math.max(...xs, 2.5), L, w - R), lo = Math.min(-60, ...ys), hi = Math.max(60, ...ys), Y = scale(lo, hi, h - B, T);
   const ticks = [10, 30, 60, 120, 300, 600, 1200].filter(t => lx(t) >= Math.min(...xs, 0.7) && lx(t) <= Math.max(...xs, 2.5));
   const used = [...new Set(pts.map(p => p.source))];
-  const dots = pts.map((p, i) => `<circle cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3.6" fill="var(${SRC_COLOR[p.source] || "--muted"})" opacity=".75"><title>${esc(p.symbol)} · ${p.source} · ${pct(p.pnl_pct, 0)} in ${dur(p.hold_s)} (peak ${pct(p.peak_pct, 0)})</title></circle>`).join("");
+  const dots = pts.map((p, i) => `<circle ${p.mint ? `data-open="${esc(p.mint)}" class="sc-dot"` : ""} cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3.6" fill="var(${SRC_COLOR[p.source] || "--muted"})" opacity=".75"><title>${esc(p.symbol)} · ${p.source} · ${pct(p.pnl_pct, 0)} in ${dur(p.hold_s)} (peak ${pct(p.peak_pct, 0)})</title></circle>`).join("");
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Hold time vs P&L">${gridY(Y, lo, hi, L, w - R, v => v.toFixed(0) + "%")}
     <line x1="${L}" x2="${w - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--axis)"/>
     ${ticks.map(t => `<text x="${X(lx(t)).toFixed(1)}" y="${h - 6}" text-anchor="middle">${dur(t)}</text>`).join("")}${dots}</svg>
@@ -2320,12 +2341,35 @@ function svgHours(rows) {
       const bar = r ? (() => { const bh = Math.abs(r.pnl_sol) / m * half; return `<rect x="${x.toFixed(1)}" y="${(r.pnl_sol >= 0 ? mid - bh : mid).toFixed(1)}" width="${(bw - 6).toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="2" fill="${r.pnl_sol >= 0 ? "var(--good-mark)" : "var(--bad)"}" opacity=".85"><title>${k}:00 UTC · ${r.n} trades · ${signed(r.pnl_sol)}${U()} · win ${Math.round(r.win_rate * 100)}%</title></rect>`; })() : "";
       return bar + `<text x="${(k * bw + bw / 2).toFixed(1)}" y="${h - 4}" text-anchor="middle">${k}</text>`; }).join("")}</svg>`;
 }
-function groupTable(rows, keyLabel = "") {
+// a row of an Analytics table opens its trades under it (GET /api/trades groups exactly like the table)
+const GRP = {id: "", html: ""};
+const grpId = (table, key, who) => `${table}\u241f${key}\u241f${who}`;
+function groupTable(rows, keyLabel = "", table = "", who = "all") {
   if (!rows || !rows.length) return `<div class="empty">Nothing yet.</div>`;
   return `<div class="tablewrap"><table><thead><tr><th>${keyLabel}</th><th class="r">Trades</th><th class="r">Win</th><th class="r">Avg</th><th class="r">PF</th><th class="r">Hit 2x</th><th class="r">P&amp;L SOL</th></tr></thead><tbody>
-    ${rows.map(r => `<tr><td>${esc(r.key)}</td><td class="r">${r.n}</td><td class="r">${Math.round(r.win_rate * 100)}%</td>
+    ${rows.map(r => { const id = table ? grpId(table, r.key, who) : "", open = id && GRP.id === id;
+      return `<tr ${table ? `class="click${open ? " sel" : ""}" data-angrp="${esc(table)}" data-agkey="${esc(String(r.key))}" data-agwho="${esc(who)}" title="${open ? "Hide" : "Show"} these ${r.n} trades"` : ""}><td>${table ? `<span class="grp-caret">${open ? "▾" : "▸"}</span> ` : ""}${esc(r.key)}</td><td class="r">${r.n}</td><td class="r">${Math.round(r.win_rate * 100)}%</td>
       <td class="r ${cls(r.avg_pnl_pct)}">${pct(r.avg_pnl_pct, 1)}</td><td class="r">${fx(r.profit_factor)}</td><td class="r">${Math.round(r.reached_2x * 100)}%</td>
-      <td class="r ${cls(r.pnl_sol)}">${signed(r.pnl_sol)}</td></tr>`).join("")}</tbody></table></div>`;
+      <td class="r ${cls(r.pnl_sol)}">${signed(r.pnl_sol)}</td></tr>${open ? `<tr class="grp-x"><td colspan="7"><div class="grp-box">${GRP.html || '<div class="empty">Loading…</div>'}</div></td></tr>` : ""}`; }).join("")}</tbody></table></div>`;
+}
+async function openGroup(table, key, who) {
+  const id = grpId(table, key, who);
+  if (GRP.id === id) { GRP.id = ""; if (S.analytics) renderAnalytics(S.analytics); return; }
+  GRP.id = id; GRP.html = "";
+  if (S.analytics) renderAnalytics(S.analytics);
+  let ts = null;
+  try { ts = (await (await fetch(`/api/trades?table=${encodeURIComponent(table)}&key=${encodeURIComponent(key)}&who=${encodeURIComponent(who)}`, {cache: "no-store"})).json()).trades; } catch { /* below */ }
+  if (GRP.id !== id) return;                                     // another row was opened meanwhile
+  (ts || []).forEach(t => { if (t.chain && t.url) XURL[t.mint] = t.url; });
+  const row = (((S.analytics || {})[{source: "by_source", exit: "by_exit", score: "by_score", p: "by_p"}[table]]) || (((S.analytics || {}).by_mcap || {})[who]) || []).find(r => String(r.key) === String(key));
+  if (ts && row && row.n !== ts.length) loadAnalytics();          // a trade closed since the table was drawn: catch it up
+  const when = t => t ? new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}) : "–";
+  GRP.html = !ts ? `<div class="empty">Couldn't load the trades.</div>` : !ts.length ? `<div class="empty">No trades.</div>`
+    : `<table class="grp-tbl"><thead><tr><th>Closed</th><th>Coin</th><th>Strategy</th><th class="r">P&amp;L</th><th class="r">SOL</th><th class="r">Peak</th><th class="r">Entry MC</th><th>Exit</th></tr></thead><tbody>
+      ${ts.map(t => `<tr class="click" data-open="${esc(t.mint)}" title="Open ${esc(t.symbol)}"><td class="note num">${when(t.closed)}</td><td>${logo(t.mint, t.symbol)}<b>${esc(t.symbol || short(t.mint))}</b></td>
+        <td><span class="tag">${esc(t.source.split(":")[0])}</span></td><td class="r num ${cls(t.pnl_pct)}">${pct(t.pnl_pct, 1)}</td><td class="r num ${cls(t.pnl)}">${signed(t.pnl)}</td>
+        <td class="r num">${pct(t.peak_pct, 0)}</td><td class="r num">${t.entry_mcap_usd ? "$" + fmtUsd(t.entry_mcap_usd) : "–"}</td><td class="note">${esc(t.exit)}</td></tr>`).join("")}</tbody></table>${ts.length >= 200 ? `<p class="note">The newest 200.</p>` : ""}`;
+  if (S.analytics) renderAnalytics(S.analytics);
 }
 function renderAnalytics(a) {
   S.analytics = a; renderExitLab(); renderEdge(); renderTeamRecord();
@@ -2353,16 +2397,17 @@ function renderAnalytics(a) {
   $("an-pnl").innerHTML = svgBars(a.pnl_hist, true);
   $("an-cum").innerHTML = svgCum(a.timeline);
   const ex = (a.by_exit || []).slice().sort((x, y) => y.pnl_sol - x.pnl_sol), exm = Math.max(1e-9, ...ex.map(r => Math.abs(r.pnl_sol)));
-  $("an-exitbars").innerHTML = ex.length ? hbars(ex.map(r => ({label: esc(r.key), v: r.pnl_sol, text: signed(r.pnl_sol), title: `${r.key}: ${r.n} trades, ${Math.round(r.win_rate * 100)}% win`})), exm,
+  $("an-exitbars").innerHTML = ex.length ? hbars(ex.map(r => ({label: esc(r.key), v: r.pnl_sol, text: signed(r.pnl_sol), title: `${r.key}: ${r.n} trades, ${Math.round(r.win_rate * 100)}% win · click for the trades`,
+    attrs: `data-angrp="exit" data-agkey="${esc(r.key)}" data-agwho="all" data-agjump="1"`})), exm,
     r => r.v >= 0 ? "var(--good-mark)" : "var(--bad)") + `<p class="note">${ex.map(r => `${esc(r.key)} ${r.n}×`).join(" · ")}</p>` : `<div class="empty">No exits yet.</div>`;
   $("an-scatter").innerHTML = svgScatter(a.scatter);
-  $("an-src").innerHTML = groupTable(a.by_source, "Strategy");
-  $("an-exit").innerHTML = groupTable(a.by_exit, "Exit");
-  $("an-score").innerHTML = groupTable(a.by_score, "Score");
+  $("an-src").innerHTML = groupTable(a.by_source, "Strategy", "source");
+  $("an-exit").innerHTML = groupTable(a.by_exit, "Exit", "exit");
+  $("an-score").innerHTML = groupTable(a.by_score, "Score", "score");
   const mw = S.anMc || "all"; $$("#an-mc-who button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.anmc === mw)));
-  $("an-mcap").innerHTML = groupTable((a.by_mcap || {})[mw], "Entry MC") + `<p class="note">Trades from before market caps were logged are filled in from the recorded feed (dollars at today's SOL price).</p>`;
+  $("an-mcap").innerHTML = groupTable((a.by_mcap || {})[mw], "Entry MC", "mcap", mw) + `<p class="note">Trades from before market caps were logged are filled in from the recorded feed (dollars at today's SOL price).</p>`;
   const lc = a.live_calibration || [];
-  $("an-p").innerHTML = groupTable(a.by_p, "P(2x)") + (lc.length ? `<p class="note" style="margin-top:8px">Live check: ${lc.map(b => `${b.bin}: predicted ${prob(b.predicted)}, reached 2x ${prob(b.realized_2x)} (n=${b.n})`).join(" · ")}</p>` : "");
+  $("an-p").innerHTML = groupTable(a.by_p, "P(2x)", "p") + (lc.length ? `<p class="note" style="margin-top:8px">Live check: ${lc.map(b => `${b.bin}: predicted ${prob(b.predicted)}, reached 2x ${prob(b.realized_2x)} (n=${b.n})`).join(" · ")}</p>` : "");
   $("an-hour").innerHTML = svgHours(a.by_hour);
   const g = a.gate_audit || [], ref = g.find(r => r.gate === "(bought)");
   $("an-gates").innerHTML = !g.length ? `<div class="empty">Each decision is followed for 10 minutes; results appear as they settle.</div>` :
@@ -4631,7 +4676,7 @@ function svgCum(timeline) {
     <div class="legend">${srcs.map(s => `<span><i style="background:var(${SRC_COLOR[s] || "--muted"})"></i>${esc(s)} ${signed(run[s])}</span>`).join("")}${srcs.length > 1 ? `<span class="note">dashed = all ${signed(tot)}</span>` : ""}</div>`;
 }
 function hbars(rows, max, color = r => "var(--series)") {
-  return rows.map(r => `<div class="hb"><span title="${esc(r.title || r.label)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.label}</span>
+  return rows.map(r => `<div class="hb${r.attrs ? " click" : ""}" ${r.attrs || ""}><span title="${esc(r.title || r.label)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.label}</span>
     <div class="track"><i style="width:${Math.max(1.5, Math.min(100, Math.abs(r.v) / (max || 1) * 100)).toFixed(1)}%;background:${color(r)}"></i></div><span class="num" style="text-align:right">${r.text}</span></div>`).join("");
 }
 
@@ -6083,7 +6128,7 @@ setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
   const lnk = e.target.closest("a[href]");
   if (lnk && !Object.keys(lnk.dataset).length) return;   // a plain link inside a clickable row goes only where it says
-  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-tctf],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-tctf],[data-angrp],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
@@ -6093,6 +6138,9 @@ document.addEventListener("click", e => {
   if (d.xsell) { if (confirm("Sell this other-chain position now (paper)?")) send({action: "xchain_sell", key: d.xsell}); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
   if (d.tctf) { tcLoadTf(t); return; }
+  if (d.angrp) { openGroup(d.angrp, d.agkey, d.agwho || "all");
+    if (d.agjump) setTimeout(() => { const r = document.querySelector("#an-exit tr.sel"); if (r) r.scrollIntoView({block: "center", behavior: "smooth"}); }, 150);
+    return; }
   if (d.lvchain) { const [key, v] = d.lvchain.split(":");
     if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
     LV.keys = {}; renderViews(true); return; }
