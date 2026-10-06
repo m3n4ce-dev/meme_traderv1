@@ -103,6 +103,7 @@ def test_practice_with_the_graduation_play_off_scores_every_call(monkeypatch):
     asyncio.run(go())
     assert not e.positions and not e.pending                              # nothing bought
     assert e._calls_open[s.mint]["mode"] == "practice" and e.lab.open[s.mint][0]["kind"] == "practice-buy"
+    assert e._calls_open[s.mint]["rubric"].endswith("counterparty")      # which rubric the call was made under
     assert e.desk_reviews[-1]["kind"] == "practice" and s.late_tried
     e.lab._close(e.lab.open[s.mint][0], s.curve.price * 1.2, e.now + 60, "graduation exit")
     c = e.desk_calls[-1]
