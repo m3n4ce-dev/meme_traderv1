@@ -150,6 +150,21 @@ class AgentAPI:
         if d is None:
             raise AgentError("token not tracked (never seen, or cleaned up) - use watch to start tracking it")
         d = dict(d)
+        # A coin the bot only started watching (pasted, bought by hand) has placeholders until it trades: a fresh
+        # curve's price and an age counted from now. Seen 2026-10-06: a 33-hour-old $394K coin read as "$3.3K, 2 s old".
+        s, caveats = self.e.tokens.get(str(mint)), []
+        if s is not None and s.launch is None:
+            d["watching_for_s"], d["age_s"] = d.get("age_s"), None
+            caveats.append("the bot didn't see this coin launch, so its age is unknown (watching_for_s is how long the bot has watched it)")
+        if not d.get("price_known"):
+            d["curve_pct"] = d["mcap_usd"] = d["price"] = None
+            caveats.append("no price yet: the bot hasn't seen it trade since it started watching. Use lookup_token for its real "
+                           "metrics (DexScreener, RugCheck, the chain)")
+        elif s is not None and s.migrated:
+            d["curve_pct"] = None
+            caveats.append("graduated: priced from its DEX pool (refreshed every ~10 s while held), so the bonding-curve numbers don't apply")
+        if caveats:
+            d["caveats"] = caveats
         d["tape"] = d.get("tape", [])[:20]
         chart = d.pop("chart", None) or []
         d["price_points"] = chart[:: max(1, len(chart) // 30)]
