@@ -262,6 +262,8 @@ sniper:
   market:                        # how trades are read
     non_organic_wallets:         # their trades move the price, but never count as demand, buyers or holders
       - BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s   # pump.fun's Mayhem-mode AI agent: ~22% of all trades (2026-10-03)
+    skip_mayhem: true            # the bots never buy a Mayhem-mode coin (~19% of launches; seen once the agent trades it),
+                                 #   and sell their own if a coin turns out to be one. Your manual trades aren't affected
 
   agent:                         # AI operator tools (Claude Code via MCP: see .mcp.json and CLAUDE.md)
     enabled: true                # local-only API at /api/agent, secret token in data/agent.token

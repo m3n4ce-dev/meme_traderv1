@@ -106,8 +106,9 @@ def test_manual_exit_rules():
     assert evaluate_manual_exit(pos, S, {"sl": 40}) == (1.0, "manual stop -50%")
     S.curve.price = 2.2
     m = {"tp": 100, "tp_frac": 0.5}
-    assert evaluate_manual_exit(pos, S, m)[0] == 0.5 and m["tp_done"]
-    assert evaluate_manual_exit(pos, S, m) is None                            # take profit fires once
+    assert evaluate_manual_exit(pos, S, m)[0] == 0.5 and not m.get("tp_done")   # asks; only a filled sell spends it
+    m["tp_done"] = True
+    assert evaluate_manual_exit(pos, S, {**m, "trail": 0}) is None            # spent: it fires once
     S.curve.price = 1.5
     assert evaluate_manual_exit(pos, S, {"trail": 25})[1].startswith("manual trail")
     S.migrated = True
@@ -325,7 +326,8 @@ def test_the_bots_ride_a_handed_position_for_a_runner_instead_of_selling_at_once
     step = lambda px, live=False: (setattr(tok.curve, "price", px), evaluate_ride_exit(pos, tok, RIDE_DEFAULTS, live))[1]
     assert step(1.05) is None and step(0.9) is None and step(1.3) is None        # chop, no time or stall exit
     frac, why = step(2.05)
-    assert frac == 0.5 and "2x" in why and pos.ride_tp                          # half out at 2x
+    assert frac == 0.5 and "2x" in why and not pos.ride_tp                      # half out at 2x (spent once it fills)
+    pos.ride_tp = True                                                          # (Engine._apply_sell, on the fill)
     assert step(2.6) is None and step(2.0) is None                              # the rest runs...
     assert step(1.8)[1].startswith("bots: trail")                               # ...until it gives back 30% of its peak
     pos2 = SniperPosition(mint="n", symbol="Y", opened_at=0, entry_price=1.0, tokens=100, initial_tokens=100, cost_sol=0.1,
