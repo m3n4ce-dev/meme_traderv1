@@ -4087,7 +4087,7 @@ function renderHouseBoards() {
       : `<text x="8" y="34" class="pb-s">loading the recorder's data…</text>`}`);
     const strat = e ? (e.strategies || []).filter(s => s.n && s.source !== "manual").slice(0, 3) : [];
     const LB = (snap || {}).lab || {}, lr = LB.running, ll = LB.last;
-    const labTop = lr ? `<text x="8" y="14" class="pb-t">LAB: TESTING</text><text x="8" y="28" class="pb-s">${esc(labName(lr.key).slice(0, 26))}</text><text x="8" y="40" class="pb-s">${lr.now} → ${lr.value} · last 24 h</text>`
+    const labTop = lr ? `<text x="8" y="14" class="pb-t">LAB: TESTING</text><text x="8" y="28" class="pb-s">${esc(labName(lr.key).slice(0, 26))}</text><text x="8" y="40" class="pb-s">${lr.now} → ${lr.value} · day by day</text>`
       : ll ? `<text x="8" y="14" class="pb-t">LAB: LAST RESULT</text><text x="8" y="28" class="pb-s">${esc(labName(ll.key).slice(0, 26))} ${ll.now} → ${ll.value}</text><text x="8" y="40" class="pb-s">${esc(ll.status === "failed" ? "run failed" : ll.verdict || "")} · ${LB.tries || 0} tests so far</text>` : "";
     if (labTop) { setHTML(b2, labTop + `<text x="8" y="58" class="pb-t">EDGE</text>${strat.slice(0, 1).map(s => `<text x="8" y="70" class="pb-s ${cls(s.ret_pct)}">${esc(s.label.slice(0, 14))} ${pct(s.ret_pct, 1)} per SOL</text>`).join("")}`); return; }
     setHTML(b2, `<text x="8" y="14" class="pb-t">EDGE CHECK</text>${strat.length ? strat.map((s, i) => `
@@ -5601,7 +5601,7 @@ function renderLab() {
     ${rows ? `<div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">Now</th><th class="r">With the change</th><th class="r" title="6-hour blocks where the change made more">Blocks better</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="empty">No results yet. The team runs a routine test every 6 hours, and the meetings can propose their own.</div>`}
     <div class="lab-add"><span class="note">Test a change:</span><select id="lab-key">${opts}</select><input id="lab-val" type="number" step="any" placeholder="new value"><button class="small primary" data-labadd="1">Test it</button></div>
-    <p class="note">${d.tries || 0} tests run so far. Each replays the last 24 hours twice, with the current settings and with the one change. "Better" there is promising, not proven: the best of many tries always looks better than it is. Nothing changes the bot until you Apply it.</p>`);
+    <p class="note">${d.tries || 0} tests run so far. Each replays every recorded day (the last 5) with the current settings and with the one change, and says on how many days the change won. "Better" there is promising, not proven: the best of many tries always looks better than it is. Nothing changes the bot until you Apply it.</p>`);
 }
 function labRoom() {                                          // the room plays out the lab's work
   const L = (snap || {}).lab; if (!L || !IO.built) return;
