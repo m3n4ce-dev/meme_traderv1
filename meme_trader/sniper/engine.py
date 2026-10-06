@@ -71,6 +71,8 @@ CONTROLS = [
     ("xchain.enabled", "bool", None, None, "Other chains (paper)", "Young DEX coins on BNB Chain, Base and Solana, paper money"),
     ("callouts.enabled", "bool", None, None, "Callouts", "$1 bags + callout cards"),
     ("late.enabled", "bool", None, None, "Graduation plays", "Late-curve momentum, out before migration"),
+    ("desk.graduation_vote", "bool", None, None, "AI team decides graduation buys", "Off: the rules decide and the team votes on the side, scored"),
+    ("desk.practice", "bool", None, None, "AI team practice", "With graduation plays off, the team still votes on what the rules pick (nothing bought); every call is scored"),
     ("risk_adapt.enabled", "bool", None, None, "Defense mode", "Halve size + raise the bar after a bad run"),
     ("entry.min_score", "int", 0, 100, "Min entry score", "Rule score needed to buy"),
     ("predict.min_p", "float", 0.0, 0.95, "Min P(2x first)", "Model gate; 0 = show only"),
@@ -238,6 +240,20 @@ class Engine:
         self.ledger = CallLedger(DATA / "calls.jsonl" if self.persist else None)
         # other exit rules, shadowing every bot entry on the same prices (measurement only; data/exit_lab.jsonl)
         self.lab = ExitLab(DATA / "exit_lab.jsonl" if self.persist else None, self.fee)
+        # the AI team's track record (desk_record.py): every graduation vote, scored when its follow closes
+        from . import desk_record
+        self.desk_calls: list[dict] = []
+        if self.persist:
+            path = DATA / "desk_calls.jsonl"
+            if not path.exists():                        # first run: the record from the journal and the exit lab
+                old = desk_record.backfill(DATA)
+                if old:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("".join(json.dumps(c) + "\n" for c in old))
+            self.desk_calls = desk_record.load(path)
+        self._calls_open: dict[str, dict] = {}            # mint -> a vote waiting for its score
+        self._practice_n = 0
+        self.lab.on_close = self._score_call
         self._last_ledger_tick = 0.0
         self._last_ledger_dex = 0.0
         self._ledger_busy = False
@@ -1003,6 +1019,11 @@ class Engine:
 
     async def _enter(self, s: TokenState, kind: str, score: float, buy_sol: float, notes: list[str],
                      source: str = "sniper", leader: str = "", ref_price: float = 0.0) -> None:
+        if self.desk and self.desk.enabled and kind == "late" and not self.p.desk.get("graduation_vote", True):
+            if self.feed.realtime:                       # the rules decide; the team votes on the side, and is scored
+                asyncio.create_task(self._practice(s, "shadow"))
+            await self._buy(s, score, self._size(s, kind, score, buy_sol, None, notes), notes, source, leader)
+            return
         if self.desk and self.desk.enabled:
             self.reviewing.add(s.mint)
             review = self._desk_then_buy(s, kind, score, buy_sol, notes, source, leader, ref_price)
@@ -1014,9 +1035,20 @@ class Engine:
         await self._buy(s, score, self._size(s, kind, score, buy_sol, None, notes), notes, source, leader)
 
     async def _desk_then_buy(self, s, kind, score, buy_sol, notes, source, leader, ref_price) -> None:
-        from .desk import snapshot_for
-
         start_price = s.curve.price
+        snap, only = self._desk_inputs(s, kind, leader)
+        t0 = time.time()
+        try:
+            v = await self.desk.review(snap, only)
+        finally:
+            self.reviewing.discard(s.mint)
+        await self._after_review(s, kind, v, t0, start_price, score, buy_sol, notes, source, leader)
+
+    def _desk_inputs(self, s, kind: str, leader: str = "") -> tuple[dict, dict]:
+        """What the team votes on: the snapshot, plus what one persona alone reads (the narrative context; each
+        persona's own track record)."""
+        from . import desk_record
+        from .desk import snapshot_for
         extra = {}
         if leader:
             st = self.leaders.stats[leader]
@@ -1032,12 +1064,16 @@ class Engine:
             extra = {**extra, "name_family": {"coins_sharing_name_or_ticker_6h": fam["n"], "is_first_launched": fam["og"],
                                               "launch_order": fam["rank"], "seconds_after_first": fam["after_og_s"],
                                               "biggest_now": fam.get("lead_symbol"), "biggest_mcap_usd": fam.get("lead_mcap_usd")}}
-        t0 = time.time()
-        try:
-            v = await self.desk.review(snapshot_for(s, self.now, kind, extra),
-                                       {"narrative": {"narrative_context": self.narrative_context(s)}})
-        finally:
-            self.reviewing.discard(s.mint)
+        only: dict = {}
+        if kind == "late":
+            for p in self.p.desk.personas:
+                rec = desk_record.persona_record(self.desk_calls, p)
+                if rec:
+                    only[p] = {"your_record": rec}
+        only["narrative"] = {**only.get("narrative", {}), "narrative_context": self.narrative_context(s)}
+        return snapshot_for(s, self.now, kind, extra), only
+
+    async def _after_review(self, s, kind, v, t0, start_price, score, buy_sol, notes, source, leader) -> None:
         if self.feed.realtime:
             self.desk_vote_s.append(round(time.time() - t0, 2))
         s.desk = v.summary
@@ -1055,6 +1091,8 @@ class Engine:
                                   "Entries continue on the rules alone.")
         else:
             self.desk_failures, self.desk_error = 0, ""
+            if kind == "late":
+                self._open_call(s, v, "live")
         if not v.approve:
             self.rejects["desk passed"] += 1
             if kind == "sniper":
@@ -1080,6 +1118,8 @@ class Engine:
             self.say("info", f"desk approved {s.symbol} but skipped: {why}", s.mint)
             if kind == "sniper" and not why.startswith(("max positions", "paused", "low SOL")):
                 s.decided = "skipped: " + why          # don't pay for a fresh desk review every tick
+            if kind == "late" and self.feed.realtime:      # the call still gets its score
+                self.lab.start(s.mint, s.symbol, "practice-buy", s.curve.price, self.now, self.p, only=("as now",))
             return
         await self._buy(s, score, size, notes, source, leader)
 
@@ -1851,7 +1891,9 @@ class Engine:
     # ------------------------------------------------------------------ graduation plays
     async def _maybe_late(self) -> None:
         L = self.p.late
-        if not L.enabled or self.now - self._last_late_scan < L.get("scan_interval_s", 2) or self.entries_blocked():
+        practice = not L.enabled and self._practicing()
+        if not (L.enabled or practice) or self.now - self._last_late_scan < L.get("scan_interval_s", 2) \
+                or (L.enabled and self.entries_blocked()):
             return
         self._last_late_scan = self.now
         en = self.p.entry
@@ -1871,11 +1913,75 @@ class Engine:
                 if why in SKIP_FOR_GOOD:                   # it qualified but looks like the dump profile: never this coin
                     s.late_tried = True
                 continue
+            if practice:
+                if self._practice_n >= 3:                # a few at a time: each review is 4 model calls
+                    break
+                s.late_tried = True
+                asyncio.create_task(self._practice(s, "practice"))
+                continue
             s.late_tried = True
             await self._enter(s, kind="late", score=max(s.score, 60.0), buy_sol=self.p.capital.buy_sol,
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _practicing(self) -> bool:
+        """desk.practice: with the graduation play off, the team keeps voting on what the rules pick (live feed,
+        desk awake). Nothing is bought; each call is scored on the bot's exits."""
+        return bool(self.feed.realtime and self.desk and self.desk.enabled and self.p.desk.get("practice", True))
+
+    async def _practice(self, s, mode: str) -> None:
+        """A vote that buys nothing: practice (the graduation play is off: the coin is followed on the bot's exits from
+        the vote) or shadow (the rules bought it anyway: the bot's own trade scores the call)."""
+        snap, only = self._desk_inputs(s, "late")
+        self.reviewing.add(s.mint)
+        self._practice_n += 1
+        t0 = time.time()
+        try:
+            v = await self.desk.review(snap, only)
+        finally:
+            self.reviewing.discard(s.mint)
+            self._practice_n -= 1
+        if not v.votes or all(x.error for x in v.votes):
+            return                                       # nobody answered: no call to score
+        self.desk_vote_s.append(round(time.time() - t0, 2))
+        label = "practice" if mode == "practice" else "side vote"
+        self.say("desk", f"{label}: {s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
+        self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": label,
+                                  "approve": v.approve, "summary": v.summary, "votes": [vars(x) for x in v.votes]})
+        self._open_call(s, v, mode)
+        if mode == "practice":
+            self.lab.start(s.mint, s.symbol, "practice-buy" if v.approve else "practice-pass", s.curve.price, self.now,
+                           self.p, only=("as now",))
+        elif s.mint in self.positions:
+            self.positions[s.mint].desk = f"side vote: {v.summary}"
+
+    def _open_call(self, s, v, mode: str) -> None:
+        from .desk_record import call_votes
+        if len(self._calls_open) > 300:                  # never scored (a buy that didn't land): let them go
+            self._calls_open = {m: c for m, c in self._calls_open.items() if self.now - c["ts"] < 7200}
+        self._calls_open[s.mint] = {"ts": self.now, "mint": s.mint, "symbol": s.symbol, "mode": mode,
+                                    "approve": bool(v.approve), "votes": call_votes(v.votes)}
+
+    def _score_call(self, row: dict) -> None:
+        """The exit lab closed a follow: if a team vote was waiting on that coin, it gets its score."""
+        from .desk_record import FOLLOWED
+        if row.get("variant") != "as now" or row.get("kind") not in FOLLOWED:
+            return
+        c = self._calls_open.get(row["mint"])
+        if c is None or row["opened"] < c["ts"] - 30:
+            return
+        del self._calls_open[row["mint"]]
+        c = {**c, "pnl_pct": row["pnl_pct"], "held_s": row.get("held_s"), "exit": row.get("why", "")}
+        self.desk_calls.append(c)
+        del self.desk_calls[:-2000]
+        if self.persist:
+            with (DATA / "desk_calls.jsonl").open("a") as f:
+                f.write(json.dumps(c) + "\n")
+
+    def desk_scorecard(self) -> dict:
+        from .desk_record import scorecard
+        return scorecard(self.desk_calls, self.p.desk.personas)
 
     def _read_x_link(self, s) -> None:
         """Read a coin's X link once, as it nears the graduation window, so the narrative persona has the story
@@ -2759,6 +2865,8 @@ class Engine:
             "top_rejections": [[why, n] for why, n in self.rejects.most_common(10)],
             "recent_trades": recent,
             "exit_lab": [{"rule": v["variant"], "n": v["n"], "mean_pct": round(v["mean_pct"], 1)} for v in (lab.get("variants") or [])[:7]],
+            # the team's own record: what its buy calls and passes did next on the bot's exits (desk_record.py)
+            "team_record": self.desk_scorecard(),
             # plain names next to the keys: a model read "entry.enabled: false" as "all entries are off" (it's only the sniper)
             "strategy_switches": {"graduation plays (late.enabled)": self.p.late.enabled, "early sniper (entry.enabled)": self.p.entry.enabled,
                                   "copy trading (copy.enabled)": self.p.copy.enabled, "callouts (callouts.enabled)": self.p.callouts.enabled},
