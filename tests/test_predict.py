@@ -142,6 +142,57 @@ def test_graduation_play_entry_and_exit_before_migration():
     assert frac == 1.0 and why.startswith("graduation exit")
 
 
+def test_dev_sold_threshold_lets_a_play_in_and_sells_only_on_a_new_dev_sale():
+    import copy as _copy
+
+    from meme_trader.sniper.strategy import late_checklist
+    s, now = _late_state()
+    s.dev_sold = 0.01 * s.supply                                    # the creator sold 1% of the supply
+    assert evaluate_late_entry(s, now, L, RED) == (False, "red flag")   # default 0: any sale skips (as before)
+    on = _copy.deepcopy(L)
+    on["max_dev_sold_pct"] = 2
+    ok, why = evaluate_late_entry(s, now, on, RED)
+    assert ok, why
+    assert late_checklist(s, now, on, RED)["verdict"] == "buy"
+    assert late_checklist(s, now, L, RED)["why"] == "dev holding: sold 1.0%"
+    pos = SniperPosition(MINT, "T", now, s.curve.price, 1e6, 1e6, 0.05, 0.05, 0, peak_price=s.curve.price, exits=[],
+                         source="late", dev_sold_at_entry=s.dev_sold)
+    assert evaluate_late_exit(pos, s, now + 1, on, X) is None       # the sale before the buy doesn't sell it
+    s.dev_sold += 1e6
+    assert evaluate_late_exit(pos, s, now + 2, on, X) == (1.0, "dev sold")
+    s.dev_sold = 0.03 * s.supply                                    # past the limit: skipped again
+    assert evaluate_late_entry(s, now, on, RED) == (False, "red flag")
+
+
+def test_runner_mode_trails_a_big_run_instead_of_momentum_decay():
+    import copy as _copy
+
+    from meme_trader.sniper.strategy import exit_watch
+    from tests.test_sniper import push_price
+    s, now = _late_state()
+    entry = s.curve.price
+    push_price(s, now + 10, 1.4)                                    # +40%
+    assert s.curve.progress * 100 < L.exit_curve_pct
+    pos = SniperPosition(MINT, "T", now, entry, 1e6, 1e6, 0.05, 0.05, 0, peak_price=entry, exits=[], source="late")
+    on = _copy.deepcopy(L)
+    on["runner_after_pct"], on["runner_trail_pct"] = 30, 25
+    assert evaluate_late_exit(pos, s, now + 11, on, X) is None      # (the peak)
+    push_price(s, now + 30, 0.85, side="sell", sol=2.0)             # 15% off it on a 2 SOL outflow
+    assert evaluate_late_exit(pos, s, now + 31, L, X)[1].startswith("momentum decay")   # off (the default)
+    assert evaluate_late_exit(pos, s, now + 31, on, X) is None      # on: a 15% dip doesn't sell a runner
+    labels = [g["label"] for g in exit_watch(pos, s, now + 31, on, X)]
+    assert "runner trail" in labels and "momentum decay" not in labels and "stall (no new high)" not in labels
+    assert evaluate_late_exit(pos, s, now + 80, on, X) is None      # nor does a stall
+    push_price(s, now + 85, 0.85, side="sell")                      # 28% off the peak
+    frac, why = evaluate_late_exit(pos, s, now + 86, on, X)
+    assert frac == 1.0 and why.startswith("late trail -28% from peak (+40%)")
+    low = _copy.deepcopy(on)
+    low["runner_after_pct"] = 60                                    # not armed below its level: the usual exits
+    assert evaluate_late_exit(pos, s, now + 86, low, X)[1].startswith("momentum decay") or \
+        evaluate_late_exit(pos, s, now + 86, low, X)[1].startswith("late stall")
+    assert "runner mode" in [g["label"] for g in exit_watch(pos, s, now + 86, low, X)]
+
+
 def test_running_engine_hot_reloads_a_retrained_model(tmp_path, monkeypatch):
     import copy as _copy
     import os
