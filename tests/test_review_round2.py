@@ -1240,3 +1240,21 @@ def test_the_launch_backup_pauses_entries_only_when_it_goes_quiet():
     assert not f.degraded and f.host == "example.org"           # (the trade server, not the launch one)
     f.launches.last_launch = time.time() - 90
     assert f.degraded and "no new coins" in f.degraded_reason
+
+
+def test_a_reconnect_to_the_endpoint_that_was_fine_keeps_entries_open():
+    """2026-10-05: 109 minutes of entries paused 'checking trade data' after reconnects, mostly to the same endpoint."""
+    import time
+    f = SolanaTradeFeed("wss://example.org/")
+    f.trades_up = True
+    f.launches.last_launch = time.time()
+    assert "checking" in f.degraded_reason                      # a fresh connection, nothing known about it
+    f._good = (f.ws_idx, time.time() - 5)                       # it measured fine 5 s before the hang-up
+    assert not f.degraded and f._trusted()
+    f._good = (f.ws_idx, time.time() - f.TRUST_S - 1)            # too long ago
+    assert "checking" in f.degraded_reason
+    f._good = (f.ws_idx + 1, time.time())                        # a different endpoint
+    assert "checking" in f.degraded_reason
+    f._good = (f.ws_idx, time.time())
+    f.quality.lags.extend([9.0] * f.quality.min_lags)            # trusted, but this connection turns out slow
+    assert f.degraded and "behind the chain" in f.degraded_reason
