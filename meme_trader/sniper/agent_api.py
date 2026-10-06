@@ -315,7 +315,7 @@ class AgentAPI:
         return {"sent": True, "symbol": s.symbol, "fraction": frac}
 
     async def act_set_exits(self, mint: str, reason: str, stop_loss_pct=None, take_profit_pct=None,
-                            take_profit_fraction=None, trail_pct=None) -> dict:
+                            take_profit_fraction=None, trail_pct=None, sell_if_dev_sells=None) -> dict:
         """Exit rules on one of the owner's positions: a stop loss, a take profit (and how much it sells), a trail."""
         reason = self._reason(reason)
         pos = self.e.positions.get(str(mint))
@@ -323,13 +323,14 @@ class AgentAPI:
             raise AgentError("no open position in that coin")
         if pos.source != "manual":
             raise AgentError("that's the bot's own position: its strategy's exits manage it")
-        if all(v in (None, "") for v in (stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct)):
-            raise AgentError("give at least one of stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct")
-        err = self.e.set_manual_exits(str(mint), stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct)
+        if all(v in (None, "") for v in (stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct, sell_if_dev_sells)):
+            raise AgentError("give at least one of stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct, sell_if_dev_sells")
+        err = self.e.set_manual_exits(str(mint), stop_loss_pct, take_profit_pct, take_profit_fraction, trail_pct, sell_if_dev_sells)
         if err:
             raise AgentError(err)
         rules = ", ".join(f"{k} {v}" for k, v in (("stop", stop_loss_pct), ("take profit", take_profit_pct),
-                                                    ("sells", take_profit_fraction), ("trail", trail_pct)) if v not in (None, ""))
+                                                    ("sells", take_profit_fraction), ("trail", trail_pct),
+                                                    ("sell if the creator sells", sell_if_dev_sells)) if v not in (None, ""))
         self._say(f"exits on {pos.symbol}: {rules} | {reason}", str(mint))
         return {"symbol": pos.symbol, "exits": pos.manual}
 
