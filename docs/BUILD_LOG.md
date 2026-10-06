@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #52: A faster, better-looking room
+
+**Owner's request:** "improve the graphics and de-lag".
+
+**The lag was drawing, not code.** Profiling the live Desk tab (Chromium, 20 s), the page's scripts used about 1% of the CPU; drawing used about 33%.
+- **At night** a blurred, screen-blended glow layer and a multiply-blended dark wash covered the room. Firefox re-blends the whole picture through them every frame anything moves. The header's backdrop blur re-blurred the room under it too.
+- **Now:** gradient light pools and a plain translucent wash (no CSS blur, blend modes or backdrop filter). At night, drawing time fell from 7.8 s to 4.5 s per 20 s (−42%), and script time from 0.53 s to 0.34 s.
+- **The loop** runs every frame only while someone walks or the view zooms; standing still (typing, dozing) it's 8 frames a second. The room is re-sorted only when its order changes; that re-sort used to run every frame.
+
+**Graphics:**
+- **Plants:** a tapered terracotta pot with a rim and soil, and a fan of shaded leaves, in all three rooms. They used to be three ellipses on a box.
+- **Floor shadows** under furniture.
+- **The room's weather line** says the day's P&L and whether defense mode is on, instead of "Clouds rolling in."
+
+---
+
 ## 2026-10-06 — Entry #51: Risk to Normal, twice the lab tests, and two new ideas for it to test
 
 **Owner's requests:** "lets do more tests if it wont slow things down", risk to Normal ("your call"), then "keep working".
