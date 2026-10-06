@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #56: The AI team practices whenever the bot can't buy
+
+**Owner's request:** "the team should always be practicing and working to find an edge".
+
+**Problem:** after the restart the team cast no votes at all. Practice only ran with the graduation play switched off. While the kill switch was on (`halted: drawdown 50%`) both plays were on but blocked, so the team sat idle and its record stayed at 115 calls.
+
+**Change:** `desk.practice` now covers every long block, for both plays:
+- **When:** a play switched off, the kill switch, the daily loss limit, paused, or low SOL.
+- **What happens:** the team votes on what the rules pick and nothing is bought. Each call is followed on the bot's exits and scored in the team's record (graduation: `practice-buy`/`practice-pass`; sniper: `sniper-skip`/`sniper-pass`, mode `practice`).
+- **Not for a moment's block:** every seat taken, where the coin may still be bought in a minute, or a degraded feed, where there are no trades to vote on.
+- **No seats taken:** practice votes don't count toward max open positions (`Engine.practicing`), so they never stop a real buy.
+- **Sniper candidates:** they still go through the funding gate first, as they would live.
+- **Cost:** at most 3 votes at a time (4 model calls each).
+
+---
+
 ## 2026-10-06 — Entry #55: What traders on X say, checked against our data, and what was worth adding
 
 **Owner's request:** "search Twitter for more posts like that and gather info and add what is beneficial", after posts by @SajadFlips (runners collapse in hours: exit fully, keep orders up) and @rimtoln (sell in 4 cuts as the curve fills, and everything when the dev sells).
