@@ -202,7 +202,9 @@ def _last_ts(path: Path) -> float:
 
 
 # what a replay's result depends on besides the settings: the code that trades (a change there invalidates the cache)
-REPLAY_CODE = ("strategy.py", "engine.py", "research.py", "tracker.py", "execution.py", "curve.py", "sizing.py", "feeds.py")
+# (replays run on sweep.MemoryFeed, so the live feeds in feeds.py don't count)
+REPLAY_CODE = ("strategy.py", "engine.py", "research.py", "tracker.py", "execution.py", "curve.py", "sizing.py", "sweep.py",
+               "events.py")
 
 
 def code_hash() -> str:

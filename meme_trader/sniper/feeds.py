@@ -422,7 +422,7 @@ class SolanaTradeFeed(Feed):
             return f"launch feed on backup {self.launches.host}: no new coins for {quiet:.0f}s"
         if not self.trades_up:
             return f"no trade data from {self.host}"
-        if not self.quality.measured:                   # ~20-30 s after (re)connecting
+        if not self.quality.measured and not self._trusted():    # ~10-30 s after (re)connecting
             return f"checking trade data from {self.host}"
         if self.quality.bad:
             return f"trade data from {self.host} incomplete ({self.quality.gap_pct:.0f}% missing)"
@@ -656,7 +656,18 @@ class SolanaTradeFeed(Feed):
             first, cur = self._known_lag(0, now), self.quality.lag_s
             if first is None or (cur is not None and first < cur):
                 return "retry"
+        if self.quality.measured and not self.quality.bad and not self.quality.slow:
+            self._good = (self.ws_idx, now)              # this endpoint, measured fine just now
         return ""
+
+    # Measured 2026-10-04/05 from the per-minute health records: entries were paused 77 and 109 minutes a day
+    # "checking trade data" after reconnects, mostly hang-ups of the public RPC followed by a reconnect to the same
+    # endpoint. Back on the endpoint that measured fine moments ago, its measurement stands until a new one is in.
+    TRUST_S = 90
+
+    def _trusted(self) -> bool:
+        idx, ts = getattr(self, "_good", (-1, 0.0))
+        return idx == self.ws_idx and time.time() - ts < self.TRUST_S
 
     QUICK_CLOSES = 4        # an endpoint that hangs up this often within CLOSE_WINDOW_S is given up on for now
     CLOSE_WINDOW_S = 180
