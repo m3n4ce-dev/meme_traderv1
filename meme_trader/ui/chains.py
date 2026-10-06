@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import re
 import time
 
 GT = "https://api.geckoterminal.com/api/v2/networks"
@@ -16,6 +17,11 @@ KINDS = {"trending": "trending_pools?page=1", "new": "new_pools?page=1", "hot": 
 REFRESH_S = 120         # each list at most this often
 GAP_S = 2.0             # between calls
 BACKOFF_S = 120         # after a 429
+# a chart's timeframes (the coin card's buttons): GeckoTerminal's unit, aggregate, and how many candles
+OHLCV = {"1m": ("minute", 1, 180), "5m": ("minute", 5, 144), "15m": ("minute", 15, 96), "1h": ("hour", 1, 168),
+         "4h": ("hour", 4, 180), "1d": ("day", 1, 180)}
+POOL_RE = re.compile(r"^(?:[1-9A-HJ-NP-Za-km-z]{32,44}|0x[0-9a-fA-F]{40,64})$")
+CANDLE_S = 30           # a pool's candles at one timeframe are reused this long
 VIEW_S = 600            # the view's lists keep coming this long after someone looked
 
 
@@ -62,6 +68,8 @@ class Chains:
         self.backoff_until = 0.0
         self._last_call = 0.0
         self._task: asyncio.Task | None = None
+        self._candles: dict[tuple, tuple[float, list]] = {}
+        self._pace = asyncio.Lock()
 
     def wanted(self, now: float) -> list[tuple[str, str]]:
         out = [(n, k) for k in ("trending", "new") for n in NETWORKS] if now - self.viewed < VIEW_S else []
@@ -120,6 +128,47 @@ class Chains:
                 self.fetched_at[(net, kind)] = time.time()
                 self.data["fetched"] = time.time()
         self.data["error"] = "; ".join(errors)[:300]
+
+    async def _ohlcv(self, net: str, pool: str, tf: str) -> tuple[int, dict]:
+        import aiohttp
+
+        unit, agg, n = OHLCV[tf]
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), headers={"Accept": "application/json"}) as s:
+            async with s.get(f"{GT}/{net}/pools/{pool}/ohlcv/{unit}", params={"aggregate": agg, "limit": n, "currency": "usd"}) as r:
+                return r.status, (await r.json() if r.status == 200 else {})
+
+    async def candles(self, net: str, pool: str, tf: str) -> dict:
+        """One pool's candles at a timeframe (the coin card's 1m..1D buttons). Paced with the lists, so a few clicks
+        can't spend the free allowance the other-chain trader needs, and cached for CANDLE_S."""
+        if net not in NETWORKS or tf not in OHLCV or not POOL_RE.match(pool or ""):
+            return {"candles": [], "tf": tf, "error": "unknown chain, pool or timeframe"}
+        key = (net, pool, tf)
+        hit = self._candles.get(key)
+        if hit and time.time() - hit[0] < CANDLE_S:
+            return {"candles": hit[1], "tf": tf, "error": ""}
+        async with self._pace:
+            if time.time() < self.backoff_until:
+                return {"candles": hit[1] if hit else [], "tf": tf,
+                        "error": f"GeckoTerminal's free limit: try again in {int(self.backoff_until - time.time()) + 1} s"}
+            wait = self._last_call + GAP_S - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.time()
+            try:
+                status, d = await self._ohlcv(net, pool, tf)
+            except Exception as e:
+                return {"candles": [], "tf": tf, "error": f"couldn't reach GeckoTerminal ({type(e).__name__})"}
+        if status == 429:
+            self.backoff_until = time.time() + BACKOFF_S
+            return {"candles": [], "tf": tf, "error": f"GeckoTerminal's free limit: try again in {BACKOFF_S // 60} min"}
+        if status != 200:
+            return {"candles": [], "tf": tf, "error": f"GeckoTerminal answered HTTP {status}"}
+        rows = ((d.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
+        out = [[int(t), o, h, lo, cl, v] for t, o, h, lo, cl, v in sorted(rows)]
+        if len(self._candles) > 200:
+            self._candles.clear()
+        self._candles[key] = (time.time(), out)
+        return {"candles": out, "tf": tf, "error": ""}
 
     def names(self, limit: int = 5) -> dict:
         """What's trending per chain, for the desk's narrative reads (no fetch: whatever was last seen)."""

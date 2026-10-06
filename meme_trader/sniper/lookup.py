@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
 import struct
 import time
 
@@ -167,9 +168,37 @@ async def _rugcheck(http: httpx.AsyncClient, mint: str) -> dict | None:
     return r.json() if r.status_code == 200 else None
 
 
+def default_tf(age_s: float | None) -> str:
+    """The card's first chart: 1-minute candles under 2 hours old, 5-minute under a day, else 15-minute."""
+    return "1m" if age_s is not None and age_s < 2 * 3600 else "5m" if age_s is not None and age_s < 24 * 3600 else "15m"
+
+
+TICKER_RE = re.compile(r"(?<![\w$])\$([A-Za-z][A-Za-z0-9_]{0,14})\b")
+
+
+async def search_ticker(sym: str) -> list[dict]:
+    """Solana coins trading as $SYM (DexScreener search, exact symbol), the most liquid first. Copies share tickers,
+    so the caller shows the first and lists the rest."""
+    async with httpx.AsyncClient(timeout=8, headers={"User-Agent": "meme_trader/0.1"}) as http:
+        r = await http.get("https://api.dexscreener.com/latest/dex/search", params={"q": sym})
+    if r.status_code != 200:
+        return []
+    by: dict[str, dict] = {}
+    for p in (r.json() or {}).get("pairs") or []:
+        b = p.get("baseToken") or {}
+        if p.get("chainId") != "solana" or str(b.get("symbol") or "").lower() != sym.lower() or not b.get("address"):
+            continue
+        x = by.setdefault(b["address"], {"mint": b["address"], "symbol": b.get("symbol"), "name": str(b.get("name") or "")[:60],
+                                         "liq_usd": 0.0, "vol_h24": 0.0, "mcap_usd": 0.0, "pairs": 0})
+        x["liq_usd"] = max(x["liq_usd"], float((p.get("liquidity") or {}).get("usd") or 0))
+        x["vol_h24"] += float((p.get("volume") or {}).get("h24") or 0)
+        x["mcap_usd"] = max(x["mcap_usd"], float(p.get("marketCap") or p.get("fdv") or 0))
+        x["pairs"] += 1
+    return sorted(by.values(), key=lambda x: (x["liq_usd"], x["vol_h24"]), reverse=True)[:6]
+
+
 async def _candles(http: httpx.AsyncClient, pool: str, age_s: float | None) -> list:
-    tf, agg, limit = ("minute", 1, 120) if age_s is not None and age_s < 2 * 3600 else \
-        ("minute", 5, 144) if age_s is not None and age_s < 24 * 3600 else ("minute", 15, 96)
+    tf, agg, limit = {"1m": ("minute", 1, 120), "5m": ("minute", 5, 144), "15m": ("minute", 15, 96)}[default_tf(age_s)]
     r = await http.get(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool}/ohlcv/{tf}",
                        params={"aggregate": agg, "limit": limit, "currency": "usd"},
                        headers={"Accept": "application/json"})
@@ -377,7 +406,7 @@ async def lookup(mint: str, engine=None, sol_usd: float | None = None, watch: bo
                                       "risks": [{k: r.get(k) for k in ("name", "level", "value", "description")}
                                                 for r in rug.get("risks") or []]},
         "socials": socials,
-        "candles": candles,
+        "candles": candles, "candles_tf": default_tf(age_s) if candles else None,
         "links": {"pump.fun": f"https://pump.fun/coin/{mint}", "DexScreener": f"https://dexscreener.com/solana/{mint}",
                   "Solscan": f"https://solscan.io/token/{mint}", "RugCheck": f"https://rugcheck.xyz/tokens/{mint}"},
         "errors": errors, "fetched_at": time.time(),

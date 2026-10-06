@@ -315,6 +315,7 @@ body.on-chat .toasts { bottom: auto; top: 200px; }   /* below the buddy */
 .tc-name { min-width: 0; flex: 1; } .tc-name b { font-size: 17px; } .tc-name small { color: var(--ink-2); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-body { padding: 12px 14px; display: grid; gap: 14px; }
 .tc-body h5 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.tc-tf { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: -8px; } .tc-tf .note { margin-left: 6px; }
 .big { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; }
 .big .fact .v { font-size: 16px; }
 .chg { display: flex; gap: 6px; flex-wrap: wrap; } .chg span { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); }
@@ -4584,6 +4585,7 @@ function svgPulse(pulse, since = 0, h = 150) {
 }
 function svgCandles(c, h = 180) {
   if (!c || c.length < 2) return "";
+  const span = c[c.length - 1][0] - c[0][0], when = t => span > 36 * 3600 ? new Date(t * 1000).toLocaleDateString([], {month: "short", day: "numeric"}) + (span < 8 * 86400 ? " " + hhmm(t) : "") : hhmm(t);
   const w = 600, L = 4, R = 58, T = 6, B = 18, vh = 28;
   const lo = Math.min(...c.map(x => x[3])), hi = Math.max(...c.map(x => x[2])) || 1;
   const Y = scale(lo, hi, h - B - vh - 6, T), bw = (w - L - R) / c.length, vmax = Math.max(...c.map(x => x[5])) || 1;
@@ -4591,10 +4593,10 @@ function svgCandles(c, h = 180) {
   let o = "";
   for (let k = 0; k <= 3; k++) { const v = lo + (hi - lo) * k / 3; o += `<line class="g" x1="${L}" x2="${w - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text x="${w - R + 5}" y="${(Y(v) + 4).toFixed(1)}">${fp(v)}</text>`; }
   c.forEach(([t, op, hh, ll, cl, v], i) => { const col = cl >= op ? "var(--good-mark)" : "var(--bad)", cx = L + i * bw + bw / 2, y1 = Y(Math.max(op, cl)), y2 = Y(Math.min(op, cl)), bwi = Math.max(bw * .7, 1);
-    o += `<g><title>${hhmm(t)} · O ${fp(op)} H ${fp(hh)} L ${fp(ll)} C ${fp(cl)} · vol $${fmtUsd(v)}</title><line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${Y(hh).toFixed(1)}" y2="${Y(ll).toFixed(1)}" stroke="${col}"/>
+    o += `<g><title>${when(t)} · O ${fp(op)} H ${fp(hh)} L ${fp(ll)} C ${fp(cl)} · vol $${fmtUsd(v)}</title><line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${Y(hh).toFixed(1)}" y2="${Y(ll).toFixed(1)}" stroke="${col}"/>
       <rect x="${(cx - bwi / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${bwi.toFixed(1)}" height="${Math.max(y2 - y1, 1).toFixed(1)}" fill="${col}"/>
       <rect x="${(cx - bwi / 2).toFixed(1)}" y="${(h - B - v / vmax * vh).toFixed(1)}" width="${bwi.toFixed(1)}" height="${(v / vmax * vh).toFixed(1)}" fill="${col}" opacity=".3"/></g>`; });
-  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Price candles">${o}<text x="${L}" y="${h - 4}">${hhmm(c[0][0])}</text><text x="${w - R}" y="${h - 4}" text-anchor="end">${hhmm(c[c.length - 1][0])}</text></svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Price candles">${o}<text x="${L}" y="${h - 4}">${when(c[0][0])}</text><text x="${w - R}" y="${h - 4}" text-anchor="end">${when(c[c.length - 1][0])}</text></svg>`;
 }
 function svgArea(ys, h = 150, fmt = v => v.toExponential(2)) {
   if (!ys || ys.length < 2) return "";
@@ -4691,6 +4693,20 @@ function renderPulse(id, subId, s) {
 }
 
 // ---------------------------------------------------------------- token card (contract-address lookup)
+const TC_TFS = ["1m", "5m", "15m", "1h", "4h", "1d"], TCTF = {};   // the chart's timeframe buttons; what you picked, per coin
+function tcLoadTf(btn) {
+  const bar = btn.closest(".tc-tf"), card = btn.closest(".tcard"), mint = bar.dataset.mint, tf = btn.dataset.tctf, note = bar.querySelector(".tc-tfnote");
+  bar.querySelectorAll("[data-tctf]").forEach(b => { b.classList.toggle("primary", b === btn); b.classList.toggle("ghost", b !== btn); });
+  note.textContent = "loading…";
+  fetch(`/api/candles?pool=${encodeURIComponent(bar.dataset.pool)}&tf=${encodeURIComponent(tf)}`, {cache: "no-store"}).then(r => r.json()).then(x => {
+    if ((x.candles || []).length > 1) {
+      TCTF[mint] = {tf, candles: x.candles};
+      let box = card.querySelector(".tc-chart");
+      if (!box) { box = document.createElement("div"); box.className = "tc-chart"; bar.after(box); }
+      box.innerHTML = svgCandles(x.candles); note.textContent = "";
+    } else note.textContent = x.error || "No candles at that timeframe yet.";
+  }).catch(() => { note.textContent = "couldn't load the candles"; });
+}
 function tokenCard(d) {
   if (!d) return "";
   const c = d.curve, tr = d.trading, h = d.holders || {}, t = d.tracked, sym = (d.symbol || "").replace(/^\$/, "") || short(d.mint);
@@ -4704,7 +4720,11 @@ function tokenCard(d) {
   const hcol = r => ({"bonding curve": "var(--axis)", "program / pool": "var(--axis)", creator: "var(--warn-mark)", insider: "var(--bad)"}[r.lab] || "var(--series)");
   const hrows = (h.top || []).slice(0, 8).map(x => ({label: `<span class="num">${short(x.owner)}</span>${x.label ? ` <span class="tag ${x.label === "insider" ? "bad" : x.label === "creator" ? "late" : ""}">${esc(x.label)}</span>` : ""}`,
     title: x.owner, v: x.pct, text: x.pct.toFixed(1) + "%", lab: x.label}));
-  const chart = (d.candles || []).length > 1 ? svgCandles(d.candles) : t && (t.chart || []).length > 1 ? svgArea(t.chart, 150, v => px(v, 2)) : "";
+  const pool = d.pair && d.pair.address, pick = TCTF[d.mint] || {}, cs = pick.candles || d.candles || [];
+  const chart = cs.length > 1 ? svgCandles(cs) : t && (t.chart || []).length > 1 ? svgArea(t.chart, 150, v => px(v, 2)) : "";
+  const tfNow = pick.tf || d.candles_tf || "";
+  const tfs = pool ? `<div class="tc-tf" data-pool="${esc(pool)}" data-mint="${esc(d.mint)}">${TC_TFS.map(k => `<button class="small ${k === tfNow ? "primary" : "ghost"}" data-tctf="${k}" title="${k} candles">${k.toUpperCase() === "1D" ? "1D" : k}</button>`).join("")}<span class="note tc-tfnote"></span></div>` : "";
+  const also = (d.also || []).length ? `<p class="note">Also trading as $${esc(sym)}: ${d.also.map(x => `<b>${esc(x.name || x.symbol)}</b> $${fmtUsd(x.mcap_usd)} MC <button class="small ghost" data-copymint="${esc(x.mint)}">Copy CA</button>`).join(" · ")}</p>` : "";
   const links = Object.entries(d.links || {}).concat(Object.entries(d.socials || {}).map(([k, u]) => [k === "twitter" ? "X" : k[0].toUpperCase() + k.slice(1), safeUrl(u)]))
     .filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(k)}</a>`).join(" · ");
   const flags = (d.flags || []).map(f => `<li class="${esc(f.level)}">${esc(f.text)}</li>`).join("");
@@ -4719,7 +4739,7 @@ function tokenCard(d) {
         ${fact("Volume 24h", tr && tr.vol_h24 != null ? "$" + fmtUsd(tr.vol_h24) : "–")}${fact("Holders", d.holder_count ? fmtUsd(d.holder_count) : "–")}
         ${fact("Age", age(d.age_s != null ? d.age_s : t && t.age_s))}</div>
       ${chg ? `<div class="chg">${chg}</div>` : ""}
-      ${chart ? `<div>${chart}</div>` : `<p class="note">${d.now_tracking || t ? "No chart yet: the bot is tracking it now, so the live price fills in with the next trades (open its details)." : "No chart: not listed on a DEX yet."}</p>`}
+      ${also}${tfs}${chart ? `<div class="tc-chart">${chart}</div>` : `<p class="note">${d.now_tracking || t ? "No chart yet: the bot is tracking it now, so the live price fills in with the next trades (open its details)." : "No chart: not listed on a DEX yet."}</p>`}
       ${c && !c.complete ? `<div><h5>Bonding curve <span class="note" style="text-transform:none;letter-spacing:0">${c.progress_pct.toFixed(1)}% · graduates at 100%</span></h5><div class="curvebar"><i style="width:${Math.min(100, c.progress_pct).toFixed(1)}%"></i></div></div>` : ""}
       <div class="cols2">
         <div><h5>Buys vs sells</h5>${flow || '<p class="note">No DEX trade counts yet.</p>'}</div>
@@ -6034,7 +6054,7 @@ function setUnit(u) {                          // SOL or $ everywhere amounts sh
 $("unit-btn").onclick = () => setUnit(S.unit === "usd" ? "sol" : "usd");
 setUnit(store.get("unit") || "sol");
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
+  const t = e.target.closest("[data-cdsend],[data-cdclose],[data-cdfull],[data-sell],[data-posted],[data-copy],[data-copymint],[data-toggle],[data-apply],[data-enum],[data-tab-link],[data-open],[data-decide],[data-ask],[data-lv],[data-advapply],[data-keyset],[data-keyclr],[data-rec],[data-rech],[data-deskwake],[data-pfref],[data-pfrm],[data-xrm],[data-copyaddr],[data-bot],[data-keytest],[data-zoom],[data-zoomout],[data-wardrobe],[data-wdbot],[data-wdcat],[data-wdset],[data-wdact],[data-dialog],[data-corkadd],[data-corkboard],[data-corkdel],[data-arhide],[data-mbuy],[data-msell],[data-minit],[data-msave],[data-memdel],[data-tramt],[data-trade],[data-plfilt],[data-plqb],[data-plreset],[data-clcaller],[data-callgo],[data-anchor],[data-share],[data-ordq],[data-ordx],[data-labkind],[data-desktest],[data-huddle],[data-hap],[data-lcsell],[data-lctrade],[data-lcopen],[data-lcwin],[data-anmc],[data-lcview],[data-labdrop],[data-labadd],[data-lvchain],[data-tctf],[data-hqref],[data-xsell],[data-lcpin],[data-kolref],[data-room],[data-edgecopy],[data-unhalt],[data-addpaper],[data-startover],[data-compose],[data-mhand],[data-away],[data-roomedit],[data-roomreset],[data-xdisc],[data-goconn],[data-memopen],[data-memsend],[data-memask],[data-pcollapse],[data-arspan],[data-arh],[data-help],[data-gdjump],[data-gdopen],[data-tour],[data-cki],[data-ctxdo]");
   if (!t) return;
   const d = t.dataset;
   if (d.lcsell) { trSell(d.lcsell, +d.f); return; }
@@ -6043,6 +6063,7 @@ document.addEventListener("click", e => {
   if (d.hqref) { loadHQ(); return; }
   if (d.xsell) { if (confirm("Sell this other-chain position now (paper)?")) send({action: "xchain_sell", key: d.xsell}); return; }
   if (d.lcview) { toggleView(d.lcview); return; }
+  if (d.tctf) { tcLoadTf(t); return; }
   if (d.lvchain) { const [key, v] = d.lvchain.split(":");
     if (key === "kind") { LV.chainKind = v; store.set("lv-chainkind", v); } else if (key === "fresh") { LV.fresh = v === "1"; store.set("lv-fresh", v); } else { LV.chain = v; store.set("lv-chain", v); }
     LV.keys = {}; renderViews(true); return; }
