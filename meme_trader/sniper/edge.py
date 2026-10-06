@@ -20,9 +20,19 @@ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) -> 
         return {**out, "level": "none", "verdict": "No trades yet.", "caveats": [], "by_day": []}
     rets = [t["pnl"] / t["cost"] for t in rows]
     pnl, stake = sum(t["pnl"] for t in rows), sum(t["cost"] for t in rows)
+    # 90% range of the mean trade, resampled by day and then by trade within each day: one day's trades share its
+    # market, so treating them as independent would overstate how sure the range is (as the research replays do)
     rng = random.Random(seed)
-    means = sorted(statistics.fmean(rng.choices(rets, k=len(rets))) for _ in range(boots))
-    lo, hi = means[int(0.05 * boots)], means[int(0.95 * boots) - 1]           # 90% range of the mean trade
+    by_utc: dict[str, list] = defaultdict(list)
+    for t, r in zip(rows, rets):
+        by_utc[time.strftime("%Y-%m-%d", time.gmtime(t["opened"]))].append(r)
+    groups = list(by_utc.values())
+    means = []
+    for _ in range(boots):
+        sample = [x for g in rng.choices(groups, k=len(groups)) for x in rng.choices(g, k=len(g))]
+        means.append(statistics.fmean(sample))
+    means.sort()
+    lo, hi = means[int(0.05 * boots)], means[int(0.95 * boots) - 1]
     best = sorted(rows, key=lambda t: -t["pnl"])
     without3 = sum(t["pnl"] for t in best[3:])
     days: dict[str, list] = defaultdict(list)

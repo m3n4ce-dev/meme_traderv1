@@ -144,10 +144,38 @@ def freeze(name: str, now: float | None = None) -> dict:
     return {"policy": pol["name"], "frozen_at": at, "hash": h}
 
 
+def code_revision() -> str:
+    """The code that produced a result: git commit, "+dirty" if the engine, strategy or config files differ from it.
+    The signature locks settings, gates and costs; this records the code too, so an engine or accounting change
+    between the freeze and a verdict is visible (an external review, 2026-10-06)."""
+    from ..config import ROOT
+
+    try:
+        rev = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=12", "HEAD"], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+        dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "meme_trader", "config/params.example.yaml"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return (rev or "unknown") + ("+dirty" if dirty else "")
+
+
 def write_lock(pol: dict, at: str, h: str) -> None:
     sn = json.loads(json.dumps(policy_params(pol)["sniper"], default=str))
-    lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn},
-                                         indent=1, sort_keys=True) + "\n")
+    lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn,
+                                          "code_revision": code_revision()}, indent=1, sort_keys=True) + "\n")
+
+
+def code_note(pol: dict) -> dict:
+    """The code at the freeze against the code now. Policies frozen before revisions were recorded say so: a new
+    version records it; an old holdout isn't rewritten after the fact."""
+    try:
+        frozen = json.loads(lock_path(pol).read_text()).get("code_revision")
+    except (OSError, ValueError):
+        frozen = None
+    now = code_revision()
+    return {"code_revision": now, "code_at_freeze": frozen or "not recorded (frozen before revisions were kept)",
+            "code_changed_since_freeze": (frozen != now) if frozen else None}
 
 
 def frozen_ts(pol: dict) -> float | None:
@@ -576,9 +604,11 @@ def cmd_eval(name: str, files: list[str] | None = None, quick: bool = False, job
     events, st = load_events(paths, start, end, min_progress_pct=min_progress(pol))
     rep = evaluate(pol, events, quality_summary(st), quick=quick, jobs=jobs)
     rep["signature"] = sig
+    rep.update(code_note(pol))
     rep["variants_tried_on_this_data"] = variants_tried([p.name for p in paths]) + 1
     log_experiment({"kind": "eval", "policy": pol["name"], "files": [p.name for p in paths], "quick": quick,
-                    "hashes": [rep["hash"]], "result": rep["result"], "uncertainty": rep.get("uncertainty")})
+                    "hashes": [rep["hash"]], "result": rep["result"], "uncertainty": rep.get("uncertainty"),
+                    "code_revision": rep["code_revision"]})
     return rep
 
 
@@ -608,10 +638,11 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
                                              f" - no results shown until then", "data": q}
     rep["gates"] = gates_check(pol, rep)
     rep["verdict"] = "PASS" if rep["gates"]["pass"] else "FAIL"
+    rep.update(code_note(pol))
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_text(json.dumps(rep, indent=1, default=str))
     log_experiment({"kind": "final", "policy": pol["name"], "hash": rep["hash"], "verdict": rep["verdict"],
-                    "result": rep["result"], "files": [p.name for p in paths]})
+                    "result": rep["result"], "files": [p.name for p in paths], "code_revision": rep["code_revision"]})
     return rep
 
 
@@ -697,6 +728,10 @@ def print_report(rep: dict) -> None:
     ident = (f"FROZEN, signature {rep.get('signature')}" if rep["frozen"] and rep.get("signature")
              else f"hash {rep['hash']}")
     print(f"\n=== {rep['policy']}  ({ident}) ===")
+    if rep.get("code_revision"):
+        changed = rep.get("code_changed_since_freeze")
+        print(f"code: {rep['code_revision']} (at freeze: {rep.get('code_at_freeze')})"
+              + ("  WARNING: the code changed since the freeze: the engine or accounting may differ" if changed else ""))
     print(f"data: {', '.join(d['files'])} | {d['span_hours']} h | {d['launches']} launches, {d['trades']} trades "
           f"({d['non_organic_pct']}% non-organic)")
     lag = f"lag p50 {d['lag_p50_s']}s / p99 {d['lag_p99_s']}s" if d["lag_p50_s"] is not None else "no chain times"

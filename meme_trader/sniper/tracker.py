@@ -49,6 +49,8 @@ class TokenState:
     price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
     mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): seen when the agent trades it
     non_organic_trades: int = 0
+    curve_slot: int = 0           # the slot of the newest reserves applied to `curve`
+    slot_moves: list = field(default_factory=list)   # that slot's trades: (tokens before, tokens after, sol after)
 
     @property
     def created_ts(self) -> float:
@@ -83,9 +85,32 @@ class TokenState:
             self.holders[e.creator] = e.dev_buy_tokens
             self.buyers.add(e.creator)
 
+    def _apply_reserves(self, t: Trade) -> None:
+        """The curve after `t`, in chain order, not arrival order: some endpoints deliver trades late or out of order
+        (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within
+        one slot, the trades chain by reserves (each starts where another ended): the newest state is the one no
+        other trade starts from. While a link is missing, a trade that doesn't continue the current state leaves it."""
+        if not t.slot:                                   # no chain order known (synthetic, old recordings): arrival
+            self.curve = Curve(t.v_sol, t.v_tokens)
+            return
+        if t.slot < self.curve_slot:
+            return
+        if t.slot > self.curve_slot:
+            self.curve_slot, self.slot_moves = t.slot, []
+        before = t.v_tokens + t.tokens if t.side == "buy" else t.v_tokens - t.tokens
+        first = not self.slot_moves
+        self.slot_moves.append((before, t.v_tokens, t.v_sol))
+        starts = [b for b, _, _ in self.slot_moves]
+        heads = [m for m in self.slot_moves if not any(abs(m[1] - b) < 1.0 for b in starts)]
+        cur = self.curve.v_tokens
+        if not first and abs(before - cur) >= 1.0 and any(abs(h[1] - cur) < 1.0 for h in heads):
+            return          # a separate piece of the chain (its link hasn't arrived): keep the newest state known
+        _, vt, vs = (heads or self.slot_moves)[-1]
+        self.curve = Curve(vs, vt)
+
     def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
-            self.curve = Curve(t.v_sol, t.v_tokens)
+            self._apply_reserves(t)
             self.price_known = True
         elif t.pool != "pump" and t.mcap_sol > 0:
             # graduated (PumpSwap etc.): no curve reserves in the event, so price it from market cap on a
@@ -128,14 +153,14 @@ class TokenState:
 
     # ---- metrics ------------------------------------------------------------
     def dev_pct(self) -> float:
-        return self.holders.get(self.creator, 0.0) / TOTAL_SUPPLY * 100 if self.creator else 0.0
+        return self.holders.get(self.creator, 0.0) / self.supply * 100 if self.creator else 0.0
 
     def dev_initial_pct(self) -> float:
-        return (self.launch.dev_buy_tokens / TOTAL_SUPPLY * 100) if self.launch else 0.0
+        return (self.launch.dev_buy_tokens / self.supply * 100) if self.launch else 0.0
 
     def bundle_pct(self) -> float:
         """Supply bought by non-dev wallets inside the bundle window (insider/sniper proxy)."""
-        return sum(self.early_bought.values()) / TOTAL_SUPPLY * 100
+        return sum(self.early_bought.values()) / self.supply * 100
 
     def fees_paid_sol(self, fee_pct: float = 1.25) -> float:
         """Total trading fees paid on the curve so far - a proxy for real, paying demand."""
@@ -143,20 +168,20 @@ class TokenState:
 
     def sniper_pct(self) -> float:
         """Supply currently held by wallets that bought within the sniper window (excl. dev)."""
-        return sum(self.holders.get(w, 0.0) for w in self.snipers) / TOTAL_SUPPLY * 100
+        return sum(self.holders.get(w, 0.0) for w in self.snipers) / self.supply * 100
 
     def insider_pct(self) -> float:
         """Supply currently held by the dev + bundle-window wallets. (Funding-graph clustering would
         catch more insiders - see roadmap.)"""
         ws = set(self.early_bought) | ({self.creator} if self.creator else set())
-        return sum(self.holders.get(w, 0.0) for w in ws) / TOTAL_SUPPLY * 100
+        return sum(self.holders.get(w, 0.0) for w in ws) / self.supply * 100
 
     def early_sold_ratio(self) -> float:
         total = sum(self.early_bought.values())
         return self.early_sold / total if total else 0.0
 
     def top_holders_pct(self, n: int) -> float:
-        return sum(sorted(self.holders.values(), reverse=True)[:n]) / TOTAL_SUPPLY * 100
+        return sum(sorted(self.holders.values(), reverse=True)[:n]) / self.supply * 100
 
     def window(self, now: float, seconds: float) -> list[tuple]:
         """Organic trades of the last `seconds` (flow, buyers). Price history uses self.trades directly."""
