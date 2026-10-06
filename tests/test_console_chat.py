@@ -349,11 +349,39 @@ def test_chat_shows_a_card_for_a_ticker(fake_claude, tmp_path, monkeypatch):
         part = chat.state["messages"][-1]["parts"][0]
         assert part["type"] == "card" and part["mint"] == BONK and [x["name"] for x in part["data"]["also"]] == ["copy"]
         prompt = calls(tmp_path)[0]["prompt"]
-        assert prompt.startswith("What do you make of this token?") and "Metrics for " + BONK in prompt
+        assert "\n\nWhat do you make of this token?" in prompt and "Metrics for " + BONK in prompt
         await chat.send("is $ABC or $XYZ better?")                        # two tickers: no card, just the question
         await wait_idle(chat)
         assert not any(p["type"] == "card" for p in chat.state["messages"][-1]["parts"])
     run(go())
+
+
+def test_every_message_says_what_the_owner_holds(fake_claude, tmp_path):
+    """Seen 2026-10-06: "close this trade if it goes under 50 percent or over 30 percent" was taken to mean a coin from
+    earlier in the chat. The open positions now lead every message, with any exits already set."""
+    from meme_trader.sniper.strategy import SniperPosition
+    from meme_trader.sniper.tracker import TokenState
+    from meme_trader.ui.chat import holdings_note
+
+    eng = engine()
+    assert holdings_note(eng) == "[Open positions right now: none]"
+    s = eng.tokens[BONK] = TokenState(BONK, None, eng.now)
+    s.price_known = True
+    eng.positions[BONK] = SniperPosition(BONK, "RABBIT", eng.now, s.curve.price * 1.25, 1e6, 1e6, .5, .5, 50,
+                                         source="manual", exits=[], manual={"sl": 50.0, "tp": 0, "trail": 0})
+    note = holdings_note(eng)
+    assert note.startswith("[Open positions right now: RABBIT (mint " + BONK) and "yours" in note and "-20% now" in note
+    assert 'exits set: {"sl": 50.0}' in note
+
+    async def go():
+        chat = ChatManager(eng, 8787, {"claude_bin": str(fake_claude)}, tmp_path / "chat.json")
+        await chat.send("close this trade if it goes under 50 percent or over 30 percent")
+        await wait_idle(chat)
+        prompt = calls(tmp_path)[0]["prompt"]
+        assert prompt.startswith("[Open positions right now: RABBIT") and prompt.endswith("over 30 percent")
+    run(go())
+    from meme_trader.ui.chat import CHAT_PROMPT
+    assert "take_profit_fraction 1" in CHAT_PROMPT and "exactly one" in CHAT_PROMPT
 
 
 def test_chat_state_survives_a_restart(tmp_path):

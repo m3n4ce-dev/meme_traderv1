@@ -222,8 +222,9 @@ async def add_paper_funds(sol: float, reason: str, keep_after_restart: bool = Fa
 async def set_position_exits(mint: str, reason: str, stop_loss_pct: float | None = None, take_profit_pct: float | None = None,
                              take_profit_fraction: float | None = None, trail_pct: float | None = None) -> str:
     """Set exit rules on one of the owner's own (manual) positions: stop_loss_pct (sell all if it falls this far
-    below the entry), take_profit_pct (sell take_profit_fraction, 0-1, when it's up this much), trail_pct (sell if it
-    falls this far off its peak). Give only the ones to change. The bot's own positions keep their strategy's exits."""
+    below the entry), take_profit_pct (sell take_profit_fraction, 0-1, when it's up this much; not given = half, so
+    "close it at +X%" needs take_profit_fraction 1), trail_pct (sell if it falls this far off its peak). Give only the
+    ones to change. The bot's own positions keep their strategy's exits."""
     return await _call("set_exits", mint=mint, reason=reason, stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
                        take_profit_fraction=take_profit_fraction, trail_pct=trail_pct)
 
