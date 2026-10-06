@@ -1136,7 +1136,6 @@ def test_a_hang_up_on_the_fastest_endpoint_reconnects_to_it(monkeypatch):
 
 def test_the_metered_backup_is_used_only_while_the_free_feeds_fail(monkeypatch, tmp_path):
     """Your Helius key's websocket backs up the free endpoints during outages, within a daily allowance."""
-    import time
     monkeypatch.delenv("SOLANA_WS_URL", raising=False)
     monkeypatch.delenv("SOLANA_WS_BACKUP_URL", raising=False)
     monkeypatch.setenv("HELIUS_API_KEY", "k-secret")

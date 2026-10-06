@@ -1954,8 +1954,8 @@ class Engine:
         self._last_late_scan = self.now
         en = self.p.entry
         for s in list(self.tokens.values()):
-            if self.feed.realtime and s.mint not in self.linked_x and s.launch is not None and s.launch.twitter \
-                    and not s.migrated and s.curve.progress * 100 >= L.min_curve_pct - 15:
+            if self.feed.realtime and self.persist and s.mint not in self.linked_x and s.launch is not None \
+                    and s.launch.twitter and not s.migrated and s.curve.progress * 100 >= L.min_curve_pct - 15:
                 self._read_x_link(s)
             if not s.decided or s.late_tried or s.mint in self.positions or s.mint in self.pending \
                     or s.mint in self.reviewing or not s.price_known:
@@ -2093,8 +2093,8 @@ class Engine:
                 self._read_x_link(s)
 
     def _read_x_link(self, s) -> None:
-        """Read a coin's X link once: as it gets active (_x_intel) or nears the graduation window, so the narrative
-        persona has the story when the desk votes. Through FxTwitter, no X login, no cost: one read every 2 s,
+        """Read a coin's X link once (the real bot only: a demo's coins are made up): as it gets active (_x_intel) or
+        nears the graduation window, so the narrative persona has the story when the desk votes. Through FxTwitter, no X login, no cost: one read every 2 s,
         intel.x_reads_per_day at most, and a link many coins share (a viral post) is read once in 6 h. Every read
         goes to data/xlinks.jsonl with the coin's state at that moment."""
         from .memory import fetch_x_link, parse_x_link

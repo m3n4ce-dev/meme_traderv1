@@ -119,7 +119,7 @@ def test_valid_pubkey():
 
 
 def test_callout_agent_rate_limit_bags_and_factual_text():
-    from meme_trader.sniper.callouts import compose, is_red_flag
+    from meme_trader.sniper.callouts import is_red_flag
 
     params = copy.deepcopy(P)
     feed = SyntheticFeed(seed=7, speed=0, launches=400, start_ts=1_780_000_000)
