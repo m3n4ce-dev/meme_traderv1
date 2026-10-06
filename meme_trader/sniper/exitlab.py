@@ -45,6 +45,9 @@ def _sniper_variants(x) -> dict[str, dict]:
         "no stall exit": {"stall_s": 10 ** 9},
         "take profit at 2x": {"_tp": 100},
         "trail 20% once up 30%": {"_trail": (30, 20)},
+        # a trader's "4 cuts" (2026-10-06): a quarter of the bag as the curve passes 25, 50 and 75%; the last quarter
+        # rides the usual exits, which already sell everything when the creator sells
+        "curve ladder 25/50/75%": {"_curve_ladder": (25, 50, 75)},
     }
 
 
@@ -98,6 +101,12 @@ class ExitLab:
         if "_half" in over and not sh.get("half_done") and gain >= over["_half"]:
             sh["half_done"] = True                       # once; the rest runs on the normal exits
             return 0.5, f"half out at +{gain:.0f}%"
+        if "_curve_ladder" in over:
+            levels, i = over["_curve_ladder"], sh.get("rung", 0)
+            if i < len(levels) and s.curve.progress * 100 >= levels[i]:
+                sh["rung"] = i + 1                       # a quarter of the original bag per rung
+                share = pos.initial_tokens / (len(levels) + 1)
+                return min(share / max(pos.tokens, 1e-12), 1.0), f"curve ladder {levels[i]}%"
         if "_trail" in over:
             up, trail = over["_trail"]
             peak = pos.gain_pct(pos.peak_price)

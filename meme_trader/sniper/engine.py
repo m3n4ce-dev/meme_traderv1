@@ -1331,7 +1331,7 @@ class Engine:
             entry_delay_s=round(self.now - (meta or {}).get("decided", self.now), 3),
             failed_fees_sol=fill.fees_lost,
             bot="ride" if source == "manual" and self.away else "", feat=(meta or {}).get("feat"),
-            dev_sold_at_entry=(meta or {}).get("dev_sold", 0.0) if source == "late" else 0.0)
+            dev_sold_at_entry=(meta or {}).get("dev_sold", 0.0) if source in ("late", "manual") else 0.0)
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
@@ -1370,6 +1370,7 @@ class Engine:
             # a graduated coin keeps a price on paper (DexScreener's pool); live orders only reach the curve
             r = evaluate_manual_exit(pos, s, {"sl": mc.stop_loss_pct, "tp": mc.take_profit_pct,
                                               "tp_frac": mc.take_profit_frac, "trail": mc.trail_pct,
+                                              "dev": bool(mc.sell_on_dev_sell),
                                               "sell_on_graduation": mc.sell_on_graduation and self.mode.startswith("live"),
                                               **(pos.manual or {})})
             if r and r[1].startswith("manual take profit"):
@@ -2299,7 +2300,8 @@ class Engine:
         from ..config import Params
 
         d = {"max_sol": 2.0, "presets_sol": [0.05, 0.1, 0.25, 0.5, 1.0], "stop_loss_pct": 0,
-             "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_graduation": True, "queue_s": 60,
+             "take_profit_pct": 0, "take_profit_frac": 0.5, "trail_pct": 0, "sell_on_dev_sell": False,
+             "sell_on_graduation": True, "queue_s": 60,
              "handover": RIDE_DEFAULTS}
         return Params({**d, **(self.p.get("manual") or {})})
 
@@ -2411,11 +2413,13 @@ class Engine:
         pos.initials_taken = True
         return ""
 
-    def set_manual_exits(self, mint: str, sl=None, tp=None, tp_frac=None, trail=None) -> str:
+    def set_manual_exits(self, mint: str, sl=None, tp=None, tp_frac=None, trail=None, dev=None) -> str:
         pos = self.positions.get(mint)
         if pos is None:
             return "no open position in that coin"
         m = dict(pos.manual or {})
+        if dev is not None and dev != "":                 # sell everything if the creator sells after the buy
+            m["dev"] = str(dev).lower() in ("1", "true", "yes", "on")
         for k, v, hi in (("sl", sl, 99), ("tp", tp, 10000), ("tp_frac", tp_frac, 1), ("trail", trail, 99)):
             if v is None or v == "":
                 continue
@@ -3446,6 +3450,53 @@ class Engine:
                 self.coin_names[m] = sym
         if len(self.coin_names) > 5000:
             self.coin_names = {m: n for m, n in self.coin_names.items() if m in self._kol_keep}
+
+    async def after_exit(self, n: int = 40) -> dict:
+        """Where the coins you and the bots sold are now: market cap now against the market cap at the sell (Analytics
+        -> After you sold). Coins that kept running after the sell point at the exits; coins that died, at the entries
+        (owner, 2026-10-06, from a trader's advice: "look at where the coins you traded are now"). Cached 2 min."""
+        import statistics
+
+        from .curve import TOTAL_SUPPLY
+        hit = getattr(self, "_after_exit", None)
+        if hit and time.time() - hit[0] < 120:
+            return hit[1]
+        seen, picked = set(), []
+        for c in reversed(self.book.closed):               # newest first, one row per coin, Solana pump.fun coins
+            if c.get("source") in ("callout", "chains") or c.get("chain") or not c.get("exit_mcap_sol") or c["mint"] in seen:
+                continue
+            seen.add(c["mint"])
+            picked.append(c)
+            if len(picked) >= n:
+                break
+        need = [c["mint"] for c in picked if not (c["mint"] in self.tokens and self.tokens[c["mint"]].price_known)]
+        dex = {}
+        if need and self.feed.realtime:
+            from ..clients import dexscreener
+            try:
+                dex = await asyncio.to_thread(dexscreener.best_pair_by_mint, need)
+            except Exception:
+                dex = {}
+        rows = []
+        for c in picked:
+            s = self.tokens.get(c["mint"])
+            px = float((dex.get(c["mint"]) or {}).get("priceNative") or 0)
+            now = s.market_cap_sol if s is not None and s.price_known else px * TOTAL_SUPPLY if px > 0 else None
+            rows.append({"mint": c["mint"], "symbol": c.get("symbol", ""), "who": "you" if c.get("source") == "manual" else "bots",
+                         "source": str(c.get("source", "")).split(":")[0], "closed": c.get("closed"), "pnl_pct": round(c.get("pnl_pct", 0.0), 1),
+                         "peak_pct": round(c.get("peak_gain_pct") or 0.0, 1), "exit_mcap_sol": c["exit_mcap_sol"],
+                         "now_mcap_sol": round(now, 1) if now else None,
+                         "since_exit_pct": round((now / c["exit_mcap_sol"] - 1) * 100, 1) if now else None})
+
+        def summary(rs):
+            known = [r["since_exit_pct"] for r in rs if r["since_exit_pct"] is not None]
+            return {"n": len(rs), "priced": len(known), "higher": sum(1 for x in known if x > 20),
+                    "lower": sum(1 for x in known if x < -20), "doubled": sum(1 for x in known if x >= 100),
+                    "median_pct": round(statistics.median(known), 1) if known else None}
+        out = {"trades": rows, "you": summary([r for r in rows if r["who"] == "you"]),
+               "bots": summary([r for r in rows if r["who"] == "bots"]), "at": time.time()}
+        self._after_exit = (time.time(), out)
+        return out
 
     def kol_view(self, minutes: float = 60) -> dict:
         """The Charts tab's KOL tracker over the last `minutes`: the coins they're in (who's still in, their average

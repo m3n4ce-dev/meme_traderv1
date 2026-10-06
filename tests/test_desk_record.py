@@ -159,3 +159,18 @@ def test_sniper_votes_are_scored_apart_from_graduation_votes(monkeypatch):
                       "votes": [["quant", "buy", 58, "late reason"]]} for i in range(9)]
     assert dr.persona_record(e.desk_calls, "quant", strategy="sniper") is None      # 1 sniper call: too few
     assert dr.persona_record(e.desk_calls, "quant", strategy="late")["when_you_said_buy"]["n"] == 9
+
+
+def test_the_exit_lab_tries_a_curve_ladder_on_sniper_entries():
+    from meme_trader.sniper.curve import CURVE_TOKENS, INITIAL_V_TOKENS, Curve
+    e = engine(realtime=False)
+    s = TokenState("L" * 40 + "pump", None, e.now)
+    s.price_known = True
+    e.tokens[s.mint] = s
+    e.lab.start(s.mint, "LAD", "sniper", s.curve.price, e.now, e.p)
+    sh = next(x for x in e.lab.open[s.mint] if x["variant"] == "curve ladder 25/50/75%")
+    for prog in (.26, .51, .76):                                       # the curve fills past each rung
+        vt = INITIAL_V_TOKENS - prog * CURVE_TOKENS
+        s.curve = Curve(30.0 * INITIAL_V_TOKENS / vt, vt)
+        e.lab.tick(e.tokens, e.now + 1, e.p)
+    assert sh["rung"] == 3 and abs(sh["pos"].tokens / sh["pos"].initial_tokens - .25) < 1e-6 and sh["proceeds"] > 0

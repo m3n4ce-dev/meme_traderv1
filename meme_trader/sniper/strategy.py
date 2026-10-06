@@ -141,7 +141,7 @@ class SniperPosition:
     exit_fill: float = 0.0
     exit_delay_s: float = 0.0
     failed_fees_sol: float = 0.0
-    manual: dict | None = None   # manual positions: {"sl", "tp", "tp_frac", "trail", "tp_done"} (0 = off)
+    manual: dict | None = None   # manual positions: {"sl", "tp", "tp_frac", "trail", "dev", "tp_done"} (0 = off)
     adds: list | None = None     # buys added to the position later: [(ts, sol, tokens, price)]
     bot: str = ""                # your position handed to the bots ("ride"; older saves say "late"/"sniper")
     handed_price: float = 0.0    # the price when you handed it over, and its peak since
@@ -338,13 +338,15 @@ def runner_armed(pos: SniperPosition, L) -> bool:
 
 # --------------------------------------------------------------------------- manual positions
 def evaluate_manual_exit(pos: SniperPosition, s: TokenState, m: dict):
-    """Your own position: no strategy exits, only what you set (stop, take profit, trail), plus an exit when
-    the coin leaves the bonding curve (the bot can't price or sell it after). (fraction, reason) or None."""
+    """Your own position: no strategy exits, only what you set (stop, take profit, trail, sell when the creator sells),
+    plus an exit when the coin leaves the bonding curve (the bot can't price or sell it after). (fraction, reason) or None."""
     price = s.curve.price
     pos.peak_price = max(pos.peak_price, price)
     gain = pos.gain_pct(price)
     if s.migrated and m.get("sell_on_graduation", True):
         return 1.0, "manual: graduated (live sells at graduation)"
+    if m.get("dev") and s.dev_sold > pos.dev_sold_at_entry:   # the creator sold after you bought: out, all of it
+        return 1.0, "manual: the creator sold"
     if m.get("sl") and gain <= -m["sl"]:
         return 1.0, f"manual stop {gain:.0f}%"
     if m.get("tp") and not m.get("tp_done") and gain >= m["tp"]:

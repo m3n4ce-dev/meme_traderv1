@@ -4,6 +4,32 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #55: What traders on X say, checked against our data, and what was worth adding
+
+**Owner's request:** "search Twitter for more posts like that and gather info and add what is beneficial", after posts by @SajadFlips (runners collapse in hours: exit fully, keep orders up) and @rimtoln (sell in 4 cuts as the curve fills, and everything when the dev sells).
+
+**How:** 24 FxTwitter searches (no X login, one every 3 s) gave 419 posts. 136 were substantive and well engaged, and 23 X articles were read. Post text was treated as data. Nothing was installed or signed up for. Several posts were promotions: referral links, "DM me", tools.
+
+**What they say, against our data:**
+
+| Tactic | Source | Our data | Done |
+|---|---|---|---|
+| Slow curve fills do better (median 20 min; slow ones double 1.5x more often after graduating) | @0xbobaaa | Replays: for our 10-minute graduation trades the youngest coins (after the 30 s filter) did better, so the opposite. | Lab test queued: `late.min_age_s` 30 → 90 |
+| Check dev share, bundles, block-0 snipers, linked wallets, one funder | rimtoln (HYDRA, PUMPSKAN), @FabianoSolana, @BalaiBB | The bot already checks dev buy/sold, bundles, early-buyer dumps, creator launches and funding clusters. | Nothing new |
+| Fixed TP/SL on every trade, flat after each | rimtoln | Fixed take-profits cut the runners that pay for everything (exit what-ifs). | No |
+| Look at where your coins are now, not at your P&L | @CaptainNFA | New measurement | **After you sold** (Analytics) |
+| The dev is your last take profit: sell all on a dev sell | rimtoln (RONIN) | The bots do it. Manual trades couldn't. Bot dev-sold exits still lost a median 24.5% (2.5 s landing). | **Manual: "sell if the creator sells"** (off by default) |
+| Sell in 4 cuts as the curve fills | rimtoln | Not measured | **Exit lab: "curve ladder 25/50/75%"** on sniper entries |
+| Close, don't take a little; keep orders up | @SajadFlips | Owner's 8 manual losers below −40% cost 4.08 SOL (all −2.11). A 25% trail once up 20% would have helped by up to +1.7 SOL. | **Take profit sells ¼ / half / all** on the position card. A default trail is suggested, not set. |
+| Buy "second lives": 70%+ crash, flat, holders and volume back | @murtaza | Days to weeks on established coins, not what the bots do | Noted only |
+
+**Built:**
+- **Manual positions:** "sell if the creator sells", which counts only sales after the buy (`dev_sold_at_entry` now kept for manual buys). The default is `manual.sell_on_dev_sell`, false. The take profit can sell a quarter, half or all. The chat agent's `set_position_exits` takes `sell_if_dev_sells`.
+- **Analytics → After you sold:** for the last 40 coins sold, market cap now against the market cap at the sell (live price, or DexScreener in one batched call, cached 2 min). Split by you and the bots, with a verdict: mostly higher means early exits; mostly lower means fix entries.
+- **Exit lab:** a "curve ladder 25/50/75%" variant on sniper entries, so it's measured on real coins without trading.
+
+---
+
 ## 2026-10-06 — Entry #54: Sniper back on, a trained model, sniper votes scored, the KOL tracker in depth
 
 **Owner:** turned the early sniper back on ("better for the model to learn what to look for on each ... just paper trading right now").
