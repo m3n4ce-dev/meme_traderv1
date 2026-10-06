@@ -65,7 +65,13 @@ needed), then say in one line what you did and the shortcut for next time (e.g. 
 You're the team's lead (the crowned Claude in the room). You can set a stop loss, take profit or trail on the
 owner's positions (set_position_exits), place limit buys and sells or market-cap alerts (place_order), cancel one
 (cancel_order), buy (buy_token) and sell (sell_position): each waits for the owner's Approve, so when they ask,
-just do it with a one-line reason."""
+just do it with a one-line reason.
+Each owner message starts with what they hold right now ("[Open positions right now: ...]"). "This trade", "this
+position", "it" mean the position they hold when there's exactly one: use its mint and act, even if the chat was
+about another coin before. With several, use the one they name or the one just discussed, and ask only when it's
+truly unclear. Exits in plain words, all in one set_position_exits call: "close it / sell it if it goes over 30%"
+= take_profit_pct 30 with take_profit_fraction 1 (everything); "take half at +30%" = fraction 0.5; "if it goes
+under 50%" or "if it drops 50%" = stop_loss_pct 50 (half the entry gone); "trail 20" = trail_pct 20."""
 
 
 # a question about using the dashboard: a how-to form, or a do-verb about something on the screen
@@ -78,6 +84,21 @@ UI_NOUN = re.compile(r"\b(theme|dark|light|white|tab|page|panel|button|chart|boa
 def _is_howto(text: str) -> bool:
     t = text or ""
     return bool(HOWTO.search(t) or (UI_VERB.search(t) and UI_NOUN.search(t)))
+
+
+def holdings_note(e) -> str:
+    """What the owner holds right now, in front of every message, so "this trade" needs no guessing. Seen 2026-10-06:
+    "close this trade if it goes under 50 percent or over 30 percent" was taken to mean a coin from earlier in the
+    chat, not the one position open, and the take profit was going to sell only half."""
+    rows = []
+    for m, pos in list(getattr(e, "positions", {}).items()):
+        s = e.tokens.get(m)
+        gain = f"{pos.gain_pct(s.curve.price):+.0f}% now" if s is not None and s.price_known else "no price yet"
+        ex = {k: v for k, v in (pos.manual or {}).items() if k in ("sl", "tp", "tp_frac", "trail") and v}
+        whose = "yours" if pos.source == "manual" else f"the bot's ({pos.source})"
+        rows.append(f"{pos.symbol or m[:6]} (mint {m}, {whose}, {gain}, "
+                    + (f"exits set: {json.dumps(ex)}" if ex else "no exits set") + ")")
+    return "[Open positions right now: " + ("; ".join(rows) if rows else "none") + "]"
 
 
 def with_manual(prompt: str, text: str) -> str:
@@ -298,7 +319,7 @@ class ChatManager:
             if prompt is None:                       # card only (auto-read off)
                 self._finish(msg)
                 return
-            prompt = with_manual(prompt, text)
+            prompt = holdings_note(self.e) + "\n\n" + with_manual(prompt, text)
             for attempt in (0, 1):
                 resume = attempt == 0 and bool(self.state["session_id"])
                 got_result, err = await self._run(prompt, msg, resume)
