@@ -32,6 +32,10 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Charts:** a bar in "Where the P&L comes from" opens the same list in By exit, and a dot on the hold-time scatter opens its coin.
 - **If a trade closed since the table was drawn,** the table refreshes so the count and the list agree.
 
+**Small polish:**
+- **Charts:** a first visit opens Graduation watch and Market pulse, instead of an empty page.
+- **Live:** the headline numbers flash green or red when they really move (equity by 0.5% or more, at most every 4 s; off with reduced motion).
+
 **Also scored:** an approval the bot couldn't act on (price ran during the vote, no size, slots full) is followed like a practice buy.
 
 ---
