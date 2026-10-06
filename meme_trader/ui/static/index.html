@@ -1320,7 +1320,7 @@ body.arranging .board { outline: 2px dashed var(--series-soft); outline-offset: 
     <section class="panel" id="exit-lab"><h2>Exit lab <small>other exit rules, run on the same entries and the same prices</small></h2>
       <p class="note">Every time the bot buys, the lab follows the coin with each of these exit rules in the shadow: instant fills, fees on both sides, nothing traded.
         Same entries, so a better row means a better exit, not luckier picks. It's measurement only: switching the frozen strategy's exits would be a new version with its own test.</p>
-      <div class="seg" id="lab-kind" role="group" aria-label="Which strategy"><button data-labkind="late" aria-pressed="true">Graduation plays</button><button data-labkind="sniper" aria-pressed="false">Sniper and copy</button><button data-labkind="picks" aria-pressed="false">Model picks</button></div>
+      <div class="seg" id="lab-kind" role="group" aria-label="Which strategy"><button data-labkind="late" aria-pressed="true">Graduation plays</button><button data-labkind="sniper" aria-pressed="false">Sniper and copy</button><button data-labkind="picks" aria-pressed="false">Model picks</button><button data-labkind="revival" aria-pressed="false">Second-life momentum</button></div>
       <div id="an-lab" style="margin-top:10px"></div></section>
     <section class="panel"><h2>Gate audit <small>had we bought at the decision, would it double before −30%? (10 min)</small></h2><div id="an-gates"></div>
       <p class="note">“(bought)” is the same test on our own entries: the yardstick. A gate whose rejects double more often than our buys is costing trades.</p></section>
@@ -5785,9 +5785,21 @@ function renderPicks(v) {               // the stronger model's picks, followed 
       <tr><th>Exit rule</th>${names.map(() => `<th class="r">Picks</th><th class="r">Mean</th><th class="r">Median</th><th class="r">Won</th>`).join("")}</tr></thead><tbody>
       ${vs.map(x => `<tr><td>${esc(x)}</td>${names.map(b => cell(bands[b].find(r => r.variant === x))).join("")}</tr>`).join("")}</tbody></table></div>`);
 }
+function renderRevival(v) {             // established coins jumping on volume, followed live: never traded
+  const head = `<p class="note">Established pump.fun coins (2+ days old, on PumpSwap): when one jumps 20-40%+ in 5 minutes on 4x its usual volume, it's followed from that moment, filled 5 s or 60 s later, after 1.2% costs. On Oct 4-6 recordings this made money every day, but a few revivals carried it. This is the forward test, on trades it never saw. Nothing is bought.</p>`;
+  if (!v) { setHTML($("an-lab"), head + `<div class="empty">Off: it needs the wallet recorder running in stream mode.</div>`); return; }
+  if (!v.table.length) { setHTML($("an-lab"), head + `<div class="empty">No follows closed yet${v.open ? ` (${v.open} signals being followed now)` : ""}${v.lag_s != null ? ` · trades read ${v.lag_s} s after they happen` : ""}. The first results come an hour after the first signal.</div>`); return; }
+  const best = (v.best || []).map(r => `${esc(r.symbol || "?")} ${pct(r.pnl_pct, 0)}`).join(" · ");
+  setHTML($("an-lab"), head + `<p class="note">${v.signals} signals${v.open ? ` · ${v.open} being followed now` : ""}${v.since ? ` · since ${new Date(v.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""} · P&amp;L per follow after costs.${v.signals < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}${best ? ` Best so far: ${best}.` : ""}</p>
+    <div class="tablewrap"><table><thead><tr><th>Signal</th><th>Fill</th><th>Exit</th><th class="r">Follows</th><th class="r">Mean</th><th class="r">Without best 3</th><th class="r">Median</th><th class="r">Won</th></tr></thead><tbody>
+    ${v.table.map(r => `<tr><td>${esc(r.rule)}</td><td>${r.delay_s} s late</td><td>${esc(r.exit)}</td><td class="r num">${r.n}</td>
+      <td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${r.mean_without_best3 == null ? "" : cls(r.mean_without_best3)}">${r.mean_without_best3 == null ? "–" : pct(r.mean_without_best3, 1)}</td>
+      <td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td><td class="r num">${Math.round(r.win_rate * 100)}%</td></tr>`).join("")}</tbody></table></div>`);
+}
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;
   if (S.labKind === "picks") { renderPicks(all.picks); return; }
+  if (S.labKind === "revival") { renderRevival(all.revival); return; }
   const v = all[S.labKind || "late"], dp = all.desk_pass;
   const base0 = ((all.late && all.late.variants) || []).find(r => r.variant === "as now"), r0 = dp && dp.variants && dp.variants[0];
   const passes = r0 ? `<p class="note" style="margin-top:10px"><b>AI desk passes:</b> ${dp.entries} graduation coin${dp.entries === 1 ? "" : "s"} it turned down would have averaged
