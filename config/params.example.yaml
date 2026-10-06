@@ -186,6 +186,7 @@ sniper:
     take_profit_pct: 0           # sell take_profit_frac at this gain; 0 = off
     take_profit_frac: 0.5        # share of the bag sold at that take profit
     trail_pct: 0                 # once in profit, sell everything this far below the peak; 0 = off
+    sell_on_dev_sell: false      # sell everything if the coin's creator sells after you bought (each position can override)
     sell_on_graduation: true     # live only: exit when a coin migrates (its price then updates every 10 s); paper keeps it
     queue_s: 60                  # a coin with no live price yet: buy it when its first trade shows up, within this
   desk:                          # AI trading desk (Claude persona agents vote on entries; needs ANTHROPIC_API_KEY)
