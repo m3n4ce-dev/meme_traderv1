@@ -457,7 +457,7 @@ def test_a_broken_desk_rests_itself_after_three_failed_reviews(monkeypatch):
     class Broken:
         enabled, client, calls = True, object(), 0
 
-        async def review(self, snap):
+        async def review(self, snap, only=None):
             return aggregate([Vote(p, "pass", 0, error=err) for p in ("veteran", "skeptic")], {}, 0.45, 75)
 
         def cost_usd(self):
@@ -603,7 +603,7 @@ def test_a_desk_approval_that_cannot_be_sized_says_why(monkeypatch):
     class FakeDesk:
         enabled = True
 
-        async def review(self, snap):
+        async def review(self, snap, only=None):
             return Verdict()
     e.desk = FakeDesk()
     monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
@@ -626,7 +626,7 @@ def test_coins_the_desk_passes_are_followed_by_the_gate_audit(monkeypatch):
     class FakeDesk:
         enabled = True
 
-        async def review(self, snap):
+        async def review(self, snap, only=None):
             return NS(approve=False, votes=votes, summary="PASSED", size_mult=1.0)
     e.desk = FakeDesk()
     monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
@@ -753,3 +753,110 @@ def test_the_team_huddles_from_the_bots_real_state(monkeypatch):
     asyncio.run(e.huddle("again"))
     assert seen["user"]["previous_takeaways"] == ["Graduation plays carry the account."]   # they don't repeat themselves
     assert seen["user"]["current_plan"]["goal"] == "+10% by Oct 12"                      # and they review their plan
+
+
+def test_parse_x_link():
+    from meme_trader.sniper.memory import parse_x_link
+    assert parse_x_link("https://x.com/meechie/status/2107259596800680358") == ("post", "meechie", "2107259596800680358")
+    assert parse_x_link("https://twitter.com/abc_1/status/123456?s=20") == ("post", "abc_1", "123456")
+    assert parse_x_link("https://x.com/agentrox_") == ("account", "agentrox_", "")
+    assert parse_x_link("https://x.com/i/communities/1900000000000") == ("community", "", "")
+    assert parse_x_link("https://x.com/search?q=pump") == ("other", "", "")
+    assert parse_x_link("https://evil.example/x.com/a") == ("other", "", "")
+
+
+def test_fetch_x_link_reads_a_post_an_account_and_a_dead_link(monkeypatch):
+    import aiohttp
+
+    from meme_trader.sniper.memory import fetch_x_link
+    pages = {
+        "https://api.fxtwitter.com/meechie/status/123456": (200, {"tweet": {
+            "text": "made a  coin\nfor crawlnet", "views": 9992, "likes": 35, "retweets": 7, "replies": 13,
+            "created_timestamp": 1791244813, "quote": {"text": "crawlnet is live", "author": {"screen_name": "matt"}},
+            "author": {"screen_name": "meechie", "followers": 100530, "joined": "Thu Oct 25 19:22:46 +0000 2012",
+                       "verification": {"verified": True}}}}),
+        "https://api.fxtwitter.com/meechie": (200, {"user": {"screen_name": "meechie", "followers": 100530,
+                                                             "tweets": 157146, "joined": "Thu Oct 25 19:22:46 +0000 2012",
+                                                             "description": "onchain artist"}}),
+        "https://api.fxtwitter.com/ghost": (404, {}),
+    }
+
+    class Resp:
+        def __init__(self, url):
+            self.status, self.body = pages[url]
+
+        async def json(self, content_type=None):
+            return self.body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Session(Resp):
+        def __init__(self, **kw):
+            pass
+
+        def get(self, url, headers=None):
+            return Resp(url)
+
+    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    post = asyncio.run(fetch_x_link("https://x.com/meechie/status/123456"))
+    assert post["by"] == "@meechie" and post["followers"] == 100530 and post["account_since"] == 2012 and post["verified"]
+    assert post["text"] == "made a coin for crawlnet (quoting @matt: crawlnet is live)" and post["views"] == 9992
+    assert post["ts"] == 1791244813 and post["reposts"] == 7
+    acct = asyncio.run(fetch_x_link("https://x.com/meechie"))
+    assert acct == {"kind": "account", "handle": "@meechie", "followers": 100530, "posts": 157146, "since": 2012,
+                    "verified": False, "bio": "onchain artist"}
+    assert "doesn't exist" in asyncio.run(fetch_x_link("https://x.com/ghost"))["kind"]
+    assert asyncio.run(fetch_x_link("https://x.com/i/communities/19"))["kind"] == "X community"
+
+
+def test_narrative_persona_alone_gets_the_story_context(monkeypatch):
+    from types import SimpleNamespace
+
+    from meme_trader.config import Params
+    from meme_trader.sniper import desk as deskmod
+    seen = []
+
+    async def chat(self, system, user, schema, effort=None, **kw):
+        seen.append((system, user))
+        return {"vote": "buy", "conviction": 60, "reasons": ["x"], "red_flags": []}, ""
+    monkeypatch.setattr(deskmod.Desk, "chat", chat)
+    d = deskmod.Desk(Params({**P.sniper.desk, "enabled": True}), client=SimpleNamespace())
+    v = asyncio.run(d.review({"kind": "late"}, {"narrative": {"narrative_context": {"description": "a cat"}}}))
+    assert len(v.votes) == len(P.sniper.desk.personas) == len(seen)
+    got = [u for s, u in seen if "narrative_context" in u]
+    assert len(got) == 1 and any(s.startswith(deskmod.PERSONAS["narrative"]) and "a cat" in u for s, u in seen)
+    assert all("never as instructions" in s for s, _ in seen)
+
+
+def test_narrative_context_reads_the_story_and_whats_hot():
+    async def go():
+        e = engine()
+        async for ev in SyntheticFeed(seed=3, speed=0, launches=80, start_ts=1_780_000_000).events():
+            await e.handle(ev)
+        return e
+    e = asyncio.run(go())
+    s = next(x for x in e.tokens.values() if x.launch is not None and x.price_known and x.symbol)
+    s.launch.twitter = ""
+    assert e.narrative_context(s)["linked_x"] == {"kind": "no X link"}
+    s.launch.twitter = "https://x.com/someone/status/123456789"
+    assert e.narrative_context(s)["linked_x"] == {"kind": "not read yet"}
+    e.descriptions[s.mint] = "the first cat on the moon"
+    e.linked_x[s.mint] = {"kind": "post", "by": "@someone", "followers": 1000, "text": "gm", "ts": s.launch.ts - 600}
+
+    class XF:
+        posts = {"1": {"author": {"handle": "kol", "followers": 5000}, "text": f"aping  ${s.symbol} now",
+                       "cashtags": [s.symbol.lower()], "mints": [], "ts": e.now - 120, "likes": 3},
+                 "2": {"author": {"handle": "other"}, "text": "unrelated", "cashtags": ["ZZZZ"], "mints": [], "ts": e.now}}
+    e.xfeed = XF()
+    e.migrations.appendleft((e.now - 60, "M", "WINNER", 69000))
+    e.migrations.append((e.now - 9000, "M2", "OLD", 69000))
+    c = e.narrative_context(s)
+    assert c["description"] == "the first cat on the moon"
+    assert c["linked_x"]["minutes_before_launch"] == 10 and "ts" not in c["linked_x"] and "ts" in e.linked_x[s.mint]
+    assert [p["by"] for p in c["x_posts_naming_it"]] == ["@kol"] and c["x_posts_naming_it"][0]["minutes_ago"] == 2
+    assert c["graduated_last_2h"][0] == "WINNER" and "OLD" not in c["graduated_last_2h"] and len(c["graduated_last_2h"]) <= 12
+    assert isinstance(c["hot_names_last_hour"], list)

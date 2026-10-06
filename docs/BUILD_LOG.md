@@ -21,6 +21,14 @@ A running record of decisions, research, parameters and status. Newest entries a
 - The 9 plays held to the graduation exit made +2.26 SOL (median +167%). The 21 that peaked at +50..100% were sold by momentum decay at a median +44%.
 - Entries land a median 2.7% above the signal price and exits 2.8% below it (the 2.5 s landing).
 
+**The narrative persona now judges the story** (owner: "Narrative isn't focused on finding the coin narrative").
+- **The problem:** its reasons repeated the order flow the veteran already covers ("21 buys vs 6 sells", "top10 29.8%"). It saw only the name, ticker and links, so it had no story to judge, and it called links "real posts" it couldn't open.
+- **Now it gets, alone** (the others don't need the tokens):
+  - the coin's description from its metadata;
+  - what the X link is, read through FxTwitter as the coin nears the window (one read every 2 s, at most 800 a day): the post's text, views and likes, the poster's followers and account age, and minutes before launch; or the account's followers, bio and age; or that it doesn't exist;
+  - this hour's copycat waves, the last 2 hours' graduates, and X feed posts naming the coin.
+- **Its instructions** tell it to find the story, leave flow and holder numbers to the others, and pass on no hook, a dead or fake link, or a copy that isn't the biggest of its name.
+
 **Two new settings, off by default, for the lab to test:**
 - **`late.runner_after_pct`** (0 = off) and **`late.runner_trail_pct`** (25): once a play has been up this much, momentum decay and the stall stop no longer sell it; a trailing stop does.
 - **`late.max_dev_sold_pct`** (0 = any creator sale skips, as before): the owner saw coins passed for "dev holding: sold" whose charts kept climbing; four of ten on the graduation watch at once. A coin let in this way still sells if the creator sells again after the buy.
