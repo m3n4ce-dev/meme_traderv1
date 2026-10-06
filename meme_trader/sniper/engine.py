@@ -72,7 +72,7 @@ CONTROLS = [
     ("callouts.enabled", "bool", None, None, "Callouts", "$1 bags + callout cards"),
     ("late.enabled", "bool", None, None, "Graduation plays", "Late-curve momentum, out before migration"),
     ("desk.graduation_vote", "bool", None, None, "AI team decides graduation buys", "Off: the rules decide and the team votes on the side, scored"),
-    ("desk.practice", "bool", None, None, "AI team practice", "With graduation plays off, the team still votes on what the rules pick (nothing bought); every call is scored"),
+    ("desk.practice", "bool", None, None, "AI team practice", "Whenever the bot can't buy (a play off, the kill switch, the daily limit, paused), the team still votes on what the rules pick (nothing bought); every call is scored"),
     ("risk_adapt.enabled", "bool", None, None, "Defense mode", "Halve size + raise the bar after a bad run"),
     ("entry.min_score", "int", 0, 100, "Min entry score", "Rule score needed to buy"),
     ("predict.min_p", "float", 0.0, 0.95, "Min P(2x first)", "Model gate; 0 = show only"),
@@ -167,6 +167,7 @@ class Engine:
         self.positions: dict[str, SniperPosition] = {}
         self.pending: set[str] = set()
         self.reviewing: set[str] = set()
+        self.practicing: set[str] = set()        # of those, votes that buy nothing: they don't take a seat
         self.watch_until: dict[str, float] = {}
         self.book = Book(self.p.capital.starting_sol)
         self.creators: dict[str, deque] = defaultdict(deque)
@@ -419,7 +420,7 @@ class Engine:
             return why
         trading = sum(1 for p in self.positions.values() if p.source != "callout")   # $1 callout bags don't count
         in_flight = len(self.book.reserved.keys() - set(self.positions))
-        if trading + in_flight + len(self.reviewing) >= c.max_open_positions:
+        if trading + in_flight + len(self.reviewing - self.practicing) >= c.max_open_positions:
             return "max positions"
         need = buy_sol or (self.p.sizing.max_usd / self.sol_price.usd if self.p.sizing.enabled else c.buy_sol)
         return self._cash_block(need)
@@ -432,7 +433,7 @@ class Engine:
         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
-            if trading + in_flight + len(self.reviewing - {mint}) >= self.p.capital.max_open_positions:
+            if trading + in_flight + len(self.reviewing - self.practicing - {mint}) >= self.p.capital.max_open_positions:
                 return "max positions"
         return self._cash_block(sol, source)
 
@@ -815,7 +816,7 @@ class Engine:
             await self._check_entry(s)
 
     async def _check_entry(self, s: TokenState) -> None:
-        if not self.p.entry.enabled:
+        if not self.p.entry.enabled and not self._practicing("sniper off"):
             s.decided = "sniper off"                       # callouts / graduation plays still consider it
             return
         d = evaluate_entry(s, self.now, self.p.entry, self._ctx(s))
@@ -823,6 +824,9 @@ class Engine:
         if d.action != "reject" and self.model is not None:
             p = self._predict(s)
             s.score_notes = s.score_notes + [f"P(2x) {p:.0%}"]
+        if d.action == "reject" and not self.p.entry.enabled:
+            s.decided = "sniper off"                       # practice only: the coin is kept as it would be off
+            return
         if d.action == "reject":
             s.decided = "rejected: " + d.notes[0]
             self.rejects[reason_key(d.notes[0])] += 1
@@ -845,10 +849,13 @@ class Engine:
             if pr.require_positive_ev and self._ev(s.p) < 0:
                 s.score_notes = [f"negative EV ({self._ev(s.p):+.0f}%)"] + s.score_notes
                 return
-        blocked = self.entries_blocked()
+        blocked = self.entries_blocked() if self.p.entry.enabled else "sniper off"
+        practice = bool(blocked) and self._practicing(blocked)
         if blocked:
-            self.stats["skipped_" + blocked.split(":")[0].replace(" ", "_")] += 1
-            return
+            if self.p.entry.enabled:
+                self.stats["skipped_" + blocked.split(":")[0].replace(" ", "_")] += 1
+            if not practice or self._practice_n >= 3:
+                return
         verdict = await self._funding_gate(s)
         if verdict == "wait":
             return
@@ -857,6 +864,10 @@ class Engine:
             self.rejects[reason_key(verdict)] += 1
             self._audit_start(s, reason_key(verdict))
             self.say("info", f"{s.symbol} rejected: {verdict}", s.mint)
+            return
+        if practice:
+            s.decided = f"practice vote ({blocked.split(':')[0]})"
+            asyncio.create_task(self._practice(s, "practice", "sniper"))
             return
         await self._enter(s, kind="sniper", score=d.score, buy_sol=self.p.capital.buy_sol, notes=d.notes or [])
 
@@ -1906,9 +1917,11 @@ class Engine:
     # ------------------------------------------------------------------ graduation plays
     async def _maybe_late(self) -> None:
         L = self.p.late
-        practice = not L.enabled and self._practicing()
-        if not (L.enabled or practice) or self.now - self._last_late_scan < L.get("scan_interval_s", 2) \
-                or (L.enabled and self.entries_blocked()):
+        if self.now - self._last_late_scan < L.get("scan_interval_s", 2):
+            return
+        blocked = self.entries_blocked() if L.enabled else "graduation plays are off"
+        practice = bool(blocked) and self._practicing(blocked)
+        if blocked and not practice:
             return
         self._last_late_scan = self.now
         en = self.p.entry
@@ -1940,34 +1953,41 @@ class Engine:
             if self.entries_blocked():
                 break
 
-    def _practicing(self) -> bool:
-        """desk.practice: with the graduation play off, the team keeps voting on what the rules pick (live feed,
-        desk awake). Nothing is bought; each call is scored on the bot's exits."""
+    def _practicing(self, blocked: str = "") -> bool:
+        """desk.practice: whenever the bot can't buy for a while (the play is off, the kill switch, the daily loss
+        limit, paused, low SOL), the team keeps voting on what the rules pick (live feed, desk awake). Nothing is
+        bought; each call is scored on the bot's exits. Not for a moment's block (every seat taken: the coin may still
+        be bought in a minute) or a degraded feed (no trades to vote on)."""
+        if blocked.startswith("max positions") or blocked.endswith("entries paused"):
+            return False
         return bool(self.feed.realtime and self.desk and self.desk.enabled and self.p.desk.get("practice", True))
 
-    async def _practice(self, s, mode: str) -> None:
-        """A vote that buys nothing: practice (the graduation play is off: the coin is followed on the bot's exits from
-        the vote) or shadow (the rules bought it anyway: the bot's own trade scores the call)."""
-        snap, only = self._desk_inputs(s, "late")
+    async def _practice(self, s, mode: str, kind: str = "late") -> None:
+        """A vote that buys nothing: practice (the bot can't buy: the coin is followed on the bot's exits from the
+        vote) or shadow (the rules bought it anyway: the bot's own trade scores the call). kind: late | sniper."""
+        snap, only = self._desk_inputs(s, kind)
         self.reviewing.add(s.mint)
+        self.practicing.add(s.mint)
         self._practice_n += 1
         t0 = time.time()
         try:
             v = await self.desk.review(snap, only)
         finally:
             self.reviewing.discard(s.mint)
+            self.practicing.discard(s.mint)
             self._practice_n -= 1
         if not v.votes or all(x.error for x in v.votes):
             return                                       # nobody answered: no call to score
         self.desk_vote_s.append(round(time.time() - t0, 2))
-        label = "practice" if mode == "practice" else "side vote"
+        label = ("practice" if kind == "late" else "sniper practice") if mode == "practice" else "side vote"
         self.say("desk", f"{label}: {s.symbol}: {v.summary}", s.mint, votes=[vars(x) for x in v.votes])
         self.desk_reviews.append({"ts": self.now, "mint": s.mint, "symbol": s.symbol, "kind": label,
                                   "approve": v.approve, "summary": v.summary, "votes": [vars(x) for x in v.votes]})
-        self._open_call(s, v, mode)
+        self._open_call(s, v, mode, kind)
         if mode == "practice":
-            self.lab.start(s.mint, s.symbol, "practice-buy" if v.approve else "practice-pass", s.curve.price, self.now,
-                           self.p, only=("as now",))
+            follow = ("practice-buy" if v.approve else "practice-pass") if kind == "late" else \
+                ("sniper-skip" if v.approve else "sniper-pass")     # a sniper follow: as if bought, or as if passed
+            self.lab.start(s.mint, s.symbol, follow, s.curve.price, self.now, self.p, only=("as now",))
         elif s.mint in self.positions:
             self.positions[s.mint].desk = f"side vote: {v.summary}"
 
