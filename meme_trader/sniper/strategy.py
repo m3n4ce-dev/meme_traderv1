@@ -148,6 +148,7 @@ class SniperPosition:
     handed_peak: float = 0.0
     ride_tp: bool = False        # the bots already took their partial profit
     feat: dict | None = None     # what the bot saw when it decided to buy (kept with the trade for research)
+    dev_sold_at_entry: float = 0.0   # creator tokens already sold when the bot decided to buy ("dev sold" = more)
 
     def gain_pct(self, price: float) -> float:
         return (price / self.entry_price - 1) * 100
@@ -259,13 +260,21 @@ def gate_checklist(s: TokenState, now: float, p, ctx: dict) -> list[dict]:
 SKIP_FOR_GOOD = ("too young", "one-sided buying")   # graduation rejections that end the coin's chance
 
 
+def late_dev_ok(s: TokenState, L) -> bool:
+    """late.max_dev_sold_pct: a graduation play skips coins whose creator has sold more than this % of the supply
+    (0 = any sale, the default). Many coins keep filling their curve after the creator leaves: on 2026-10-06 four of
+    the ten coins on the graduation watch were passed for it while their charts climbed."""
+    lim = L.get("max_dev_sold_pct") or 0
+    return s.dev_sold / s.supply * 100 <= lim if lim else not s.dev_sold
+
+
 def evaluate_late_entry(s: TokenState, now: float, L, red: dict) -> tuple[bool, str]:
     """Late-curve momentum ("graduation play"): a token already filling its curve fast, bought for the
     final leg and sold before migration. L: params.sniper.late. red: red-flag limits + context."""
     prog = s.curve.progress * 100
     if s.migrated or not (L.min_curve_pct <= prog <= L.max_curve_pct) or s.age(now) > L.max_age_s:
         return False, "window"
-    if s.dev_sold or s.bundle_pct() > red["max_bundle_pct"] or s.early_sold_ratio() > red["max_early_sold_ratio"]:
+    if not late_dev_ok(s, L) or s.bundle_pct() > red["max_bundle_pct"] or s.early_sold_ratio() > red["max_early_sold_ratio"]:
         return False, "red flag"
     if red["creator_launches"] > red["max_creator_launches_24h"]:
         return False, "serial deployer"
@@ -299,7 +308,7 @@ def evaluate_late_exit(pos: SniperPosition, s: TokenState, now: float, L, x):
     gain = pos.gain_pct(price)
     drop = (1 - price / pos.peak_price) * 100 if pos.peak_price else 0.0
     held = now - pos.opened_at
-    if s.dev_sold:
+    if s.dev_sold > pos.dev_sold_at_entry:              # the creator sold (again) while we held
         return 1.0, "dev sold"
     if s.migrated or s.curve.progress * 100 >= L.exit_curve_pct:
         return 1.0, f"graduation exit (curve {s.curve.progress:.0%})"
@@ -307,12 +316,24 @@ def evaluate_late_exit(pos: SniperPosition, s: TokenState, now: float, L, x):
         return 1.0, f"late stop {gain:.0f}%"
     if held >= L.max_hold_s:
         return 1.0, "late max hold"
+    if runner_armed(pos, L):                          # a big run: only a trailing stop (and the exits above) sells it
+        if drop >= L.runner_trail_pct:
+            return 1.0, f"late trail -{drop:.0f}% from peak (+{pos.gain_pct(pos.peak_price):.0f}%)"
+        return None
     flow = s.net_flow_sol(now, x.decay_window_s)
     if drop >= x.decay_min_drop_pct and flow <= -x.decay_net_outflow_sol:
         return 1.0, f"momentum decay (outflow {flow:.2f} SOL, -{drop:.0f}%)"
     if now - s.last_high_ts() >= L.stall_s and held >= L.stall_s:
         return 1.0, f"late stall {L.stall_s:.0f}s"
     return None
+
+
+def runner_armed(pos: SniperPosition, L) -> bool:
+    """late.runner_after_pct (0 = off): once a play's peak is this far up, momentum decay and the stall stop selling
+    it. In the 2026-10-03..05 replays the 9 plays that reached the graduation exit made +2.26 SOL (median +167%) while
+    the 21 that peaked at +50..100% were sold by momentum decay at a median +44%."""
+    after = L.get("runner_after_pct") or 0
+    return bool(after) and pos.gain_pct(pos.peak_price) >= after
 
 
 # --------------------------------------------------------------------------- manual positions
@@ -379,7 +400,8 @@ def late_checklist(s: TokenState, now: float, L, red: dict) -> dict:
          not s.migrated and L.min_curve_pct <= prog <= L.max_curve_pct, prog / max(L.min_curve_pct, 1e-9)),
         ("window", "young enough", f"{age / 60:.1f} min", f"<= {L.max_age_s / 60:.0f} min", age <= L.max_age_s,
          None),
-        ("flag", "dev holding", "sold" if s.dev_sold else "holding", "", not s.dev_sold, None),
+        ("flag", "dev holding", f"sold {s.dev_sold / s.supply * 100:.1f}%" if s.dev_sold else "holding",
+         f"<= {L.max_dev_sold_pct:g}% sold" if L.get("max_dev_sold_pct") else "", late_dev_ok(s, L), None),
         ("flag", "bundled supply", f"{s.bundle_pct():.0f}%", f"<= {red['max_bundle_pct']}%",
          s.bundle_pct() <= red["max_bundle_pct"], None),
         ("flag", "early buyers dumped", f"{s.early_sold_ratio():.0%}", f"<= {red['max_early_sold_ratio']:.0%}",
@@ -475,6 +497,12 @@ def exit_watch(pos: SniperPosition, s: TokenState, now: float, L, x, own: dict |
             {"label": "time limit", "value": f"{held / 60:.1f} min", "limit": f"{L.max_hold_s / 60:.0f} min",
              "frac": held / L.max_hold_s},
         ]
+        if runner_armed(pos, L):
+            out[2:4] = [{"label": "runner trail", "value": f"-{drop:.0f}% off its peak", "limit": f"-{L.runner_trail_pct:g}%",
+                         "frac": drop / L.runner_trail_pct}]
+        elif L.get("runner_after_pct"):
+            out.append({"label": "runner mode", "value": f"peak {pos.gain_pct(pos.peak_price):+.0f}%",
+                        "limit": f"+{L.runner_after_pct:g}%", "frac": max(0.0, pos.gain_pct(pos.peak_price)) / L.runner_after_pct})
     else:
         out = [{"label": "drop from peak", "value": f"-{drop:.0f}%", "limit": "trailing stop", "frac": None},
                {"label": "time held", "value": f"{held / 60:.1f} min", "limit": f"{x.max_hold_s / 60:.0f} min",

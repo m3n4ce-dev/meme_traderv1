@@ -213,6 +213,11 @@ def validate_sniper(sn: dict) -> None:
         _num(sn, "late.min_age_s", 0, sn["late"]["max_age_s"])
     if "min_recent_sells" in sn["late"]:
         _num(sn, "late.min_recent_sells", 0, 100)
+    if "max_dev_sold_pct" in sn["late"]:
+        _num(sn, "late.max_dev_sold_pct", 0, 100)
+    if "runner_after_pct" in sn["late"]:
+        _num(sn, "late.runner_after_pct", 0, 1000)
+        _num(sn, "late.runner_trail_pct", 0, 100, lo_open=True, hi_open=True)
     _num(sn, "callouts.interval_s", 0, lo_open=True)
     _num(sn, "callouts.position_usd", 0, lo_open=True)
     _num(sn, "callouts.hold_s", 0, lo_open=True)
