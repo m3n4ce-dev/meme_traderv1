@@ -494,14 +494,16 @@ class SolanaTradeFeed(Feed):
 
     def _load_lags(self) -> None:
         """Start on the endpoint that was fastest in a recent run (seen 2026-10-04: every restart began on
-        PublicNode, 10 s behind, and paused entries until the watchdog moved on)."""
+        PublicNode, 10 s behind, and paused entries until the watchdog moved on). An endpoint you configured that
+        hasn't been measured yet (a paid one just added, 2026-10-06) is tried first: the remembered free ones
+        would otherwise win, and the feed would only go back to yours after RETRY_PRIMARY_S."""
         if not self.memory_path:
             return
         try:
             saved = json.loads(open(self.memory_path).read())
         except (OSError, ValueError):
-            return
-        now, best = time.time(), None
+            saved = {}
+        now, best, fresh = time.time(), None, None
         for i, u in enumerate(self.ws_urls):
             v = saved.get(self._hostname(u))
             if isinstance(v, list) and len(v) == 2 and now - v[1] < self.STARTUP_MEMORY_S:
@@ -510,7 +512,11 @@ class SolanaTradeFeed(Feed):
                     continue
                 if best is None or v[0] < self.endpoint_lag[best][0]:
                     best = i
-        if best is not None:
+            elif fresh is None and i < self.n_configured and i != self.backup_idx:
+                fresh = i
+        if fresh is not None:
+            self.ws_idx = fresh
+        elif best is not None:
             self.ws_idx = best
 
     def _save_lags(self, now: float) -> None:

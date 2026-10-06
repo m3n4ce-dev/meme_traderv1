@@ -1257,3 +1257,16 @@ def test_a_reconnect_to_the_endpoint_that_was_fine_keeps_entries_open():
     f._good = (f.ws_idx, time.time())
     f.quality.lags.extend([9.0] * f.quality.min_lags)            # trusted, but this connection turns out slow
     assert f.degraded and "behind the chain" in f.degraded_reason
+
+
+def test_a_newly_configured_endpoint_is_tried_first_at_startup(tmp_path, monkeypatch):
+    """A paid endpoint just added has no measured lag yet; the remembered free ones mustn't beat it for 30 minutes."""
+    mem = tmp_path / "feed_endpoints.json"
+    now = time.time()
+    mem.write_text(json.dumps({"api.mainnet-beta.solana.com": [1.4, now], "solana-rpc.publicnode.com": [10.0, now]}))
+    monkeypatch.setenv("SOLANA_WS_URL", "wss://paid.example.com/?api_key=k")
+    f = SolanaTradeFeed(memory_path=mem)
+    assert f.n_configured == 1 and f.ws_urls[f.ws_idx].startswith("wss://paid.example.com")
+    mem.write_text(json.dumps({"paid.example.com": [3.0, now], "api.mainnet-beta.solana.com": [1.4, now]}))
+    g = SolanaTradeFeed(memory_path=mem)                     # once measured, the fastest wins as before
+    assert g.ws_urls[g.ws_idx].endswith("api.mainnet-beta.solana.com")
