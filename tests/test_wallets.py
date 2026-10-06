@@ -41,7 +41,7 @@ def test_decode_real_events():
 
 
 def test_parse_logs_only_takes_the_amms_own_events():
-    logs = [f"Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]",
+    logs = ["Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]",
             f"Program {AMM_PROGRAM} invoke [2]", "Program log: Instruction: Buy", f"Program data: {BUY_B64}",
             f"Program {AMM_PROGRAM} consumed 50000 of 200000 compute units", f"Program {AMM_PROGRAM} success",
             f"Program data: {SELL_B64}",                       # emitted by the router, not the AMM: ignored

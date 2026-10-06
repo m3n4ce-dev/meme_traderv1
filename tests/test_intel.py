@@ -68,6 +68,15 @@ def test_active_coins_x_links_are_read_once_per_link_and_logged(monkeypatch, tmp
     assert by["C0"]["followers"] == 120000 and not by["C0"]["cached"] and by["C0"]["buyers"] == 25
     assert by["C1"]["cached"] and by["C3"]["kind"] == "X community" and "C2" not in by
     assert e.linked_x[b.mint]["by"] == "@big" and e.intel_view()["x_reads_today"] == 1
+    demo = Engine(copy.deepcopy(P), Quiet(), PaperExecutor(P.sniper.execution), mode="paper", log_to_journal=False,
+                  persist=False)                             # a demo's coins are made up: no reads at all
+    demo.p.late["enabled"] = True
+    d = coin(5, post)
+    d.curve.v_tokens *= 0.5                                  # deep into the curve: the graduation-window trigger
+    demo.tokens[d.mint], demo.now = d, 50.0
+    demo._x_intel()
+    asyncio.run(demo._maybe_late())
+    assert not demo.linked_x and demo.intel_view()["x_reads_today"] == 0
 
 
 class FakeChains:

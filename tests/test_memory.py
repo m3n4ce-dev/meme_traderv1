@@ -1,7 +1,6 @@
 """The desk's memory: notes, links and contract addresses you feed the agents; who gets to read them."""
 import asyncio
 import copy
-import json
 
 import pytest
 
