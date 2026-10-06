@@ -27,6 +27,11 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 **Side votes** (`desk.graduation_vote`, on by default, a Controls switch). Off: graduation buys go on the rules alone, the team votes on the side, and the bot's own trade scores the call. This is the clean test of whether the vote adds anything: every rule pick is bought, labelled with what the team would have done.
 
+**Analytics rows open their trades** (owner: "yeah sure").
+- **Tables:** click a row in By strategy, By exit, By score, By P(2x) or By entry market cap, and its trades open under it (`/api/trades`, grouped with the tables' own keys, `analytics.trades_in`). Each trade opens its coin; click the row again to close the list.
+- **Charts:** a bar in "Where the P&L comes from" opens the same list in By exit, and a dot on the hold-time scatter opens its coin.
+- **If a trade closed since the table was drawn,** the table refreshes so the count and the list agree.
+
 **Also scored:** an approval the bot couldn't act on (price ran during the vote, no size, slots full) is followed like a practice buy.
 
 ---
