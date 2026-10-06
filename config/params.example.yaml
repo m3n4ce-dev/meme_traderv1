@@ -328,6 +328,14 @@ sniper:
       model_path: data/model-trees.json   # trail / time exits, filled instantly and as late as paper_delay_s. Nothing
       min_p: 0.25                #   is bought: Analytics -> Exit lab -> Model picks
 
+  intel:                         # data for the next studies (nothing is traded on it); HQ shows the counts
+    x_reads: true                # read each coin's X link once it gets active: who posted it, followers, how fresh,
+    x_min_buyers: 20             #   reach -> data/xlinks.jsonl (FxTwitter, no login). Once it has this many buyers
+    x_reads_per_day: 3000        #   ... one read every 2 s at most; a link many coins share is read once in 6 h
+    graduated: true              # each graduated coin's 1-minute candles (its pool, GeckoTerminal), fetched once
+    graduated_after_h: 6         #   ... this long after it graduates -> data/graduated-YYYY-MM-DD.jsonl
+    graduated_per_day: 2000      #   ... at most (one GeckoTerminal call every 40 s at most, shared pacing)
+
   lab:                           # the team's lab: one setting at a time replayed on the last 24 h of recordings
     enabled: true                #   (a separate low-priority process; results go to the next huddle)
     auto_every_min: 360          # with nothing queued, the team tests a routine one-step change this often

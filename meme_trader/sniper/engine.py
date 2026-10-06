@@ -266,8 +266,15 @@ class Engine:
         self.away = False                                  # away mode: the bots manage your positions
         self.migrations: deque = deque(maxlen=120)         # (ts, mint, symbol, last curve market cap USD)
         self.descriptions: dict[str, str] = {}             # the coin's own description (its metadata; creator-written)
-        self.linked_x: dict[str, dict] = {}                # what a coin's X link is (read near the graduation window)
+        self.linked_x: dict[str, dict] = {}                # what a coin's X link is (read as it gets active)
         self._x_next_at, self._x_day = 0.0, ("", 0)
+        self._x_cache: dict[str, tuple[float, dict]] = {}  # link -> (read at, what it is): a shared link is read once
+        self._last_x_scan = 0.0
+        # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
+        from .gradlog import GradLog
+        ik = self.p.get("intel") or {}
+        self.gradlog = GradLog(DATA, float(ik.get("graduated_after_h", 6)), int(ik.get("graduated_per_day", 2000))) \
+            if feed.realtime and self.persist and ik.get("graduated", True) else None      # the real bot only, no demos
         self.xfeed = None                                  # the dashboard's X feed (posts naming a coin), when it runs
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
         self.note_stats = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "error": ""}
@@ -645,6 +652,8 @@ class Engine:
             if s:
                 if not s.migrated:
                     self.migrations.appendleft((self.now, s.mint, s.symbol, s.market_cap_sol * self.sol_price.usd))
+                    if self.gradlog is not None:
+                        self.gradlog.add(s.mint, s.symbol, self.now, s.market_cap_sol * self.sol_price.usd)
                 s.migrated = True
                 await self._evaluate(s)
         elif isinstance(e, Social):
@@ -1684,6 +1693,9 @@ class Engine:
         await self._maybe_callout()
         await self._maybe_late()
         self._model_picks()
+        self._x_intel()
+        if self.gradlog is not None:
+            self.gradlog.tick(self.now, getattr(self, "chains", None))
         await self._manual_queue_tick()
         await self._orders_tick()
         if self.lab.open:
@@ -2067,27 +2079,77 @@ class Engine:
         return {"late": scorecard(self.desk_calls, self.p.desk.personas, "late"),
                 "sniper": scorecard(self.desk_calls, self.p.desk.personas, "sniper")}
 
-    def _read_x_link(self, s) -> None:
-        """Read a coin's X link once, as it nears the graduation window, so the narrative persona has the story
-        when the desk votes (reading it then would delay the buy). One read every 2 s, 800 a day, through
-        FxTwitter: no X login, no cost."""
-        from .memory import fetch_x_link
-
-        day = time.strftime("%Y-%m-%d", time.gmtime())
-        n = self._x_day[1] if self._x_day[0] == day else 0
-        if time.time() < self._x_next_at or n >= 800:
+    def _x_intel(self) -> None:
+        """sniper.intel.x_reads: read each coin's X link once it gets active (x_min_buyers), so every read is logged
+        for the information study (does who posted it, and how fresh, predict the coin?)."""
+        ik = self.p.get("intel") or {}
+        if not self.feed.realtime or not self.persist or not ik.get("x_reads", True) or self.now - self._last_x_scan < 1:
             return
-        self._x_next_at, self._x_day = time.time() + 2.0, (day, n + 1)
+        self._last_x_scan = self.now
+        nb = int(ik.get("x_min_buyers", 20))
+        for s in list(self.tokens.values()):
+            if s.launch is not None and s.launch.twitter and s.mint not in self.linked_x and not s.migrated \
+                    and len(s.buyers) >= nb:
+                self._read_x_link(s)
+
+    def _read_x_link(self, s) -> None:
+        """Read a coin's X link once: as it gets active (_x_intel) or nears the graduation window, so the narrative
+        persona has the story when the desk votes. Through FxTwitter, no X login, no cost: one read every 2 s,
+        intel.x_reads_per_day at most, and a link many coins share (a viral post) is read once in 6 h. Every read
+        goes to data/xlinks.jsonl with the coin's state at that moment."""
+        from .memory import fetch_x_link, parse_x_link
+
+        link = s.launch.twitter
+        kind, user, sid = parse_x_link(link)
+        key = f"{kind}:{user.lower()}:{sid}"
+        at = {"ts": round(self.now, 1), "mint": s.mint, "symbol": s.symbol, "age_s": round(s.age(self.now)),
+              "curve_pct": round(s.curve.progress * 100, 1), "buyers": len(s.buyers),
+              "holders": sum(1 for v in s.holders.values() if v > 0), "link": link[:200]}
         if len(self.linked_x) > 3000:
             self.linked_x = {m: d for m, d in self.linked_x.items() if m in self.tokens}
+        hit = self._x_cache.get(key)
+        if kind in ("community", "other") or (hit and time.time() - hit[0] < 6 * 3600):
+            res = hit[1] if hit else {"kind": "X community" if kind == "community" else "not an X post or account"}
+            self.linked_x[s.mint] = res
+            self._log_x(at, res, cached=bool(hit))
+            return
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        n = self._x_day[1] if self._x_day[0] == day else 0
+        if time.time() < self._x_next_at or n >= int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)):
+            return
+        self._x_next_at, self._x_day = time.time() + 2.0, (day, n + 1)
         self.linked_x[s.mint] = {"kind": "reading"}
+        if len(self._x_cache) > 5000:
+            self._x_cache = {k: v for k, v in self._x_cache.items() if time.time() - v[0] < 6 * 3600}
 
-        async def go(mint=s.mint, link=s.launch.twitter):
+        async def go(mint=s.mint):
             try:
-                self.linked_x[mint] = await fetch_x_link(link)
+                res = await fetch_x_link(link)
+                self._x_cache[key] = (time.time(), res)
             except Exception as e:                       # network, rate limit: the persona is told it's unread
-                self.linked_x[mint] = {"kind": f"couldn't read it ({type(e).__name__})"}
+                res = {"kind": f"couldn't read it ({type(e).__name__})"}
+            self.linked_x[mint] = res
+            self._log_x(at, res, cached=False)
         asyncio.create_task(go())
+
+    def _log_x(self, at: dict, res: dict, cached: bool) -> None:
+        if not self.persist:
+            return
+        row = {**at, "cached": cached, **{k: res.get(k) for k in ("kind", "by", "handle", "followers", "verified",
+                                                                  "account_since", "since", "posts", "views", "likes",
+                                                                  "reposts", "replies") if res.get(k) is not None},
+               "post_ts": res.get("ts"), "text": str(res.get("text") or res.get("bio") or "")[:200]}
+        try:
+            with (DATA / "xlinks.jsonl").open("a") as f:
+                f.write(json.dumps(row) + "\n")
+        except OSError:
+            pass
+
+    def intel_view(self) -> dict:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        return {"x_reads_today": self._x_day[1] if self._x_day[0] == day else 0,
+                "x_per_day": int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)),
+                "x_links_cached": len(self._x_cache), "graduated": self.gradlog.view() if self.gradlog else None}
 
     def narrative_context(self, s) -> dict:
         """What the narrative persona reads on top of the snapshot: the coin's own story (its description and the

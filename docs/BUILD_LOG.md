@@ -4,6 +4,27 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #59: Collecting the data for the next studies: X links and graduated coins
+
+**Owner's request:** "whatever is needed to bring us to the next level". After today's findings (no edge on the bonding curve at our speed), the two places left to look need data the bot doesn't keep.
+
+**1. Who posted it, and how fresh: `data/xlinks.jsonl`.**
+- **When:** each coin's X link is read once the coin gets active (`intel.x_min_buyers`, 20 buyers). Before, links were read only near the graduation window, and nothing was saved.
+- **What's logged:** the coin's state then (age, curve, buyers, holders) and what the link is:
+  - for a post: the author, followers, verified, account age, post time, views, likes, reposts and replies;
+  - for an account: followers, posts and the year it joined.
+- **Rate:** through FxTwitter, no X login. One read every 2 s, at most `intel.x_reads_per_day` (3,000). A link many coins share, like a viral post with 50 copycats, is read once in 6 h.
+- **The study, in a few days:** do followers, post freshness or reach predict the coin, filled 2.5 s late?
+
+**2. After graduation: `data/graduated-YYYY-MM-DD.jsonl`.**
+- **The gap:** the recordings hold bonding-curve trades only (none after graduation). That's a slower market with lower fees, where a 2.5 s fill matters less.
+- **How:** each graduated coin is queued (`data/graduated_queue.json`, which survives restarts). `intel.graduated_after_h` (6 h) later, one DexScreener call per 30 coins finds its pool, and one GeckoTerminal call fetches up to 1,000 one-minute candles, priced in SOL.
+- **Rate:** at most one fetch every 40 s through the shared GeckoTerminal pacing, so a 429 pauses everyone.
+
+**Where it runs:** both on the real bot only, not in demos or replays. Controls → HQ → Data collection shows today's counts. Nothing is traded on either.
+
+---
+
 ## 2026-10-06 — Entry #58: Slower coins, and the owner's own style as a rule: no edge at our speed
 
 **Owner's request:** "yes pls" to (1) the stronger model on slower coins and (2) checking what their own manual trades do that the bots don't. All replays fill the buy and every sell 2.5 s late, as the paper bot lands, after 3.5% round-trip fees.
