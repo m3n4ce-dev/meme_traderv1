@@ -182,6 +182,7 @@ class LogisticModel:
         self.features, self.mean, self.std, self.w, self.b = list(features), mean, std, w, b
         self.info = info or {}
         self.temp = temp
+        self.feature_version = FEATURE_VERSION       # new weights fit today's features; loading keeps the file's own
 
     @staticmethod
     def _standardize(X, mean, std):
@@ -230,7 +231,7 @@ class LogisticModel:
         return [(k, round(c, 3)) for k, c in contrib[:top]]
 
     def to_dict(self) -> dict:
-        return {"features": self.features, "feature_version": FEATURE_VERSION, "mean": self.mean, "std": self.std,
+        return {"features": self.features, "feature_version": self.feature_version, "mean": self.mean, "std": self.std,
                 "w": self.w, "b": self.b, "temp": self.temp, "info": self.info}
 
     @classmethod
@@ -264,6 +265,7 @@ class TreeModel:
 
     def __init__(self, features, trees, info=None):
         self.features, self.trees, self.info = list(features), trees, info or {}
+        self.feature_version = FEATURE_VERSION
 
     @classmethod
     def from_lightgbm(cls, booster, features=FEATURES, num_iteration=None, info=None) -> "TreeModel":
@@ -303,7 +305,7 @@ class TreeModel:
         return _sigmoid(self.raw_row([feats.get(k, 0.0) for k in self.features]))
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "features": self.features, "feature_version": FEATURE_VERSION, "trees": self.trees,
+        return {"kind": self.kind, "features": self.features, "feature_version": self.feature_version, "trees": self.trees,
                 "info": self.info}
 
     def save(self, path: str | Path) -> None:
@@ -317,6 +319,7 @@ class TreeModel:
         try:
             d = json.loads(path.read_text())
             m = cls(d["features"], d["trees"], d.get("info"))
+            m.feature_version = d.get("feature_version", 1)
         except (OSError, ValueError, KeyError):
             return None
         ok = d.get("kind") == cls.kind and m.features == FEATURES and d.get("feature_version", 1) == FEATURE_VERSION
