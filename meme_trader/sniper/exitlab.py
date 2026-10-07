@@ -39,8 +39,12 @@ MAX_OPEN_S = 1800
 TP10 = {"all out at +10% net": {"_tp_net": 10}, "trim 25% at +10% net": {"_trim_net": (10, 0.25)}}
 TX_COST_SOL = 0.000005                              # a transaction's base fee; its priority fee comes from the config
 ACCOUNTING = 2                                      # the cash-ledger version recorded in each row
-LAB_SELL_FAIL_PCT = 10                              # late-landing variants: a sell attempt fails this often (assumed)
+# late-landing variants: a sell attempt LANDS AND FAILS this often, paying its network fee - a declared assumption,
+# not a measured rate (no trustworthy public figure exists for this route; a tenth review). It isn't a model of
+# dropped, unsent or preflight-rejected transactions, which pay nothing on chain.
+LAB_SELL_FAIL_PCT = 10
 MAX_SELL_TRIES = 20                                 # then the shadow's exit never filled: the tokens count as lost
+END_FRESH_S = 60                                    # an after-exit end mark at most this old at the horizon
 
 
 def _late_landing(delay_s: float) -> dict[str, dict]:
@@ -324,29 +328,64 @@ class ExitLab:
         self.done.append(row)
         if price and why not in ("30 min limit",) and now - sh["opened"] < MAX_OPEN_S:   # follow what it gave up
             self.after.append({"mint": pos.mint, "variant": sh["variant"], "kind": sh["kind"], "opened": sh["opened"],
-                               "closed": now, "exit_price": price, "peak": price, "low": price, "last": price})
+                               "closed": now, "exit_price": price, "horizon": sh["opened"] + MAX_OPEN_S,
+                               "peak": price, "low": price, "last": price, "last_t": now, "last_known": True,
+                               "observations": 0, "unknown": 0})
         if self.on_close is not None:
             self.on_close(row)
         self._write(row)
 
     def _follow_after(self, tokens: dict, now: float) -> None:
-        """After an early exit, the coin's price to the 30-minute mark, relative to the exit price."""
+        """After an early exit, the coin's price up to the 30-minute horizon (a tenth review's schema, 2026-10-07):
+        - in-window peak and low use only observations at or before the horizon;
+        - the end mark is the last valid price at or before the horizon, if it's at most END_FRESH_S old there and
+          the coin's price was known then; an unknown price AT the horizon, a stale last price, or a coin no longer
+          tracked leaves the end unmeasured, with the reason. Nothing stale is carried forward as a measured end;
+        - the first price seen AFTER the horizon is reported apart, with its delay (horizon slippage, not upside
+          inside the window).
+        Marks, not executable sizes: a missed-upside diagnostic only."""
         keep = []
         for g in self.after:
             s = tokens.get(g["mint"])
-            if s is not None and s.price_known:
-                px = s.curve.price
-                g["peak"], g["low"], g["last"] = max(g["peak"], px), min(g["low"], px), px
-            if now - g["opened"] < MAX_OPEN_S and s is not None:
-                keep.append(g)
-                continue
-            x = g["exit_price"]
-            self._write({"record": "after_exit", "mint": g["mint"], "variant": g["variant"], "kind": g["kind"],
-                         "opened": g["opened"], "closed": g["closed"], "until": now, "followed_to_end": s is not None,
-                         "peak_after_pct": round((g["peak"] / x - 1) * 100, 2),
-                         "low_after_pct": round((g["low"] / x - 1) * 100, 2),
-                         "end_after_pct": round((g["last"] / x - 1) * 100, 2)})
+            known = s is not None and s.price_known
+            px = s.curve.price if known else None
+            if now <= g["horizon"]:
+                if known:
+                    g["peak"], g["low"] = max(g["peak"], px), min(g["low"], px)
+                    g["last"], g["last_t"] = px, now
+                    g["observations"] += 1
+                else:
+                    g["unknown"] += 1
+                g["last_known"] = known
+                if now < g["horizon"] and s is not None:
+                    keep.append(g)
+                    continue
+            self._write(self._after_row(g, now, s, px))
         self.after = keep
+
+    def _after_row(self, g: dict, now: float, s, px: float | None) -> dict:
+        x = g["exit_price"]
+        age = g["horizon"] - g["last_t"]
+        if s is None and now < g["horizon"]:
+            missing = "the coin is no longer tracked"
+        elif now == g["horizon"] and px is None:
+            missing = "price unknown at the horizon"
+        elif not g["last_known"]:
+            missing = "price unknown at the last observation before the horizon"
+        elif age > END_FRESH_S:
+            missing = f"last price {age:.0f} s before the horizon (stale)"
+        else:
+            missing = ""
+        end = None if missing else round((g["last"] / x - 1) * 100, 2)
+        late = now > g["horizon"] and px is not None
+        return {"record": "after_exit", "mint": g["mint"], "variant": g["variant"], "kind": g["kind"],
+                "opened": g["opened"], "closed": g["closed"], "horizon": g["horizon"], "until": now,
+                "followed_to_end": not missing, "missing_reason": missing,
+                "peak_after_pct": round((g["peak"] / x - 1) * 100, 2), "low_after_pct": round((g["low"] / x - 1) * 100, 2),
+                "end_after_pct": end, "end_price_age_s": round(age, 3), "observations": g["observations"],
+                "unknown_observations": g["unknown"],
+                "after_horizon": {"t": now, "delay_s": round(now - g["horizon"], 3),
+                                  "pct": round((px / x - 1) * 100, 2)} if late else None}
 
     def _write(self, row: dict) -> None:
         if self.path:

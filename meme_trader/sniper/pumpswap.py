@@ -21,6 +21,7 @@ observer must still check owners, account relationships, freshness and the conte
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import struct
 
@@ -42,12 +43,20 @@ POOL_LEN = 270                                       # the 1.20.0 IDL's layout, 
 # shorter than the current layout; read the missing trailing fields as 0 / false"): after coin_creator, then each
 # appended field. A length between these is a truncated account, never an old layout.
 POOL_ENDS = (243, 244, 245, 261, 269, 270, 271)
+# The known prefix: pump.fun's public IDL at commit cb188ce (2026-09-29) ends at is_holder_reward (byte 270); the npm
+# SDK 1.20.0 IDL at can_edit_creator_fee. Bytes past 271 are undocumented (a tenth review found no newer source).
+POOL_LAYOUT = "pump-public-docs idl@cb188ce: 271-byte known prefix"
 I128 = (-(1 << 127), (1 << 127) - 1)
 U64 = (1 << 64) - 1
 
 
 class QuoteError(ValueError):
-    """The SDK would throw (its message), or an input is refused before quoting."""
+    """The SDK would throw (its message; code "sdk"), or the checked layer refuses: an unqualified input ("input"),
+    a state outside the protocol's documented bounds ("state"), or an output that isn't executable ("output")."""
+
+    def __init__(self, message: str, code: str = "sdk"):
+        super().__init__(message)
+        self.code = code
 
 
 def _tdiv(a: int, b: int) -> int:
@@ -138,30 +147,17 @@ def parse_fee_config(d: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- quotes (buy.ts, sell.ts)
-def _check(amount: int, base_reserve: int, quote_reserve: int, virtual: int, slippage: float) -> int:
-    """Refusals the SDK leaves to its caller (its own throws are kept separately below)."""
-    if not isinstance(amount, int) or amount <= 0 or amount > U64:
-        raise QuoteError("amount must be a positive u64")
-    if not I128[0] <= virtual <= I128[1]:
-        raise QuoteError("virtual quote reserves out of i128 range")
-    if base_reserve < 0 or quote_reserve < 0 or base_reserve > U64 or quote_reserve > U64:
-        raise QuoteError("reserves must be u64")
-    if not 0 <= slippage < 100:
-        raise QuoteError("slippage must be in [0, 100)")
+# Two layers (a tenth review, 2026-10-07). `raw_*` is the SDK's integer math exactly, awkward outputs included: a
+# 1-lamport buy "receives" -20 atoms in the SDK, and so here. The unprefixed functions are the CHECKED layer, the only
+# one an observer or executor may use: qualified inputs, protocol bounds, executable outputs - or a QuoteError.
+def raw_buy_base_input(base: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
+                       virtual: int = 0, coin_creator: str = "x") -> dict:
+    """SDK buyBaseInput: buy exactly `base` atoms - the quote it costs (internal, with fees, the slippage maximum)."""
     if base_reserve == 0 or quote_reserve == 0:
         raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
-    eff = quote_reserve + virtual
-    if eff <= 0:
-        raise QuoteError("effective quote reserves are not positive")
-    return eff
-
-
-def buy_base_input(base: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                   virtual: int = 0, coin_creator: str = "x") -> dict:
-    """Buy exactly `base` atoms: the quote it costs (internal, with fees, and the slippage maximum)."""
-    eff = _check(base, base_reserve, quote_reserve, virtual, slippage)
     if base > base_reserve:
         raise QuoteError("Cannot buy more base tokens than the pool reserves.")
+    eff = quote_reserve + virtual
     if base_reserve - base == 0:
         raise QuoteError("Pool would be depleted; denominator is zero.")
     q_in = ceil_div(eff * base, base_reserve - base)
@@ -170,10 +166,12 @@ def buy_base_input(base: int, slippage: float, base_reserve: int, quote_reserve:
     return {"internalQuoteAmount": q_in, "uiQuote": total, "maxQuote": _tdiv(total * _slip(slippage, 1), 10 ** 9)}
 
 
-def buy_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                    virtual: int = 0, coin_creator: str = "x") -> dict:
-    """Spend `quote` atoms (fees included): the base atoms received."""
-    eff = _check(quote, base_reserve, quote_reserve, virtual, slippage)
+def raw_buy_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
+                        virtual: int = 0, coin_creator: str = "x") -> dict:
+    """SDK buyQuoteInput: spend `quote` atoms (fees included) - the base atoms received."""
+    if base_reserve == 0 or quote_reserve == 0:
+        raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
+    eff = quote_reserve + virtual
     c_bps = 0 if coin_creator == DEFAULT_KEY else fees["creator"]
     effective = _tdiv(quote * 10_000, 10_000 + fees["lp"] + fees["protocol"] + c_bps)
     with_fees = effective + fee(effective, fees["lp"]) + fee(effective, fees["protocol"]) + \
@@ -187,10 +185,12 @@ def buy_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserv
             "maxQuote": _tdiv(quote * _slip(slippage, 1), 10 ** 9)}
 
 
-def sell_base_input(base: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                    virtual: int = 0, coin_creator: str = "x") -> dict:
-    """Sell exactly `base` atoms: the quote received after fees (and the slippage minimum)."""
-    eff = _check(base, base_reserve, quote_reserve, virtual, slippage)
+def raw_sell_base_input(base: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
+                        virtual: int = 0, coin_creator: str = "x") -> dict:
+    """SDK sellBaseInput: sell exactly `base` atoms - the quote received after fees (and the slippage minimum)."""
+    if base_reserve == 0 or quote_reserve == 0:
+        raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
+    eff = quote_reserve + virtual
     out = _tdiv(eff * base, base_reserve + base)
     lp, proto = fee(out, fees["lp"]), fee(out, fees["protocol"])
     creator = 0 if coin_creator == DEFAULT_KEY else fee(out, fees["creator"])
@@ -202,12 +202,14 @@ def sell_base_input(base: int, slippage: float, base_reserve: int, quote_reserve
     return {"uiQuote": final, "minQuote": _tdiv(final * _slip(slippage, -1), 10 ** 9), "internalQuoteAmountOut": out}
 
 
-def sell_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                     virtual: int = 0, coin_creator: str = "x") -> dict:
-    """Receive `quote` atoms after fees: the base atoms to sell (an INVERSE quote: see `forward_sell_check`)."""
-    eff = _check(quote, base_reserve, quote_reserve, virtual, slippage)
+def raw_sell_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
+                         virtual: int = 0, coin_creator: str = "x") -> dict:
+    """SDK sellQuoteInput: receive `quote` atoms after fees - the base to sell (an INVERSE quote: forward-check it)."""
+    if base_reserve == 0 or quote_reserve == 0:
+        raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
     if quote > quote_reserve:
         raise QuoteError("Cannot receive more quote tokens than the pool quote reserves.")
+    eff = quote_reserve + virtual
     c_bps = 0 if coin_creator == DEFAULT_KEY else fees["creator"]
     raw = ceil_div(quote * 10_000, 10_000 - (fees["lp"] + fees["protocol"] + c_bps))
     if raw >= eff:
@@ -220,10 +222,81 @@ def forward_sell_check(quote: int, slippage: float, base_reserve: int, quote_res
                        virtual: int = 0, coin_creator: str = "x") -> dict:
     """Does selling the inverse quote's base amount actually net `quote`? (The SDK's component rounding can leave it
     a few atoms short: never rely on the inverse amount, or a minimum receive derived from it, without this.)"""
-    inv = sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
-    fwd = sell_base_input(inv["base"], slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    inv = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    fwd = raw_sell_base_input(inv["base"], slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
     return {"output": fwd, "targetQuote": quote, "meetsTarget": fwd["uiQuote"] >= quote,
             "shortfallAtoms": max(0, quote - fwd["uiQuote"])}
+
+
+def _atoms(x, what: str) -> int:
+    if isinstance(x, bool) or not isinstance(x, int):
+        raise QuoteError(f"{what} must be an integer number of atoms", "input")
+    return x
+
+
+def _qualify(amount, slippage, base_reserve, quote_reserve, fees, virtual) -> int:
+    """Inputs an observer may quote on: integer atoms (a bool isn't one), u64 amounts and vault balances, an i128
+    virtual reserve, valid fee rates, and effective quote reserves in (0, u64] - the protocol's documented
+    guarantee for real pool state, so anything outside it is invalid state, not a quote."""
+    if _atoms(amount, "amount") <= 0 or amount > U64:
+        raise QuoteError("amount must be a positive u64", "input")
+    for v, what in ((base_reserve, "base reserve"), (quote_reserve, "quote vault")):
+        if not 0 < _atoms(v, what) <= U64:
+            raise QuoteError(f"{what} must be a positive u64", "state")
+    if not I128[0] <= _atoms(virtual, "virtual quote reserves") <= I128[1]:
+        raise QuoteError("virtual quote reserves out of i128 range", "state")
+    if isinstance(slippage, bool) or not isinstance(slippage, (int, float)) or not 0 <= slippage < 100:
+        raise QuoteError("slippage must be in [0, 100)", "input")
+    if not isinstance(fees, dict) or set(fees) < {"lp", "protocol", "creator"} or \
+            any(isinstance(fees[k], bool) or not isinstance(fees[k], int) or fees[k] < 0
+                for k in ("lp", "protocol", "creator")) or fees["lp"] + fees["protocol"] + fees["creator"] >= 10_000:
+        raise QuoteError("fee rates must be non-negative integer bps totalling under 10000", "input")
+    eff = quote_reserve + virtual
+    if not 0 < eff <= U64:
+        raise QuoteError(f"effective quote reserves {eff} outside (0, u64]: invalid pool state", "state")
+    return eff
+
+
+def _executable(out: dict, positive: tuple, bounded: tuple) -> dict:
+    for k in positive:
+        if out[k] <= 0:
+            raise QuoteError(f"{k} {out[k]} is not a positive amount: not executable", "output")
+    for k in bounded:
+        if not 0 <= out[k] <= U64:
+            raise QuoteError(f"{k} {out[k]} outside u64", "output")
+    return out
+
+
+def buy_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
+    """Checked buyBaseInput."""
+    _qualify(base, slippage, base_reserve, quote_reserve, fees, virtual)
+    out = raw_buy_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    return _executable(out, ("internalQuoteAmount", "uiQuote", "maxQuote"), ("internalQuoteAmount", "uiQuote", "maxQuote"))
+
+
+def buy_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
+    """Checked buyQuoteInput."""
+    _qualify(quote, slippage, base_reserve, quote_reserve, fees, virtual)
+    out = raw_buy_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    return _executable(out, ("base", "internalQuoteWithoutFees", "maxQuote"), ("base", "internalQuoteWithoutFees", "maxQuote"))
+
+
+def sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
+    """Checked sellBaseInput."""
+    _qualify(base, slippage, base_reserve, quote_reserve, fees, virtual)
+    out = raw_sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    return _executable(out, ("uiQuote", "internalQuoteAmountOut"), ("uiQuote", "minQuote", "internalQuoteAmountOut"))
+
+
+def sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
+    """Checked sellQuoteInput: also refused when selling its base amount wouldn't actually net `quote`."""
+    _qualify(quote, slippage, base_reserve, quote_reserve, fees, virtual)
+    out = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    _executable(out, ("internalRawQuote", "base"), ("internalRawQuote", "base", "minQuote"))
+    chk = forward_sell_check(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    if not chk["meetsTarget"]:
+        raise QuoteError(f"selling {out['base']} atoms nets {chk['shortfallAtoms']} atoms short of {quote}", "output")
+    return out
 
 
 # --------------------------------------------------------------------------- accounts
@@ -259,7 +332,8 @@ def decode_pool(data: bytes) -> dict:
             "lp_supply": lp_supply, "coin_creator": key(211), "is_mayhem_mode": flag(243),
             "is_cashback_coin": flag(244), "virtual_quote_reserves": virtual, "creator_fee_bps": creator_fee_bps,
             "can_edit_creator_fee": flag(269), "is_holder_reward": flag(270), "bytes": n,
-            "undocumented_tail": any(data[271:])}
+            "layout": POOL_LAYOUT, "undocumented_tail": any(data[271:]),
+            "tail_sha256": hashlib.sha256(data[271:]).hexdigest() if any(data[271:]) else ""}
 
 
 # Token-2022 mint extensions that don't change what a transfer moves or costs: the metadata pointer (18) and the

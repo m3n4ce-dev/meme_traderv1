@@ -36,6 +36,9 @@ COMMITMENT = "confirmed"
 MAX_RESPONSE_S = 5.0                 # a quote is fresh only if the read came back this fast (proposed; to calibrate)
 MAX_SLOT_LAG = 2                     # ... and its state is at most this many slots behind the feed's newest
 RETRY_EVERY_S, RETRY_S = 30, 900     # an exit with no valid quote: retried this often, for this long (registered)
+# refusals a retry can't change (a pool's quote asset, its mint's extensions, its layout, its accounts' owners):
+# final at once, not retried every 30 s for 15 minutes
+PERMANENT = {"non_sol_quote", "mint_extensions", "unsupported_layout", "wrong_owner", "vault_mismatch"}
 ENTRY_GRACE_S = 60                   # an entry quote is tried for this long after its decision, then skipped
 TX_COST_SOL = 0.001005               # one transaction's priority + base fee (the paper bot's), for net P&L
 
@@ -212,8 +215,13 @@ class Quoter:
                 out = fn(int(amount), 0, base["amount"], quote["amount"], fees, p["virtual_quote_reserves"],
                          p["coin_creator"])
             except ps.QuoteError as ex:
-                raise Reject("insufficient_liquidity" if "reserve" in str(ex) else "quote_error", str(ex)) from None
+                code = "insufficient_liquidity" if "Insufficient real quote" in str(ex) else \
+                    {"state": "invalid_state", "output": "unexecutable_output"}.get(ex.code, "quote_error")
+                raise Reject(code, str(ex)) from None
             rec["output"] = str(out["base"] if side == "buy" else out["uiQuote"])
+            # qualified: the whole account is documented. A pool with undocumented bytes past the known prefix is
+            # quoted from that prefix and labelled - its layout risk stays explicit (a tenth review)
+            rec.update(qualified=not p["undocumented_tail"], layout=p["layout"], tail_sha256=p["tail_sha256"])
             if rec["response_s"] > MAX_RESPONSE_S:
                 raise Reject("slow_response", f"{rec['response_s']} s")
             if rec["ref_slot"] and slot < rec["ref_slot"] - MAX_SLOT_LAG:
@@ -300,7 +308,7 @@ class QuoteBook:
                                              json.dumps({**meta, "exit": name, "entry_lamports": str(amount)}), t))
                 else:
                     nxt = t + (RETRY_EVERY_S if kind == "exit" else 10)
-                    if nxt <= deadline:
+                    if nxt <= deadline and rec["reason"] not in PERMANENT:
                         self.db.execute("UPDATE jobs SET due = ?, tries = ? WHERE id = ?", (nxt, tries + 1, key))
                     else:
                         self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
@@ -331,7 +339,9 @@ class QuoteBook:
         for key, kind, state, tries, result, meta in rows:
             m, r = json.loads(meta or "{}"), json.loads(result or "{}")
             arm = "control" if m.get("control") else "signal"
-            cov[(kind, arm)][state if state == "ok" else f"{state}: {r.get('reason', '?')}"] += 1
+            label = f"{state}: {r.get('reason', '?')}" if state != "ok" else \
+                "ok" if r.get("qualified", True) else "ok, prefix-only (undocumented pool bytes)"
+            cov[(kind, arm)][label] += 1
             first_ok[(kind, arm)] += state == "ok" and tries == 1
             if kind == "entry" and state == "ok":
                 entries[m.get("follow")] = r

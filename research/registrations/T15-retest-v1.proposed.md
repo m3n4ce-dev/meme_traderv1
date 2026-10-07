@@ -69,6 +69,36 @@ On established PumpSwap pools, does demand that survives a pullback, entered onl
 2. **Feasibility first.** Five or more distinct net-buying groups in each of two consecutive minutes, eight across both, and three new ones may be rare on 2-day-old pools: the T9 replay saw ~35 breakouts a day across the universe. Before freezing, a **no-outcome feasibility pass** should count how many episodes reach each state per day: breakout, retest, recovery and persistence. If almost none reach DECIDE, the observer can't produce a verdict in any reasonable window, and the thresholds need a decision **before** any outcome is seen, not after.
 3. **The clustering it needs is only partly built.** `funding.py` resolves first funders for a coin's early buyers, not a frozen entity map for arbitrary wallets on established pools. Building that, and freezing it, is part of the prerequisite work.
 
+## Feasibility qualification (the tenth review's proposal; needs the owner's approval)
+
+**Purpose:** an engineering gate on opportunity flow, not a power or efficacy threshold.
+
+**Freeze first,** before a future window of **14 complete consecutive UTC days**:
+- the universe and the selection dates;
+- the entity and wallet artifacts;
+- the eligibility rules and the quote contract;
+- the code.
+
+**During the window, only counts are shown:** opportunities, states, availability and capacity. No returns, winners or best exits.
+- Episodes are distinct and eligible, one per pool per 2 hours.
+- Quiet days stay in the denominator, and the clock never restarts.
+
+**The binding gate is the final stage:** at least **42 qualified, after-delay executable entry candidates in the 14 days, on at least 10 of those days.**
+- **Where 42 comes from:** 3 a day is the flow needed for about 200 accepted comparisons over a 90-day study at an assumed 80% capacity acceptance (200 / (90 × 0.8) = 2.78, rounded up). The 10-day rule is a declared concentration guard.
+- **For a 60-day study** the same target needs **5 a day.**
+- **Upstream stages are recorded, not gated:** every count and conversion, to find the bottleneck. Earlier stages contain the final one, so there are no invented funnel multiples.
+
+**Also required:**
+- ≥ 95% of the window's observation time covered;
+- ≥ 95% completeness of the required decision inputs over the frozen opportunity population;
+- every accepted decision meeting the safety, quote and identity rules;
+- unresolved entity relationships never counted as independent.
+
+**Outcomes:**
+- **Missing artifacts** mean the status is **NOT READY**, not "zero opportunities".
+- **Below the floor** means **infeasible for this version, target and window**, not "unprofitable".
+- **Never weaken a condition after seeing outcomes.** A new version needs a new freeze and a new window.
+
 ## Prerequisites
 
 - the quote observer, qualified;

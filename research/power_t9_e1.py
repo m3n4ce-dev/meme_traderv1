@@ -4,6 +4,13 @@ the paper runner (meme_trader/sniper/t9_portfolio.py).
     python research/power_t9_e1.py [--sims 150] [--null-sims 500] [--boots 400] [--hurdle 1.0] [--procs 8]
                                    [--json out.json]                                                 (needs numpy)
 
+Version 5 (a tenth review, 2026-10-07). Version 4 moved a late fill's price by exp(sigma Z): with zero log drift
+that has a POSITIVE expected price drift (+2.2% for a 15-minute delay), so even its "no edge" process gained by being
+late. The late multiplier is now centered, 1 + sigma Z (a gross-price martingale whose Z = 0 path is no move); v4's
+process and its mirror run as labelled sensitivities on a subset fixed in `cells`. The late-fill share now counts the exits the
+account executed (not every quote opportunity), and each cell reports both arms' signals, entries, skips by reason,
+measured and impaired exits. Version 4's output is kept, labelled historical.
+
 Version 4 (a ninth review, 2026-10-07). Version 3 found that SOME retry within the window got a quote, then credited
 the exit at its intended time - inside the very outage that delayed it - at the intended return; a failed-then-
 recovered exit also skipped the failed-exit risk reservation; unquotable pools were drawn from the trade's eventual
@@ -41,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from meme_trader.sniper import t9_portfolio as tp  # noqa: E402
 from meme_trader.sniper.t9_portfolio import BANK, DELAY_S, HOLD_S, MAX_OPEN, RETRY_S, SIZE, Portfolio  # noqa: E402
 
-__all__ = ["one_test", "one_test_v4", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
+__all__ = ["one_test", "one_test_v4", "one_test_v5", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
 
 SEED = 20261007
 EPISODES_PER_DAY = 35.4              # the corrected replay, primary-like rule, ~3.1 days of coverage
@@ -164,18 +171,43 @@ def _arm_quotes(rng, starts, ends, t_entry: np.ndarray, ret: np.ndarray, profile
     return entry_ok, first
 
 
-def _late_return(r: np.ndarray, extra: float, late_s: np.ndarray, z: np.ndarray) -> np.ndarray:
-    """A net return filled late_s after its due time: the gross price moved on by a draw of the hourly spread."""
+DRIFT = {"centered": "1 + sigma clip(Z, +-c), c = min(4.5, 0.95 / sigma): a symmetric clip keeps the mean exactly 1, "
+                     "the multiplier positive, and Z = 0 no move (the base case)",
+         "positive": "exp(sigma Z): version 4's process, mean exp(sigma^2 / 2) > 1 (+2.2% over 15 min)",
+         "negative": "exp(sigma Z - sigma^2): its mirror, mean exp(-sigma^2 / 2) < 1"}
+LATE_CLIP = 4.5
+
+
+def _late_multiplier(sigma: np.ndarray, z: np.ndarray, drift: str) -> np.ndarray:
+    if drift == "centered":
+        with np.errstate(divide="ignore"):
+            c = np.minimum(LATE_CLIP, 0.95 / sigma)
+        return 1 + sigma * np.clip(z, -c, c)
+    if drift == "positive":
+        return np.exp(sigma * z)
+    if drift == "negative":
+        return np.exp(sigma * z - sigma ** 2)
+    raise ValueError(drift)
+
+
+def _late_return(r: np.ndarray, extra: float, late_s: np.ndarray, z: np.ndarray, drift: str = "centered") -> np.ndarray:
+    """A net return filled late_s after its due time: the gross price moved on by a draw of the hourly spread,
+    sigma = LATE_SD x sqrt(late_s / 3600). Centered (the base), its expectation is the on-time return, so the delay
+    itself adds no edge, and a Z of 0 leaves the price where it was. Version 4 used exp(sigma Z), which adds positive
+    expected drift (a tenth review, 2026-10-07); it and its mirror run as labelled sensitivities, never chosen
+    after the results. (The lognormal centering exp(sigma Z - sigma^2/2) would also be mean-preserving, but moves
+    the Z = 0 path down by sigma^2/2; at sigma <= 0.21 the two spreads differ by under 0.1%.)"""
     gross = 1 + r + FEE + extra
-    return gross * np.exp(LATE_SD * np.sqrt(np.maximum(late_s, 0) / 3600) * z) - 1 - FEE - extra
+    sigma = LATE_SD * np.sqrt(np.maximum(late_s, 0) / 3600)
+    return gross * _late_multiplier(sigma, z, drift) - 1 - FEE - extra
 
 
 def _run_arm(port: Portfolio, t_sig: np.ndarray, coin: list, r: np.ndarray, entry_ok: np.ndarray,
-             first: np.ndarray, extra: float, z: np.ndarray) -> None:
+             first: np.ndarray, extra: float, z: np.ndarray, drift: str = "centered") -> None:
     """One arm's signals through its account, in time order: skipped without an entry quote; measured at the first
     valid exit quote's time and return; impaired when none came within the retries."""
     due = t_sig + DELAY_S + HOLD_S
-    r_fill = np.where(first > due, _late_return(r, extra, first - due, z), r)
+    r_fill = np.where(first > due, _late_return(r, extra, first - due, z, drift), r)
     for i in range(len(t_sig)):
         if not entry_ok[i]:
             continue
@@ -195,8 +227,8 @@ def _bootstrap(rng, x: np.ndarray, boots: int, block: int) -> np.ndarray:
     return x[idx].mean(1)
 
 
-def one_test_v4(rng, days: int, win_frac: float, magnitude: float, ordinary: str, profile: str, extra: float,
-                hurdle: float, boots: int) -> dict:
+def one_test_v5(rng, days: int, win_frac: float, magnitude: float, ordinary: str, profile: str, extra: float,
+                hurdle: float, boots: int, drift: str = "centered") -> dict:
     mu, sd = ORDINARY[ordinary]
     end = days * 86400
     p_win = min(WIN_EPISODES_PER_DAY * win_frac / EPISODES_PER_DAY, 1.0)
@@ -225,8 +257,8 @@ def one_test_v4(rng, days: int, win_frac: float, magnitude: float, ordinary: str
     s_entry, s_first = _arm_quotes(rng, starts, ends, t_entry, r_sig, profile)
     c_entry, c_first = _arm_quotes(rng, starts, ends, t_entry, r_ctl, profile)
     port, ctl = Portfolio(end), Portfolio(end)
-    _run_arm(port, t_sig, coin, r_sig, s_entry, s_first, extra, z_sig)
-    _run_arm(ctl, t_sig, coin, r_ctl, c_entry, c_first, extra, z_ctl)
+    _run_arm(port, t_sig, coin, r_sig, s_entry, s_first, extra, z_sig, drift)
+    _run_arm(ctl, t_sig, coin, r_ctl, c_entry, c_first, extra, z_ctl, drift)
     port.close()
     ctl.close()
     s_day, c_day = np.array(port.daily(days)), np.array(ctl.daily(days))
@@ -234,11 +266,15 @@ def one_test_v4(rng, days: int, win_frac: float, magnitude: float, ordinary: str
     c_cov = ctl.measured / ctl.attempted if ctl.attempted else 0.0
     total, ctl_total = float(s_day.sum()), float(c_day.sum())
     assert abs(total - (port.cash - BANK)) < 1e-6          # the primary series reconciles to cash
-    late = [(first - (t + DELAY_S + HOLD_S)) for t, first, ok in zip(t_sig, s_first, s_entry) if ok and first > 0]
     out = {"total": total, "coverage": cov, "control_coverage": c_cov, "observed": observed,
            "control_total": ctl_total, "measured_only_total": float(sum(port.measured_daily(days))),
            "attempted": port.attempted, "entry_skipped": int((~s_entry).sum()),
-           "late_fill_share": float(np.mean([x > 0 for x in late])) if late else 0.0}
+           # of the exits the account actually executed (not every quote opportunity: a tenth review)
+           "late_fill_share": port.late_exits / port.exits if port.exits else 0.0,
+           "arms": {name: {"signals": n, "no_entry_quote": int((~ok).sum()), "attempted": a.attempted,
+                           "skipped": dict(a.skips), "measured": a.measured, "impaired": a.trapped,
+                           "executed_exits": a.exits, "late_exits": a.late_exits}
+                    for name, a, ok in (("signal", port, s_entry), ("control", ctl, c_entry))}}
     invalid = observed < 0.8 or cov < 0.8 or c_cov < 0.8
     for name, block in (("verdict", 1), ("verdict_block3", 3)):
         m = _bootstrap(rng, s_day, boots, block)
@@ -248,6 +284,11 @@ def one_test_v4(rng, days: int, win_frac: float, magnitude: float, ordinary: str
                      "pass" if lo > 0 and dlo > 0 and total >= hurdle else
                      "fail" if hi <= 0 or total < ctl_total else "inconclusive")
     return out
+
+
+def one_test_v4(rng, days, win_frac, magnitude, ordinary, profile, extra, hurdle, boots) -> dict:
+    """Version 4's signature (the reviewer's contracts call it): the version-5 procedure, centered drift."""
+    return one_test_v5(rng, days, win_frac, magnitude, ordinary, profile, extra, hurdle, boots)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> list:
@@ -264,12 +305,15 @@ GRID = ("A1", "A2", "A3", "A4", "A5")
 
 
 def cells(sims: int, null_sims: int) -> list[dict]:
+    """Version 5: version 4's frozen grid with the centered late-price process (the base), plus the drift
+    sensitivities on a fixed subset declared here before running: the nulls, and a quarter / half / the replay's
+    winner rate with flat or pessimistic ordinary trades, at A2-A4, +0 cost, 90 days."""
     out = []
     for profile in GRID + ("A3 informative",):
         for extra in (0.0, 0.015):
             for days in (60, 90, 120):
                 out.append(dict(scenario="null", win_frac=0.0, magnitude=1.0, ordinary="flat", profile=profile,
-                                extra=extra, days=days, sims=null_sims))
+                                extra=extra, days=days, sims=null_sims, drift="centered"))
     for win_frac, name in ((0.125, "eighth"), (0.25, "quarter"), (0.5, "half"), (1.0, "replay")):
         for magnitude in (1.0, 0.5):
             for ordinary in ("pessimistic", "flat", "mild"):
@@ -277,23 +321,33 @@ def cells(sims: int, null_sims: int) -> list[dict]:
                     for extra in (0.0, 0.015):
                         for days in (60, 90, 120):
                             out.append(dict(scenario=name, win_frac=win_frac, magnitude=magnitude, ordinary=ordinary,
-                                            profile=profile, extra=extra, days=days, sims=sims))
+                                            profile=profile, extra=extra, days=days, sims=sims, drift="centered"))
                 for days in (60, 90, 120):                    # the informative-missingness stress, at +0 cost
                     out.append(dict(scenario=name, win_frac=win_frac, magnitude=magnitude, ordinary=ordinary,
-                                    profile="A3 informative", extra=0.0, days=days, sims=sims))
+                                    profile="A3 informative", extra=0.0, days=days, sims=sims, drift="centered"))
     for ordinary in ("pessimistic", "mild"):                  # no winners at all: ordinary trades only
         for profile in GRID:
             for days in (60, 90, 120):
                 out.append(dict(scenario="no winners", win_frac=0.0, magnitude=1.0, ordinary=ordinary,
-                                profile=profile, extra=0.0, days=days, sims=sims))
+                                profile=profile, extra=0.0, days=days, sims=sims, drift="centered"))
+    for drift in ("positive", "negative"):                    # the late-price drift sensitivities
+        for profile in GRID + ("A3 informative",):
+            for days in (60, 90, 120):
+                out.append(dict(scenario="null", win_frac=0.0, magnitude=1.0, ordinary="flat", profile=profile,
+                                extra=0.0, days=days, sims=null_sims, drift=drift))
+        for win_frac, name in ((0.25, "quarter"), (0.5, "half"), (1.0, "replay")):
+            for ordinary in ("pessimistic", "flat"):
+                for profile in ("A2", "A3", "A4"):
+                    out.append(dict(scenario=name, win_frac=win_frac, magnitude=1.0, ordinary=ordinary,
+                                    profile=profile, extra=0.0, days=90, sims=sims, drift=drift))
     return out
 
 
 def run_cell(args) -> dict:
     i, cell, hurdle, boots = args
     rng = np.random.default_rng(np.random.SeedSequence(SEED, spawn_key=(i,)))
-    res = [one_test_v4(rng, cell["days"], cell["win_frac"], cell["magnitude"], cell["ordinary"], cell["profile"],
-                       cell["extra"], hurdle, boots) for _ in range(cell["sims"])]
+    res = [one_test_v5(rng, cell["days"], cell["win_frac"], cell["magnitude"], cell["ordinary"], cell["profile"],
+                       cell["extra"], hurdle, boots, cell["drift"]) for _ in range(cell["sims"])]
     row = {**cell, "cell": i}
     n = len(res)
     for key in ("verdict", "verdict_block3"):
@@ -305,6 +359,17 @@ def run_cell(args) -> dict:
     for k in ("total", "measured_only_total", "coverage", "control_coverage", "observed", "control_total",
               "late_fill_share"):
         row["median_" + k] = round(float(np.median([r[k] for r in res])), 4)
+    arms = {}                                                 # summed over the cell's simulations, both arms
+    for r in res:
+        for name, a in r["arms"].items():
+            t = arms.setdefault(name, {"skipped": {}})
+            for k, v in a.items():
+                if k == "skipped":
+                    for why, n2 in v.items():
+                        t["skipped"][why] = t["skipped"].get(why, 0) + n2
+                else:
+                    t[k] = t.get(k, 0) + v
+    row["arms"] = arms
     return row
 
 
@@ -346,12 +411,12 @@ def main(argv=None) -> int:
         rows = [run_cell(j) for j in jobs]
     for r in rows:
         print(f"{r['scenario']:10} x{r['magnitude']:.1f} {r['ordinary']:11} {r['profile']:14} cost+{r['extra']:.3f} "
-              f"{r['days']:3}d: pass {r['pass']:.3f} {r['pass_ci95']} fail {r['fail']:.2f} inconcl "
+              f"{r['days']:3}d {r['drift']:8}: pass {r['pass']:.3f} {r['pass_ci95']} fail {r['fail']:.2f} inconcl "
               f"{r['inconclusive']:.2f} invalid {r['invalid']:.2f} | block3 pass {r['block3_pass']:.3f} | total "
               f"{r['median_total']:+.2f} SOL, coverage {r['median_coverage']:.3f}, observed {r['median_observed']:.3f}",
               flush=True)
     if a.json:
-        doc = {"version": 4, "seed": SEED, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell",
+        doc = {"version": 5, "seed": SEED, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell",
                "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle, **prov,
                "constants": {"bank": tp.BANK, "size": tp.SIZE, "max_open": tp.MAX_OPEN, "day_stop": tp.DAY_STOP,
                              "hold_s": tp.HOLD_S, "delay_s": tp.DELAY_S, "retry_s": tp.RETRY_S, "fee": FEE,
@@ -362,7 +427,7 @@ def main(argv=None) -> int:
                                                      "long outage h", "transient failure per attempt",
                                                      "unquotable pool"],
                              "grid": GRID, "informative": sorted(INFORMATIVE), "streak_s": STREAK_S,
-                             "late_sd_per_hour": LATE_SD},
+                             "late_sd_per_hour": LATE_SD, "late_drift": DRIFT, "late_clip": LATE_CLIP},
                "primary_statistic": "economic daily P&L (Portfolio.daily): measured exits + impairments at zero "
                                     "recovery and fees, on the day recognized; reconciles to cash",
                "verdict_rule": "INVALID if observed hours < 80% or either arm's coverage < 80%; PASS if the day bootstrap's 5th "
@@ -376,7 +441,7 @@ def main(argv=None) -> int:
                "availability_note": "declared profiles, not estimates: replace them with a quote observer's "
                                     "reason-coded logs",
                "rows": rows}
-        data = json.dumps(doc, indent=1)
+        data = json.dumps(doc, indent=1, default=lambda o: o.item() if hasattr(o, "item") else str(o))
         Path(a.json).write_text(data)
         Path(a.json + ".sha256").write_text(hashlib.sha256(data.encode()).hexdigest() + "  " + Path(a.json).name + "\n")
     return 0

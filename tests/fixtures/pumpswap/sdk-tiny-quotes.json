@@ -1,0 +1,33 @@
+{
+  "sdk": "1.20.0",
+  "dist_sha256": "1ede6b4184a808cf986cd20a89d7c7487c4623054065238c5b9656f6b7309547",
+  "rows": [
+    {
+      "quote": 1,
+      "rawSdkOutput": {
+        "base": "-20",
+        "internalQuoteWithoutFees": "0",
+        "maxQuote": "1"
+      },
+      "proposedCheckedPolicy": "reject nonpositive token output"
+    },
+    {
+      "quote": 2,
+      "rawSdkOutput": {
+        "base": "-40",
+        "internalQuoteWithoutFees": "-1",
+        "maxQuote": "2"
+      },
+      "proposedCheckedPolicy": "reject nonpositive token output"
+    },
+    {
+      "quote": 3,
+      "rawSdkOutput": {
+        "base": "-20",
+        "internalQuoteWithoutFees": "0",
+        "maxQuote": "3"
+      },
+      "proposedCheckedPolicy": "reject nonpositive token output"
+    }
+  ]
+}

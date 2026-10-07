@@ -77,6 +77,7 @@ class _Pair:
     unknown: str = ""                                  # why its accounting isn't exact: "" = it is
     forced: str = ""                                   # (a correction or an arrival that couldn't be replayed)
     last_ts: float = 0.0
+    boundary: list = field(default_factory=list)       # the folded events of the checkpoint's slot (its order context)
     checkpoint: int = 0                                # the newest slot folded into `start`: older arrivals can't be
                                                        # placed in order any more (a ninth review, 2026-10-07)
 
@@ -154,25 +155,34 @@ class LeaderBook:
     def _ident(t: Trade | None) -> tuple | None:
         return (t.signature, t.event_index) if t is not None and t.signature and t.event_index >= 0 else None
 
+    ORDER_UNPROVEN = "transactions in one slot, with a sell among them: their order isn't proven"
+
     @staticmethod
-    def _ambiguous(prev: Trade | None, t: Trade) -> str:
-        """Two different transactions in one slot, one of them a sell: (slot, arrival) doesn't prove their chain order
-        (the event index orders events inside one transaction, not transactions inside a slot)."""
-        if prev is None or not t.slot or prev.slot != t.slot or prev.signature == t.signature:
-            return ""
-        return "two transactions in one slot: their order isn't proven" if "sell" in (prev.side, t.side) else ""
+    def _slot_ambiguity(trades) -> str:
+        """Two or more transactions sharing a slot, any of whose events is a sell: (slot, arrival) doesn't prove the
+        transactions' order, and a sell's cost share depends on it (a ninth and tenth review). The whole slot counts:
+        a transaction that sells and then buys can't hide its sell behind its own buy. Buys alone commute. The event
+        index orders the events inside one transaction, never the transactions inside a slot."""
+        by: dict = {}
+        for t in trades:
+            if t is not None and t.slot:
+                g = by.setdefault(t.slot, [set(), False])
+                g[0].add(t.signature)
+                g[1] = g[1] or t.side == "sell"
+        return LeaderBook.ORDER_UNPROVEN if any(len(sigs) > 1 and sell for sigs, sell in by.values()) else ""
 
     def _rebuild(self, key: tuple[str, str]) -> dict:
-        """Replay the pair from its snapshot, in chain order: (slot, then arrival). Returns each event's sold fraction."""
+        """Replay the pair from its snapshot, in chain order: (slot, then arrival). Returns each event's sold fraction.
+        Unknown never becomes known here: the snapshot keeps the reasons of what was folded into it."""
         p = self.pairs[key]
         p.events.sort(key=lambda e: (e[2], e[0]))
         b = _Bag(**asdict(p.start))
-        n, why, fr, prev = list(p.start_n), p.start_unknown, {}, None
+        n, why, fr = list(p.start_n), p.start_unknown, {}
         for seq, t, _, _ in p.events:
             if t is not None:
                 fr[seq], w = self._step(b, n, t)
-                why = why or w or self._ambiguous(prev, t)
-                prev = t
+                why = why or w
+        why = why or self._slot_ambiguity([t for _, t, _, _ in p.events] + p.boundary)
         self.bags[key], p.n, p.unknown = b, n, p.forced or why
         return fr
 
@@ -216,13 +226,19 @@ class LeaderBook:
         """Past LEDGER_EVENTS, the oldest events move into the snapshot (they can't be corrected after that)."""
         p = self.pairs[key]
         p.events.sort(key=lambda e: (e[2], e[0]))
+        ambiguous = self._slot_ambiguity([t for _, t, _, _ in p.events] + p.boundary)
         while len(p.events) > LEDGER_EVENTS:
             seq, t, slot, ident = p.events.pop(0)
             if t is not None:
                 _, w = self._step(p.start, p.start_n, t)
                 p.start_unknown = p.start_unknown or w
+                if slot and slot > p.checkpoint:
+                    p.boundary = []                      # a newer checkpoint slot: its own context starts
+                if slot:
+                    p.boundary.append(t)
             p.checkpoint = max(p.checkpoint, slot or 0)
             self._forget(key, seq, ident)
+        p.start_unknown = p.start_unknown or ambiguous   # folding never turns an unknown order into a known one
 
     def _prune(self) -> None:
         """A flat bag with no event for PAIR_IDLE_S folds into its wallet's totals (fork corrections come in minutes).
@@ -248,7 +264,8 @@ class LeaderBook:
             frac = self._rebuild(key)[seq]
         else:                                                                 # in chain order: one more step
             frac, why = self._step(self.bags[key], p.n, t)
-            p.unknown = p.unknown or why or self._ambiguous(last[1], t)
+            same = [e[1] for e in p.events if e[2] == t.slot] + [b for b in p.boundary if b.slot == t.slot]
+            p.unknown = p.unknown or why or self._slot_ambiguity(same)
         if len(p.events) > LEDGER_EVENTS:
             self._fold(key)
         self._newest_ts = max(self._newest_ts, t.ts)
@@ -324,7 +341,7 @@ class LeaderBook:
                 "folded_ids": [[i[0], i[1], w] for i, w in list(self.folded_ids.items())[-5000:]],
                 "pairs": [{"wallet": k[0], "mint": k[1], "start": asdict(p.start), "start_n": p.start_n,
                            "start_unknown": p.start_unknown, "forced": p.forced, "last_ts": p.last_ts,
-                           "checkpoint": p.checkpoint,
+                           "checkpoint": p.checkpoint, "boundary": [asdict(t) for t in p.boundary],
                            "events": [[seq, tr(t), slot, list(ident) if ident else None]
                                       for seq, t, slot, ident in p.events]}
                           for k, p in self.pairs.items()]}
@@ -346,6 +363,7 @@ class LeaderBook:
             p.start, p.start_n = _Bag(**r["start"]), list(r["start_n"])
             p.start_unknown, p.forced, p.last_ts = r.get("start_unknown", ""), r.get("forced", ""), r.get("last_ts", 0.0)
             p.checkpoint = int(r.get("checkpoint", 0))
+            p.boundary = [Trade(**{k: v for k, v in t.items() if k in fields}) for t in r.get("boundary") or []]
             for ev in r.get("events") or []:
                 seq, t, slot = ev[:3]
                 tt = Trade(**{k: v for k, v in t.items() if k in fields}) if t else None
