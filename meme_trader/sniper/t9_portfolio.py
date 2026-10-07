@@ -47,6 +47,8 @@ class Portfolio:
         self.lost: dict[int, float] = defaultdict(float)         # UTC day -> risk losses (measured + impairments)
         self.impairments = 0.0                                   # SOL written off (stakes and their fees)
         self.attempted = self.measured = self.trapped = 0
+        self.exits = self.late_exits = 0                         # measured exits executed, and those filled late
+        self.skips: dict[str, int] = defaultdict(int)            # signals not entered, by reason
         self.trace: list | None = [] if trace else None
 
     # (names kept for callers: `realized` is the primary series; `conservative` its total)
@@ -84,6 +86,8 @@ class Portfolio:
             self.economic[day] += pnl
             self.measured_pnl[day] += pnl
             self.lost[day] += max(-pnl, 0.0)
+            self.exits += 1
+            self.late_exits += p["free_t"] > p["exit_t"]
             self._log("exit", p["free_t"], coin=p["coin"], pnl=round(pnl, 6), late_s=round(p["free_t"] - p["exit_t"], 3))
 
     def risk_used(self, t: float) -> float:
@@ -105,6 +109,7 @@ class Portfolio:
                "daily stop" if self.risk_used(t) >= self.day_stop - 1e-12 else
                "cash" if self.cash < self.size - 1e-12 else "")
         if why:
+            self.skips[why] += 1
             self._log("skip", t, coin=coin, why=why)
             return why
         exit_t = t + HOLD_S

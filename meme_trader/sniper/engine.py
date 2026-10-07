@@ -1988,79 +1988,103 @@ class Engine:
             with (DATA / f"trades-{time.strftime('%Y-%m-%d', time.gmtime(row['closed']))}.jsonl").open("a") as f:
                 f.write(json.dumps(row) + "\n")
 
+    CONTENT_TYPES = (str, str, (int, float), (int, float), (int, float), (int, float), (int, float), str, (int, float))
+
+    @classmethod
+    def _parse_content(cls, raw: str) -> tuple[tuple | None, str]:
+        """A Reconcile's decoded transaction content as proof: (the event's content, "") or (None, why it isn't proof).
+        Its shape is `tracker._content`'s: trader, side, sol, tokens, v_sol, v_tokens, new_balance, pool, mcap_sol."""
+        if not raw:
+            return None, ""
+        try:
+            x = json.loads(raw)
+        except (ValueError, TypeError):
+            return None, "content is not JSON"
+        if not isinstance(x, list) or len(x) != len(cls.CONTENT_TYPES) or x[1] not in ("buy", "sell") or \
+                any(isinstance(v, bool) or not isinstance(v, ty) for v, ty in zip(x, cls.CONTENT_TYPES)):
+            return None, "content has the wrong shape"
+        return tuple(x), ""
+
     def _on_reconcile(self, e: Reconcile) -> None:
         """The chain's answer for a conflicting trade event (live: from `_reconcile_forks`; replays: as recorded).
-        A confirmed answer, failed or not, is provisional: checked again until finalized. The strongest evidence per
-        event is also kept in a registry that outlives the coin's state (restarts, evicted coins), so a later weaker
-        answer can't count for more there either, and contradicting finalized answers keep the coin blocked."""
+        In order (a tenth review, 2026-10-07): validate the answer (a malformed or mismatched payload is never proof),
+        rank it against the evidence already accepted - in the coin's conflict, or in the registry that outlives it -
+        and only then derive the buy block, the retry state and the lifecycle record from what was ACCEPTED, never
+        from the newest delivery alone. A confirmed answer, failed or not, is provisional: checked again until
+        finalized. A status-only answer for a content conflict keeps bot buys blocked until the bytes are proved."""
         k = (e.signature, e.event_index)
-        level = e.status in ("confirmed", "finalized")
-        if level and not e.err and not e.content and self.feed.realtime:
-            # a status-only answer (the transaction couldn't be fetched or decoded): it places the event, but for a
-            # conflict of CONTENT that's an inference, so bot buys stay blocked until the bytes are verified (a ninth
-            # review, 2026-10-07). Replays of older recordings don't do this: they had no content lookups.
-            u = self.fork_unproved.setdefault(k, {"mint": e.mint, "since": self.now, "given_up": False})
-            u["mint"] = e.mint
-        elif level:
-            self.fork_unproved.pop(k, None)
-        if e.status == "finalized" and k in self.fork_unproved and k in self.fork_pending:
-            self.fork_pending[k].update(stage="content", next=self.now + FORK_CONTENT_RETRY_S)
-        elif e.status != "confirmed":                     # finalized, or given up: no more lookups
-            self.fork_pending.pop(k, None)
-            self._fork_log("resolved", k, e)
-        elif k in self.fork_pending:
-            self.fork_pending[k].update(stage="final", next=self.now + 10)
-        content = None
-        if e.content:
-            try:
-                content = tuple(json.loads(e.content))
-            except (ValueError, TypeError):
-                content = None
+        content, bad = self._parse_content(e.content)
+        if bad:
+            self.stats["fork_content_invalid"] += 1      # (taken as a status-only answer: it proves no bytes)
         s = self.tokens.get(e.mint)
         c = s.conflicts.get(k) if s is not None else None
         if c is None:                                     # its history is gone (restart, eviction): only the registry
-            self._registry_evidence(e, k)
-            if s is not None:
-                self._fanout(s)
-            return
-        r = s.resolve_conflict(k, e.slot, e.status, e.source, e.err, content)
-        if r:
-            self.stats["fork_" + r] += 1
-        if c.get("strongest"):
-            self.fork_evidence[k] = {"mint": e.mint, **c["strongest"], "fault": c.get("fault", "")}
-            self._trim_evidence()
-        if s.unrepairable:                                # the followed wallet's copy of it can't be corrected either
-            self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
-        self._fanout(s)
+            if not self._registry_evidence(e, k, content):
+                if s is not None:
+                    self._fanout(s)
+                return                                    # not the same event: no gate or lifecycle change
+            accepted = self.fork_evidence.get(k)
+        else:
+            r = s.resolve_conflict(k, e.slot, e.status, e.source, e.err, content)
+            if r:
+                self.stats["fork_" + r] += 1
+            accepted = c.get("strongest")
+            if accepted:
+                self.fork_evidence[k] = {"mint": e.mint, **accepted, "fault": c.get("fault", "")}
+                self._trim_evidence()
+            if s.unrepairable:                            # the followed wallet's copy can't be corrected either
+                self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
+        self._fork_gate(e, k, accepted, c)
+        if s is not None:
+            self._fanout(s)
 
-    def _registry_evidence(self, e: Reconcile, k: tuple) -> None:
+    def _fork_gate(self, e: Reconcile, k: tuple, accepted: dict | None, c: dict | None) -> None:
+        """The buy block, retries and lifecycle for event k, from the evidence accepted for it."""
+        proved = accepted is not None and (bool(accepted.get("err")) or accepted.get("method") == "tx")
+        if accepted is not None and not proved and self.feed.realtime:
+            u = self.fork_unproved.setdefault(k, {"mint": e.mint, "since": self.now, "given_up": False})
+            u["mint"] = e.mint                           # (replays of older recordings had no content lookups)
+        elif proved:
+            self.fork_unproved.pop(k, None)
+        if e.status == "finalized" and k in self.fork_unproved and k in self.fork_pending:
+            self.fork_pending[k].update(stage="content", next=self.now + FORK_CONTENT_RETRY_S)
+        elif e.status == "confirmed":
+            if k in self.fork_pending:
+                self.fork_pending[k].update(stage="final", next=self.now + 10)
+        elif k in self.fork_pending or e.status not in ("finalized",):    # finalized, or given up: no more lookups
+            self.fork_pending.pop(k, None)
+            state = (c or {}).get("status") or ("fault" if (accepted or {}).get("fault") else
+                                                (accepted or {}).get("level") or e.status)
+            self._fork_log("resolved", k, e, state=state, proof=(accepted or {}).get("method", ""))
+
+    def _registry_evidence(self, e: Reconcile, k: tuple, content=...) -> bool:
         """A chain answer for an event whose coin no longer holds its versions: nothing can be rebuilt, but the
         registry's evidence still ranks it under the same rules as a live conflict (a ninth review, 2026-10-07):
         weaker answers are ignored; at finalized, a different slot or failure, or different decoded transaction
         content, is an integrity fault and blocks the coin; decoded content upgrades a status-only answer."""
         level = "final" if e.status == "finalized" else "confirmed" if e.status == "confirmed" else ""
-        self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
-        if not level:
-            return
-        content = None
-        if e.content:
-            try:
-                content = list(json.loads(e.content))
-            except (ValueError, TypeError):
-                content = None
+        if content is ...:                               # (called with the raw answer: validated here)
+            content, _ = self._parse_content(e.content)
+        content = list(content) if content is not None else None
         old = self.fork_evidence.get(k)
         if old is not None and old.get("mint") and old["mint"] != e.mint:
-            self.stats["fork_registry_mismatch"] += 1    # not the same event: compare nothing
-            return
+            self.stats["fork_registry_mismatch"] += 1    # not the same event: compare nothing, change nothing
+            return False
+        self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
+        if not level:
+            return True
         new = {"mint": e.mint, "slot": e.slot, "level": level, "status": e.status, "source": e.source,
                "err": e.err, "method": "tx" if content is not None else "status", "content": content, "fault": ""}
         rank = TokenState.LEVEL
         if old is None or rank[level] > rank[old["level"]]:
+            if old is not None and old.get("content") is not None and new["content"] is None and \
+                    old["slot"] == e.slot and bool(old["err"]) == bool(e.err):
+                new["lower_proof"] = {"level": old["level"], "content": old["content"]}   # kept, not promoted
             self.fork_evidence[k] = new
             self._trim_evidence()
-            return
+            return True
         if rank[level] < rank[old["level"]]:
-            return
+            return True
         facts = old["slot"] != e.slot or bool(old["err"]) != bool(e.err)
         bytes_ = content is not None and old.get("content") is not None and list(old["content"]) != content
         if level == "final" and (facts or bytes_):
@@ -2069,6 +2093,7 @@ class Engine:
             self.fork_blocks[e.mint] = "fork conflict: the chain's finalized answers contradict each other"
         elif not facts and content is not None and old.get("content") is None:
             old["content"], old["method"], old["source"] = content, "tx", e.source
+        return True
 
     def _fork_log(self, kind: str, k: tuple, e: Reconcile | None = None, **kw) -> None:
         """data/fork_conflicts.jsonl (live only): each fork conflict's creation (with why it is or isn't looked up)
