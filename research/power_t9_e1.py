@@ -441,7 +441,7 @@ def main(argv=None) -> int:
                "availability_note": "declared profiles, not estimates: replace them with a quote observer's "
                                     "reason-coded logs",
                "rows": rows}
-        data = json.dumps(doc, indent=1)
+        data = json.dumps(doc, indent=1, default=lambda o: o.item() if hasattr(o, "item") else str(o))
         Path(a.json).write_text(data)
         Path(a.json + ".sha256").write_text(hashlib.sha256(data.encode()).hexdigest() + "  " + Path(a.json).name + "\n")
     return 0

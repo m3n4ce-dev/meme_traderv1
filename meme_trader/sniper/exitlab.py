@@ -39,7 +39,10 @@ MAX_OPEN_S = 1800
 TP10 = {"all out at +10% net": {"_tp_net": 10}, "trim 25% at +10% net": {"_trim_net": (10, 0.25)}}
 TX_COST_SOL = 0.000005                              # a transaction's base fee; its priority fee comes from the config
 ACCOUNTING = 2                                      # the cash-ledger version recorded in each row
-LAB_SELL_FAIL_PCT = 10                              # late-landing variants: a sell attempt fails this often (assumed)
+# late-landing variants: a sell attempt LANDS AND FAILS this often, paying its network fee - a declared assumption,
+# not a measured rate (no trustworthy public figure exists for this route; a tenth review). It isn't a model of
+# dropped, unsent or preflight-rejected transactions, which pay nothing on chain.
+LAB_SELL_FAIL_PCT = 10
 MAX_SELL_TRIES = 20                                 # then the shadow's exit never filled: the tokens count as lost
 END_FRESH_S = 60                                    # an after-exit end mark at most this old at the horizon
 

@@ -87,7 +87,7 @@ class Portfolio:
             self.measured_pnl[day] += pnl
             self.lost[day] += max(-pnl, 0.0)
             self.exits += 1
-            self.late_exits += p["free_t"] > p["exit_t"]
+            self.late_exits += int(p["free_t"] > p["exit_t"])      # (a plain int, whatever the times' types)
             self._log("exit", p["free_t"], coin=p["coin"], pnl=round(pnl, 6), late_s=round(p["free_t"] - p["exit_t"], 3))
 
     def risk_used(self, t: float) -> float:
