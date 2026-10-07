@@ -134,3 +134,27 @@ def test_it_never_writes_into_a_used_directory(data, tmp_path):
     (tmp_path / "pkg" / "x").write_text("1")
     with pytest.raises(SystemExit, match="isn't empty"):
         export(d, root, tmp_path)
+
+
+def test_the_account_ledger_is_by_close_day_and_reconciles_cash(tmp_path):
+    d = tmp_path / "data"
+    d.mkdir()
+    rows = [{"mint": COIN, "symbol": "C", "opened": DAY - 90000, "closed": DAY - 86000, "cost": 0.1, "proceeds": 0.2,
+             "pnl": 0.1, "pnl_pct": 100, "failed_fees_sol": 0.01, "source": "late", "mode": "paper"},      # schema 1
+            {"mint": COIN, "symbol": "C", "opened": DAY + 100, "closed": DAY + 86500, "cost": 0.1, "proceeds": 0.05,
+             "pnl": -0.05, "gross_pnl": -0.05, "pnl_schema": 2, "pnl_pct": -50, "failed_fees_sol": 0.0,
+             "source": "sniper", "mode": "paper"}]
+    jl(d / "trades-2026-10-05.jsonl", rows[:1])
+    jl(d / "trades-2026-10-07.jsonl", rows[1:])
+    (d / "sniper_state_paper.json").write_text(json.dumps({
+        "book": {"sol": 9.0 + 0.09 - 0.05 - 0.2 - 0.003, "start_sol": 9.0, "deposits": [[DAY, 4.0]], "closed": rows},
+        "positions": {"X": {"proceeds_sol": 0.0, "initial_cost_sol": 0.2, "rent_sol": 0.0, "failed_fees_sol": 0.0}}}))
+    root = tmp_path / "root"
+    root.mkdir()
+    rx.run(d, tmp_path / "pkg", root=root)
+    led = list(csv.DictReader(open(tmp_path / "pkg" / "account_ledger.csv")))
+    assert [r["close_day_utc"] for r in led] == ["2026-10-05", "2026-10-06", "2026-10-07"]     # 10-06: nothing closed
+    assert float(led[0]["net_pnl_sol"]) == pytest.approx(0.09) and float(led[0]["gross_pnl_sol"]) == pytest.approx(0.1)
+    rec = json.loads((tmp_path / "pkg" / "account_reconciliation.json").read_text())
+    assert rec["net_pnl_sol"] == pytest.approx(0.04) and rec["open_positions_cash_effect_sol"] == pytest.approx(-0.2)
+    assert rec["residual_sol"] == pytest.approx(-0.003)             # a fee no position carries (a failed buy, say)
