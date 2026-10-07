@@ -392,6 +392,8 @@ sniper:
 
   record:
     full_window_s: 600           # while recording, keep every launch's trades for 10 min (unbiased backtests)
+  hq:                            # Controls -> HQ
+    extra_services: []           # other systemd user services on this machine to show there (unit names)
 
 # ---------------------------------------------------------------------------------------------------------
 # Wallet study recorder: python -m meme_trader.wallets record (docs/WALLETS.md). Paper research only.

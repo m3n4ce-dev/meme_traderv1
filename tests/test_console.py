@@ -188,7 +188,14 @@ def test_hq_status(tmp_path):
             return await (await c.get("/api/hq")).json()
     d = asyncio.run(go())
     assert {"bot", "services", "feed", "lab", "desk", "chat", "machine", "xchain"} <= set(d) and d["xchain"]["ready"].endswith("of 6")
-    assert d["machine"]["disk_free_gb"] > 0 and set(d["services"]) == {"meme-sniper", "meme-wallets", "edge-scout"}
+    assert d["machine"]["disk_free_gb"] > 0 and set(d["services"]) == {"meme-sniper", "meme-wallets"}
+
+
+def test_hq_extra_services_come_from_the_local_config():
+    from meme_trader.ui.server import _extra_services
+    assert _extra_services({"hq": {"extra_services": ["research-svc", "bad name; rm -rf", "a@b.service"]}}) == \
+        ["research-svc", "a@b.service"]                    # private names live in config/params.yaml, not the repo
+    assert _extra_services({}) == [] and _extra_services({"hq": None}) == []
 
 
 def test_desk_vote_speed_is_measured():

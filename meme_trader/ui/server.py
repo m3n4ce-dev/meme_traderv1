@@ -31,6 +31,7 @@ import time
 import hashlib
 import hmac
 import json
+import re
 import os
 import secrets
 from pathlib import Path
@@ -99,6 +100,13 @@ def restart_process(engine) -> None:
     argv = list(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])
     os.execv(sys.executable, [sys.executable, *argv[1:]])
 
+
+
+def _extra_services(p) -> list[str]:
+    """hq.extra_services: other systemd user services to show on HQ (from the local config, so private service
+    names stay out of the repo). Names only: anything that isn't a plain unit name is ignored."""
+    names = ((p.get("hq") if hasattr(p, "get") else None) or {}).get("extra_services") or []
+    return [str(n) for n in names if re.fullmatch(r"[A-Za-z0-9@._-]{1,64}", str(n))]
 
 def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path | None = None,
              restarter=None) -> web.Application:
@@ -324,7 +332,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
         return _json({
             "bot": {"up_s": round(time.time() - hq_started), "rss_mb": rss, "mode": engine.mode, "paused": engine.paused,
                     "halted": engine.book.halted},
-            "services": {u: await unit(u) for u in ("meme-sniper", "meme-wallets", "edge-scout")},
+            "services": {u: await unit(u) for u in ("meme-sniper", "meme-wallets", *_extra_services(engine.p))},
             "feed": {k: f.get(k) for k in ("host", "lag_s", "degraded_reason", "reconnects_1h", "switches_1h", "mb_per_hour", "backup")},
             "recorder": recorder,
             "lab": {"running": bool(lv["running"]), "queued": len(lv["queued"]), "tests": lv["tries"]},

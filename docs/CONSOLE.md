@@ -297,7 +297,7 @@ A separate bot trades young coins on decentralized exchanges (DEXes), so the con
 
 Controls → 🏠 HQ shows the status of everything running on this machine:
 - **The bot:** mode, uptime and memory.
-- **The services:** sniper, wallet recorder and edge-scout.
+- **The services:** sniper and wallet recorder, plus any listed in `sniper.hq.extra_services`.
 - **Market data:** server, delay, drops and data rate.
 - **The Helius backup:** in use or standing by, and its allowance.
 - **The wallet recorder, the lab and the AI desk.**
