@@ -1122,6 +1122,19 @@ def test_feed_starts_on_the_fastest_endpoint_it_remembers(tmp_path, monkeypatch)
     assert g._check_stream(now, now - g.RETRY_PRIMARY_S - 1) == ""
 
 
+def test_your_configured_endpoint_starts_unless_it_was_clearly_slower(tmp_path, monkeypatch):
+    """2026-10-07: the free public endpoint, remembered 0.1 s faster, took the start from the paid one configured."""
+    monkeypatch.setenv("SOLANA_WS_URL", "wss://paid.example/?api_key=K")
+    mem = tmp_path / "feed_endpoints.json"
+    now = time.time()
+    mem.write_text(json.dumps({"paid.example": [1.4, now], "api.mainnet-beta.solana.com": [1.3, now]}))
+    f = SolanaTradeFeed(memory_path=mem)
+    assert f.n_configured == 1 and f.ws_urls[f.ws_idx].startswith("wss://paid.example")
+    mem.write_text(json.dumps({"paid.example": [4.0, now], "api.mainnet-beta.solana.com": [1.3, now]}))
+    assert SolanaTradeFeed(memory_path=mem).ws_urls[SolanaTradeFeed(memory_path=mem).ws_idx].endswith(
+        "api.mainnet-beta.solana.com")                                 # clearly slower: the fastest starts
+
+
 def test_a_hang_up_on_the_fastest_endpoint_reconnects_to_it(monkeypatch):
     """2026-10-05: the public RPC hung up every 20 s-5 min; the bot flapped to PublicNode (10 s behind) and back,
     pausing entries each time. Now a hang-up on the fastest known endpoint is a reconnect to it."""

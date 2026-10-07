@@ -4,6 +4,16 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #71: The paid feed starts again; the account journal's first time
+
+- **The paid feed starts again.** After #96 was deployed, the feed started on the **free** public endpoint, remembered 0.1 s faster (1.3 s against 1.4 s), instead of the paid one the owner configured.
+  - **Why it matters:** the free endpoints are the ones that drop out for hours.
+  - **The fix:** at startup the configured endpoint wins unless it was more than 1 s slower (`PRIMARY_MARGIN_S`). The watchdog still moves off it if it falls behind.
+  - **A side observation:** the fork copies (#66) stopped while on the public endpoint. They come from the paid provider at `confirmed`.
+- **The account journal's first event** (the current account's adoption) was stamped `ts 0`, because the engine clock hadn't started at restore. It now uses the wall clock when the engine has none.
+
+---
+
 ## 2026-10-07 — Entry #70: The seventh review: revisable fork evidence, logical events for wallet-following, one T9 account model, typed account events
 
 **Source:** a seventh external review (revision 0f9ab0a).
