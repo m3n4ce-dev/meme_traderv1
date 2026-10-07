@@ -4,6 +4,24 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #67: The research scripts published, a private name and a wallet address out of the repo, a correction
+
+- **The exploratory scripts behind T1–T9 are in `research/exploratory/`** (with the owner's go-ahead). `README.md` there maps each test to its scripts, splits and run times. Only three things changed from the originals:
+  - paths come from `_paths.py`;
+  - 10-06 is read from its sealed `.gz`;
+  - `run_compare.sh` is written out from the one-line command.
+- **A caveat found while publishing them:** T1–T7 read 10-06's recording while it was still being written. Their "unseen 10-06" was the first ~19–20 hours of that day (outputs at 18:55–20:25 UTC). `research/hypotheses.csv` now says so, along with the exact walk-forward splits:
+  - train 10-03..04, grade 10-05;
+  - train 10-03..05, grade 10-06 (the AUC 0.86).
+- **The private research project's name is out of the current files.**
+  - **Code:** HQ's extra services come from a local setting, `sniper.hq.extra_services`, so its unit name lives only in the owner's `config/params.yaml`.
+  - **Docs:** the build log and the notes now say "a separate research project".
+  - **History:** older commits still contain it.
+- **The setup screenshot showed the owner's real wallet address.** `docs/img/ubuntu-setup-output.png`, used by the Ubuntu and Mac guides since 10-02, had it on its `wallet.pubkey` line. It's masked now; the old image remains in git history.
+- **Correction to #66:** the feed is subscribed at `confirmed` commitment, not "processed". The paid feed still delivers about 1% of trades first from a block that didn't survive (9 of 9 checked on chain landed in the later slot). Every sampled trade exists on chain, so there are no phantom trades.
+
+---
+
 ## 2026-10-07 — Entry #66: A research package for the reviewer, a proposed T9-E1 test, and fork copies in the feed
 
 **Source:** the fifth review's sections B–E. It asked for a compact, reproducible research package before any recordings, and one prospective revival test to register.
@@ -27,13 +45,19 @@ A running record of decisions, research, parameters and status. Newest entries a
   - **Large edges:** at the replay's own, optimistic, estimate, 28 days is enough.
   - **A quarter of that edge:** 60 days gives 0.63–0.93 power.
   - **Small edges** (+1–3% per trade) can't be detected even in 120 days.
-- **The exploratory scripts behind T1–T9** are kept, exactly as run, in the owner's `data/research/exploratory/` (and in the package). They're not in this repo: publishing them is the owner's call.
+- **The exploratory scripts behind T1–T9** are kept, exactly as run, in the owner's `data/research/exploratory/` (and in the package). They were published in #67, with the owner's go-ahead.
   - **Caveat:** T9 read 10-06's PumpSwap file while it was still being written, so its exact rows can't be reconstructed.
   - **Caveat:** T8 ran on commit d7f0429 plus a small uncommitted patch, both saved.
 - **Found while exporting: fork copies in the paid feed.**
-  - **10-07, at processed commitment:** about 4% of trade events arrive a second time in another slot, about 1% with different amounts. The engine drops the second copy (signature plus event index), so for those it keeps whichever arrived first, possibly the abandoned fork's.
+  - **10-07:** the paid feed, subscribed at `confirmed` commitment, delivered about 4% of trade events a second time in the next slot, about 1% with different amounts. The first copy came from a block that didn't survive.
+    - **Checked on chain:** of 9 such transactions found, all 9 landed in the later slot, and the later copy's amounts matched in 7.
+    - **No phantom trades:** all 1,200 sampled trades, repeated or not, exist on chain.
+    - **The effect:** the engine drops the second copy (signature plus event index), so for about 1% of trades it keeps the abandoned block's amounts until the coin's next trade.
   - **10-03..10-06 (no event index):** repeats were mostly same-slot transport duplicates, about 0.3% of trades, which replays count twice.
-  - **Not changed yet.** The options are confirmed commitment (slower) or letting a later-slot copy supersede the first.
+  - **Not changed yet.** The feed already asks for `confirmed` (the first version of this entry wrongly said "processed"). The options:
+    - a later-slot copy supersedes the first, at no delay;
+    - every trade waits ~0.35 s for a possible second copy;
+    - ask the provider why `confirmed` notifications include blocks that don't survive.
 
 ---
 
@@ -1286,7 +1310,7 @@ At ≥25% every delay loses 1–3% per trade. The model spots coins that are mov
 - **Deploy note:** #24 was stacked on #23 and merged into #23's branch (not main) seconds after #23 merged. #25 carries it to main; until then the bot runs from `habbo-room`.
 - **Full check, about 17:30 local:**
   - **Machine:** load 1.2 on a mini PC; 21 GB of 27 GB RAM free; 713 GB disk free; journals 52 MB.
-  - **Services:** meme-sniper, meme-wallets and edge-scout all active with no crashes. Memory: 98, 171 and 119 MB.
+  - **Services:** meme-sniper, meme-wallets and a separate research service all active with no crashes. Memory: 98, 171 and 119 MB.
   - **Feed:** mainnet-beta, 1.5 s behind the chain, 0% missing, not degraded.
   - **AI desk:** awake after the restart. `desk.enabled` was written to the config first, because it had been woken before the fix that saves that.
   - **Paper account:** started fresh one last time (nothing had been saved before #23); it now carries over restarts.
@@ -1479,7 +1503,7 @@ At ≥25% every delay loses 1–3% per trade. The model spots coins that are mov
 - Worth learning from:
   - Chainstack's pump.fun bot: listener race, `programSubscribe` for late curves, the current IDL;
   - the Rust streaming/landing SDKs;
-  - Hummingbot's funding arbitrage (a template for edge-scout);
+  - Hummingbot's funding arbitrage (a template for a separate research project);
   - a small bot whose own notes show paper ~80% wins vs live 1 in 38.
 - **Measured:** about 3% of pump.fun trades (11 of 369 in 20 s) are on USDC- or token-quoted coins. Their `sol_amount` and virtual SOL reserves are 0, so this bot reads them as price 0 and never trades them.
   - Proposed: decode `quote_mint` (after the event's variable-length fields) and skip non-SOL coins explicitly.
