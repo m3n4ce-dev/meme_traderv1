@@ -157,7 +157,7 @@ def test_an_entry_quote_schedules_its_exits_sized_by_the_tokens_it_bought(tmp_pa
     clock.t = 4600
     b.run()
     v = b.view(max_age_s=0)
-    assert v["coverage"]["entry / signal"]["ok"] == 1 and v["coverage"]["exit / signal"]["first_try_ok"] == 1
+    assert v["coverage"]["entry / signal"]["ok (qualified)"] == 1 and v["coverage"]["exit / signal"]["first_try_qualified_ok"] == 1
     row = v["quote_pnl"][0]
     assert row["exit"] == "hold 1 h" and row["n"] == 1 and -6 < row["mean_pct"] < 0      # the round trip's costs
 
@@ -217,7 +217,7 @@ def test_the_review_package_carries_coverage_and_every_attempt(tmp_path):
     Export(tmp_path, out, Pseudo(b"test")).quotes()
     summary = json.loads((out / "quotes_summary.json").read_text())
     rows = [json.loads(x) for x in (out / "quote_attempts.jsonl").read_text().splitlines()]
-    assert summary["coverage"]["entry / signal"]["ok"] == 1 and summary["pending"] == 1      # its exit, scheduled
+    assert summary["coverage"]["entry / signal"]["ok (qualified)"] == 1 and summary["pending"] == 1      # its exit, scheduled
     assert len(rows) == 1 and rows[0]["reason"] == "ok" and "SECRET" not in json.dumps(rows)
 
 

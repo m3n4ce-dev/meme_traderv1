@@ -4,6 +4,17 @@ the paper runner (meme_trader/sniper/t9_portfolio.py).
     python research/power_t9_e1.py [--sims 150] [--null-sims 500] [--boots 400] [--hurdle 1.0] [--procs 8]
                                    [--json out.json]                                                 (needs numpy)
 
+Version 6 (an eleventh review, 2026-10-07): PAIRED sensitivities. v5's drift cells had their own seeds, so a
+difference between cells mixed the process change with Monte Carlo noise. Now each simulated window draws its signals,
+outages, quotes, late-price shocks and bootstrap resamples ONCE, and runs every variant on them (common random
+numbers): the late-price drift (centered / positive / negative) and the predeclared risk policies (t9_portfolio:
+"gross" - the registration's entry-halt trigger; "hard" - a strict worst-case daily budget; "net+cap" - a net-loss stop
+with an outer gross cap), at +0, +1.5 and +2.8 points of extra cost (+2.8 makes the round trip ~4%: the builder's
+measured fee + impact + network estimate, unverified by the reviewer). Each variant reports its pass rate and the
+PAIRED difference from the base (centered, gross) with a 95% interval and the discordant counts; and admitted trades,
+stop days and times, total, worst day, peak drawdown, exposure, impairments and the top three trades' share.
+`python research/power_t9_e1.py --version 5` reproduces version 5.
+
 Version 5 (a tenth review, 2026-10-07). Version 4 moved a late fill's price by exp(sigma Z): with zero log drift
 that has a POSITIVE expected price drift (+2.2% for a 15-minute delay), so even its "no edge" process gained by being
 late. The late multiplier is now centered, 1 + sigma Z (a gross-price martingale whose Z = 0 path is no move); v4's
@@ -48,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from meme_trader.sniper import t9_portfolio as tp  # noqa: E402
 from meme_trader.sniper.t9_portfolio import BANK, DELAY_S, HOLD_S, MAX_OPEN, RETRY_S, SIZE, Portfolio  # noqa: E402
 
-__all__ = ["one_test", "one_test_v4", "one_test_v5", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
+__all__ = ["one_test", "one_test_v4", "one_test_v5", "one_test_v6", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
 
 SEED = 20261007
 EPISODES_PER_DAY = 35.4              # the corrected replay, primary-like rule, ~3.1 days of coverage
@@ -291,6 +302,88 @@ def one_test_v4(rng, days, win_frac, magnitude, ordinary, profile, extra, hurdle
     return one_test_v5(rng, days, win_frac, magnitude, ordinary, profile, extra, hurdle, boots)
 
 
+VARIANTS = (("centered", "gross"), ("positive", "gross"), ("negative", "gross"), ("centered", "hard"),
+            ("centered", "net+cap"))          # (late-price drift, risk policy); the first is the base
+
+
+def _block_idx(rng, days: int, boots: int, block: int) -> np.ndarray:
+    if block <= 1:
+        return rng.integers(0, days, size=(boots, days))
+    nb = -(-days // block)
+    starts = rng.integers(0, days - block + 1, size=(boots, nb))
+    return (starts[:, :, None] + np.arange(block)[None, None, :]).reshape(boots, -1)[:, :days]
+
+
+def _drawdown(day: np.ndarray) -> float:
+    eq = np.concatenate([[0.0], np.cumsum(day)])
+    return float((np.maximum.accumulate(eq) - eq).max())
+
+
+def one_test_v6(rng, days: int, win_frac: float, magnitude: float, ordinary: str, profile: str, extra: float,
+                hurdle: float, boots: int, variants=VARIANTS) -> dict:
+    """Version 5's procedure, every variant on the SAME draws (paths, quotes, shocks, bootstrap resamples)."""
+    mu, sd = ORDINARY[ordinary]
+    end = days * 86400
+    p_win = min(WIN_EPISODES_PER_DAY * win_frac / EPISODES_PER_DAY, 1.0)
+    t_sig, coin, win = [], [], []
+    for d in range(days):
+        n_ep = rng.poisson(EPISODES_PER_DAY * rng.gamma(4.0, 0.25))
+        for e in range(n_ep):
+            t = d * 86400 + rng.uniform(0, 86400)
+            w = rng.random() < p_win
+            for k in range(1 + rng.poisson(0.22)):
+                t_sig.append(t + k * (7200 + rng.uniform(0, 7200)))
+                coin.append((d, e))
+                win.append(w and k == 0)
+    order = np.argsort(t_sig, kind="stable")
+    t_sig = np.asarray(t_sig)[order]
+    coin = [coin[i] for i in order]
+    win = np.asarray(win, dtype=bool)[order]
+    n = len(t_sig)
+    ordinary_r = np.exp(rng.normal(mu, sd, n)) - 1 - FEE - extra
+    win_r = np.asarray(WIN_NET)[rng.integers(0, len(WIN_NET), n)] * magnitude - extra
+    r_sig = np.where(win, win_r, ordinary_r)
+    r_ctl = np.exp(rng.normal(*CONTROL, n)) - 1 - FEE - extra
+    z_sig, z_ctl = rng.normal(size=n), rng.normal(size=n)
+    starts, ends, observed = outages(rng, end, profile)
+    t_entry = t_sig + DELAY_S
+    s_entry, s_first = _arm_quotes(rng, starts, ends, t_entry, r_sig, profile)
+    c_entry, c_first = _arm_quotes(rng, starts, ends, t_entry, r_ctl, profile)
+    idx = {1: _block_idx(rng, days, boots, 1), 3: _block_idx(rng, days, boots, 3)}
+    out = {}
+    for drift, risk in variants:
+        port, ctl = Portfolio(end, risk=risk), Portfolio(end, risk=risk)
+        _run_arm(port, t_sig, coin, r_sig, s_entry, s_first, extra, z_sig, drift)
+        _run_arm(ctl, t_sig, coin, r_ctl, c_entry, c_first, extra, z_ctl, drift)
+        port.close()
+        ctl.close()
+        s_day, c_day = np.array(port.daily(days)), np.array(ctl.daily(days))
+        cov = port.measured / port.attempted if port.attempted else 0.0
+        c_cov = ctl.measured / ctl.attempted if ctl.attempted else 0.0
+        total, ctl_total = float(s_day.sum()), float(c_day.sum())
+        assert abs(total - (port.cash - BANK)) < 1e-6
+        top = sorted(port.pnls, reverse=True)[:3]
+        r = {"total": total, "control_total": ctl_total, "coverage": cov, "control_coverage": c_cov,
+             "observed": observed, "attempted": port.attempted, "skips": dict(port.skips),
+             "stop_days": len(port.stop_at),
+             "stop_time_of_day_h": float(np.median([t % 86400 for t in port.stop_at.values()]) / 3600)
+             if port.stop_at else None,
+             "worst_day": float(s_day.min()), "drawdown": _drawdown(s_day), "max_open": port.max_open_seen,
+             "impaired": port.trapped, "impairments_sol": port.impairments,
+             "top3_share": float(sum(top) / total) if total > 0 else None,
+             "late_fill_share": port.late_exits / port.exits if port.exits else 0.0}
+        invalid = observed < 0.8 or cov < 0.8 or c_cov < 0.8
+        for name, block in (("verdict", 1), ("verdict_block3", 3)):
+            m = s_day[idx[block]].mean(1)
+            diff = (s_day - c_day)[idx[block]].mean(1)
+            lo, hi, dlo = np.percentile(m, 5), np.percentile(m, 95), np.percentile(diff, 5)
+            r[name] = ("invalid" if invalid else
+                       "pass" if lo > 0 and dlo > 0 and total >= hurdle else
+                       "fail" if hi <= 0 or total < ctl_total else "inconclusive")
+        out[f"{drift}/{risk}"] = r
+    return out
+
+
 def wilson(k: int, n: int, z: float = 1.96) -> list:
     """95% interval for a simulated proportion (Monte Carlo uncertainty of a cell)."""
     if n == 0:
@@ -343,6 +436,65 @@ def cells(sims: int, null_sims: int) -> list[dict]:
     return out
 
 
+def cells_v6(sims: int, null_sims: int) -> list[dict]:
+    """Version 6's grid, declared before running: the null and a quarter / half / the replay's winner rate, flat or
+    pessimistic ordinary trades, at A1-A4 (A5 is always INVALID), +0 / +1.5 / +2.8 points of cost, 90 days - each
+    cell running every VARIANT on common random numbers."""
+    out = []
+    for profile in ("A1", "A2", "A3", "A4"):
+        for extra in (0.0, 0.015, 0.028):
+            out.append(dict(scenario="null", win_frac=0.0, magnitude=1.0, ordinary="flat", profile=profile,
+                            extra=extra, days=90, sims=null_sims))
+            for win_frac, name in ((0.25, "quarter"), (0.5, "half"), (1.0, "replay")):
+                for ordinary in ("flat", "pessimistic"):
+                    out.append(dict(scenario=name, win_frac=win_frac, magnitude=1.0, ordinary=ordinary,
+                                    profile=profile, extra=extra, days=90, sims=sims))
+    return out
+
+
+def run_cell_v6(args) -> dict:
+    i, cell, hurdle, boots = args
+    rng = np.random.default_rng(np.random.SeedSequence(SEED + 6, spawn_key=(i,)))
+    res = [one_test_v6(rng, cell["days"], cell["win_frac"], cell["magnitude"], cell["ordinary"], cell["profile"],
+                       cell["extra"], hurdle, boots) for _ in range(cell["sims"])]
+    n = len(res)
+    base = f"{VARIANTS[0][0]}/{VARIANTS[0][1]}"
+    row = {**cell, "cell": i, "variants": {}}
+    for drift, risk in VARIANTS:
+        v = f"{drift}/{risk}"
+        rs = [r[v] for r in res]
+        out = {}
+        for key in ("verdict", "verdict_block3"):
+            vs = [r[key] for r in rs]
+            pre = "" if key == "verdict" else "block3_"
+            for k in ("pass", "fail", "inconclusive", "invalid"):
+                out[pre + k] = round(vs.count(k) / n, 4)
+                out[pre + k + "_ci95"] = wilson(vs.count(k), n)
+        if v != base:                                     # the paired difference from the base, same draws
+            a = np.array([r[v]["verdict"] == "pass" for r in res], dtype=float)
+            b = np.array([r[base]["verdict"] == "pass" for r in res], dtype=float)
+            d = a - b
+            se = float(d.std(ddof=1) / math.sqrt(n)) if n > 1 else 0.0
+            out["paired_pass_diff"] = round(float(d.mean()), 4)
+            out["paired_pass_diff_ci95"] = [round(float(d.mean()) - 1.96 * se, 4), round(float(d.mean()) + 1.96 * se, 4)]
+            out["discordant"] = {"variant_only": int((d > 0).sum()), "base_only": int((d < 0).sum())}
+            out["paired_total_diff_median"] = round(float(np.median([r[v]["total"] - r[base]["total"] for r in res])), 4)
+        for k in ("total", "attempted", "stop_days", "worst_day", "drawdown", "max_open", "impaired", "coverage",
+                  "observed", "late_fill_share"):
+            out["median_" + k] = round(float(np.median([r[k] for r in rs])), 4)
+        tod = [r["stop_time_of_day_h"] for r in rs if r["stop_time_of_day_h"] is not None]
+        out["median_stop_time_of_day_h"] = round(float(np.median(tod)), 2) if tod else None
+        t3 = [r["top3_share"] for r in rs if r["top3_share"] is not None]
+        out["median_top3_share_when_positive"] = round(float(np.median(t3)), 3) if t3 else None
+        sk: dict = {}
+        for r in rs:
+            for why, c in r["skips"].items():
+                sk[why] = sk.get(why, 0) + c
+        out["skips_summed"] = sk
+        row["variants"][v] = out
+    return row
+
+
 def run_cell(args) -> dict:
     i, cell, hurdle, boots = args
     rng = np.random.default_rng(np.random.SeedSequence(SEED, spawn_key=(i,)))
@@ -390,6 +542,50 @@ def provenance(paths: list[Path]) -> dict:
             "packages": {"numpy": md.version("numpy")}, "python": sys.version.split()[0]}
 
 
+def main_v6(a) -> int:
+    root = Path(__file__).resolve().parents[1]
+    prov = provenance([Path(__file__).resolve(), root / "meme_trader/sniper/t9_portfolio.py"])   # as run, not as left
+    grid = cells_v6(a.sims, a.null_sims)
+    jobs = [(i, c, a.hurdle, a.boots) for i, c in enumerate(grid)]
+    if a.procs > 1:
+        from multiprocessing import Pool
+        with Pool(a.procs) as pool:
+            rows = pool.map(run_cell_v6, jobs, chunksize=1)
+    else:
+        rows = [run_cell_v6(j) for j in jobs]
+    for r in rows:
+        for v, x in r["variants"].items():
+            pair = (f" | paired {x['paired_pass_diff']:+.3f} {x['paired_pass_diff_ci95']}" if "paired_pass_diff" in x
+                    else "")
+            print(f"{r['scenario']:8} {r['ordinary']:11} {r['profile']} cost+{r['extra']:.3f} {v:17}: pass "
+                  f"{x['pass']:.3f} {x['pass_ci95']}{pair} | trades {x['median_attempted']:.0f}, stop days "
+                  f"{x['median_stop_days']:.0f}, total {x['median_total']:+.2f}, worst day {x['median_worst_day']:+.2f}, "
+                  f"drawdown {x['median_drawdown']:.2f}", flush=True)
+    if a.json:
+        doc = {"version": 6, "seed": SEED + 6, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell; "
+               "within a cell every variant runs on the same draws (common random numbers)",
+               "variants": [f"{d}/{r}" for d, r in VARIANTS], "base_variant": f"{VARIANTS[0][0]}/{VARIANTS[0][1]}",
+               "risk_policies": {"gross": "entries halt once the day's gross losses + impairments + overdue reservations "
+                                          "reach DAY_STOP (the registration's)",
+                                 "hard": "admit only if the day's net loss + every open position's total loss + this "
+                                         "one's stays within DAY_STOP",
+                                 "net+cap": f"entries halt once the day's net loss + overdue reservations reach DAY_STOP, "
+                                            f"or gross losses reach {tp.OUTER_CAP} x DAY_STOP"},
+               "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle, **prov,
+               "constants": {"bank": tp.BANK, "size": tp.SIZE, "max_open": tp.MAX_OPEN, "day_stop": tp.DAY_STOP,
+                             "outer_cap": tp.OUTER_CAP, "hold_s": tp.HOLD_S, "delay_s": tp.DELAY_S,
+                             "retry_s": tp.RETRY_S, "fee": FEE, "extra_costs": [0.0, 0.015, 0.028],
+                             "availability": AVAILABILITY, "late_sd_per_hour": LATE_SD, "late_drift": DRIFT,
+                             "late_clip": LATE_CLIP},
+               "paired_difference": "per simulation, pass(variant) - pass(base) on the same draws; mean with a 95% "
+                                    "normal interval, and the discordant counts",
+               "rows": rows}
+        data = json.dumps(doc, indent=1, default=lambda o: o.item() if hasattr(o, "item") else str(o))
+        Path(a.json).write_text(data)
+        Path(a.json + ".sha256").write_text(hashlib.sha256(data.encode()).hexdigest() + "  " + Path(a.json).name + "\n")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sims", type=int, default=150)
@@ -398,7 +594,10 @@ def main(argv=None) -> int:
     ap.add_argument("--hurdle", type=float, default=1.0, help="SOL the total must reach (the registration's H)")
     ap.add_argument("--procs", type=int, default=1)
     ap.add_argument("--json", default="")
+    ap.add_argument("--version", type=int, default=6, choices=(5, 6))
     a = ap.parse_args(argv)
+    if a.version == 6:
+        return main_v6(a)
     root = Path(__file__).resolve().parents[1]
     prov = provenance([Path(__file__).resolve(), root / "meme_trader/sniper/t9_portfolio.py"])   # as run, not as left
     grid = cells(a.sims, a.null_sims)

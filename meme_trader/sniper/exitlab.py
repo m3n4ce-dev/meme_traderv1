@@ -330,7 +330,8 @@ class ExitLab:
             self.after.append({"mint": pos.mint, "variant": sh["variant"], "kind": sh["kind"], "opened": sh["opened"],
                                "closed": now, "exit_price": price, "horizon": sh["opened"] + MAX_OPEN_S,
                                "peak": price, "low": price, "last": price, "last_t": now, "last_known": True,
-                               "observations": 0, "unknown": 0})
+                               "observations": 0, "unknown": 0, "mark_seq": None, "last_chain_t": None,
+                               "polled_t": now})
         if self.on_close is not None:
             self.on_close(row)
         self._write(row)
@@ -341,29 +342,38 @@ class ExitLab:
         - the end mark is the last valid price at or before the horizon, if it's at most END_FRESH_S old there and
           the coin's price was known then; an unknown price AT the horizon, a stale last price, or a coin no longer
           tracked leaves the end unmeasured, with the reason. Nothing stale is carried forward as a measured end;
+        - a price's age is its SOURCE's (an eleventh review): an observation is a newly accepted price (the coin's mark
+          `seq` changed), timed when we received it - re-reading the same carried price on a later tick is neither a
+          new observation nor fresher. A coin without price provenance is an unknown price. Ages are kept apart:
+          receipt (the freshness rule: <= END_FRESH_S at the horizon), chain clock, and when it was last polled;
         - the first price seen AFTER the horizon is reported apart, with its delay (horizon slippage, not upside
           inside the window).
         Marks, not executable sizes: a missed-upside diagnostic only."""
         keep = []
         for g in self.after:
             s = tokens.get(g["mint"])
-            known = s is not None and s.price_known
+            mark = (getattr(s, "mark", None) or {}) if s is not None and s.price_known else {}
+            at = mark.get("at")
+            known = at is not None
             px = s.curve.price if known else None
             if now <= g["horizon"]:
                 if known:
-                    g["peak"], g["low"] = max(g["peak"], px), min(g["low"], px)
-                    g["last"], g["last_t"] = px, now
-                    g["observations"] += 1
+                    if mark.get("seq") != g.get("mark_seq"):            # a newly accepted price: one observation
+                        g["mark_seq"] = mark.get("seq")
+                        g["peak"], g["low"] = max(g["peak"], px), min(g["low"], px)
+                        g["last"], g["last_t"], g["last_chain_t"] = px, at, mark.get("chain_ts")
+                        g["observations"] += 1
+                    g["polled_t"] = now
                 else:
                     g["unknown"] += 1
                 g["last_known"] = known
                 if now < g["horizon"] and s is not None:
                     keep.append(g)
                     continue
-            self._write(self._after_row(g, now, s, px))
+            self._write(self._after_row(g, now, s, px, at))
         self.after = keep
 
-    def _after_row(self, g: dict, now: float, s, px: float | None) -> dict:
+    def _after_row(self, g: dict, now: float, s, px: float | None, at: float | None = None) -> dict:
         x = g["exit_price"]
         age = g["horizon"] - g["last_t"]
         if s is None and now < g["horizon"]:
@@ -371,20 +381,23 @@ class ExitLab:
         elif now == g["horizon"] and px is None:
             missing = "price unknown at the horizon"
         elif not g["last_known"]:
-            missing = "price unknown at the last observation before the horizon"
+            missing = "price unknown at the last observation before the horizon (or without provenance)"
         elif age > END_FRESH_S:
             missing = f"last price {age:.0f} s before the horizon (stale)"
         else:
             missing = ""
         end = None if missing else round((g["last"] / x - 1) * 100, 2)
-        late = now > g["horizon"] and px is not None
+        late = px is not None and at is not None and at > g["horizon"]     # a price that arrived after it
         return {"record": "after_exit", "mint": g["mint"], "variant": g["variant"], "kind": g["kind"],
                 "opened": g["opened"], "closed": g["closed"], "horizon": g["horizon"], "until": now,
                 "followed_to_end": not missing, "missing_reason": missing,
                 "peak_after_pct": round((g["peak"] / x - 1) * 100, 2), "low_after_pct": round((g["low"] / x - 1) * 100, 2),
-                "end_after_pct": end, "end_price_age_s": round(age, 3), "observations": g["observations"],
-                "unknown_observations": g["unknown"],
-                "after_horizon": {"t": now, "delay_s": round(now - g["horizon"], 3),
+                "end_after_pct": end, "end_price_age_s": round(age, 3),
+                "end_price_chain_age_s": round(g["horizon"] - g["last_chain_t"], 3) if g.get("last_chain_t") else None,
+                "end_price_polled_at": g.get("polled_t"), "end_price_ambiguous": bool(getattr(s, "price_ambiguous", False)),
+                "freshness_rule": f"receipt age <= {END_FRESH_S} s at the horizon",
+                "observations": g["observations"], "unknown_observations": g["unknown"],
+                "after_horizon": {"t": at, "delay_s": round(at - g["horizon"], 3),
                                   "pct": round((px / x - 1) * 100, 2)} if late else None}
 
     def _write(self, row: dict) -> None:

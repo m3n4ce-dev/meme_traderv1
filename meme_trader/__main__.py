@@ -16,6 +16,8 @@ def main() -> None:
     ap.add_argument("--config", help="params file (default config/params.yaml)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    from .redact import install
+    install()
 
     try:
         params = config.load(args.config)

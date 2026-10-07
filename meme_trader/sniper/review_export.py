@@ -30,6 +30,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..config import ROOT
+from ..redact import secret_pieces
 
 B58 = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])")
 WALLET_FIELDS = {"leader", "creator", "trader", "wallet", "funder", "owner", "user", "dev", "buyer", "seller", "caller"}
@@ -474,6 +475,11 @@ class Export:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
         self._note("quote_attempts.jsonl", rows=len(rows))
+        jobs = qb.jobs()                                 # every job's outcome, those with no attempt included
+        with open(self.out / "quote_jobs.jsonl", "w") as f:
+            for r in jobs:
+                f.write(json.dumps(r) + "\n")
+        self._note("quote_jobs.jsonl", rows=len(jobs))
 
     def fork_conflicts(self) -> None:
         """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict by a stable id, matched
@@ -700,6 +706,11 @@ def safe_config(params) -> dict:
     return clean({k: v for k, v in d.items() if k not in ("wallet", "wallets")})
 
 
+def _quote_version() -> int:
+    from .quotes import RECORD_VERSION
+    return RECORD_VERSION
+
+
 def secret_values(root: Path) -> list[str]:
     out = []
     env = root / ".env"
@@ -709,6 +720,7 @@ def secret_values(root: Path) -> list[str]:
                 v = line.split("=", 1)[1].strip().strip("'\"")
                 if len(v) >= 12:
                     out.append(v)
+                out += sorted(secret_pieces(v))                # a URL's key pieces too: code rewrites URLs (wss -> https)
     return out
 
 
@@ -763,12 +775,12 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
         reg = ROOT / "research" / "registrations"
     if reg.exists():
         shutil.copytree(reg, out / "registrations")
-    for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json", "power_t9_e1_v2.out",
-                 "power_t9_e1_v2.json", "power_t9_e1_v3.out", "power_t9_e1_v3.json", "power_t9_e1_v3.json.sha256",
-                 "power_t9_e1_v4.out", "power_t9_e1_v4.json", "power_t9_e1_v4.json.sha256"):
-        if (data / "research" / name).exists():
+    # every power output, its .out log and .sha256 - all versions, found rather than listed (an eleventh review: a
+    # hand-kept list left version 5 out of the package)
+    for p in sorted((data / "research").glob("power_t9*")):
+        if p.is_file() and p.suffix in (".out", ".json", ".sha256"):
             (out / "registrations").mkdir(exist_ok=True)
-            shutil.copy2(data / "research" / name, out / "registrations" / name)
+            shutil.copy2(p, out / "registrations" / p.name)
     evidence = sorted((data / "research").glob("evidence_*.json"))      # builder-side evidence (provider packet...)
     if evidence:
         (out / "evidence").mkdir(exist_ok=True)
@@ -810,6 +822,8 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     import importlib.metadata as md
     man = {"generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)), "cutoff_ts": started,
            "code_revision": code_revision(), "code_tree": _tree(), "package_schema": 1, "inputs": inputs,
+           "exporter": {"file": "meme_trader/sniper/review_export.py", "sha256": sha256(Path(__file__)),
+                        "quote_record_version": _quote_version()},
            "outputs": files,
            "counts": ex.counts, "unavailable": [{"what": a, "why": b} for a, b in ex.unavailable],
            "findings": ex.findings,
