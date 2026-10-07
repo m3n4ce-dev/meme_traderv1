@@ -28,7 +28,8 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-START_DAY = "2026-10-08"            # the first complete UTC day after the recorder moved to the paid stream
+START_DAY = "2026-10-09"            # amended 2026-10-07 23:2x UTC, before the window opened: the fixed observer
+                                    # (v3: the official 287-byte layout, spendable sell liquidity) must run all of it
 DAYS, MAX_DAYS = 14, 28             # the window; extended a whole day at a time, only while a guard is short
 TARGETS = {"eventual": 0.95, "first_try": 0.90}
 MIN_EXITS_PER_CELL, MIN_POOLS, MIN_POOL_DAYS = 200, 30, 100
