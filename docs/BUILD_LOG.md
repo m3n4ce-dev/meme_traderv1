@@ -4,6 +4,39 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #66: A research package for the reviewer, a proposed T9-E1 test, and fork copies in the feed
+
+**Source:** the fifth review's sections B–E. It asked for a compact, reproducible research package before any recordings, and one prospective revival test to register.
+
+- **`python -m meme_trader.sniper.review_export OUT --root <checkout> --scan-feeds`** writes the package for the owner to review and send; it uploads nothing.
+  - **Contents:** every row of each store; nothing is picked for looking good.
+  - **Unavailable fields** are listed with reasons, never reconstructed.
+  - **Results:** taken from a consistent SQLite snapshot (not the JSONL export).
+  - **Per-day data quality** comes from one pass over each recording.
+  - **Hashes:** sha256 for every input and output, each input marked sealed, growing or snapshot.
+  - **Privacy:** wallets become stable pseudonyms and the owner's wallet becomes `OWNER_WALLET`; coins and pools stay public. Settings are included without URLs, keys or wallets.
+  - **Secret scan:** the export deletes itself if it finds the owner's wallet, an `.env` value or a keyed URL. Tests: `tests/test_review_export.py`, on synthetic data.
+- **`research/hypotheses.csv`:** T1–T12 plus graduation-v1. For each: what was searched, on which days, whether those days had been looked at, and the result.
+  - **graduation-v1's holdout is contaminated:** T8 and the lab ran on days inside it, so its verdict will be reported that way.
+- **`research/registrations/T9-E1.proposed.md`:** one executable revival test for the owner to approve. It's separate from the exploratory forward test, which keeps running unchanged.
+  - **Trades:** +40% in 5 min on 4× volume; decided at read time; entered 60 s later at a fresh on-chain quote; impact capped at 1% per side; 0.25 SOL; one hour.
+  - **Account:** its own 9 SOL paper account, at most 4 positions, one per coin, a 2 h cooldown and a 0.5 SOL daily loss stop. A matched control runs alongside.
+  - **Verdict:** 60 days with pre-declared pass, fail and **inconclusive** outcomes.
+- **`research/power_t9.py`** (seeded) sets that horizon:
+  - **Calibration:** with no edge, the test passes 4–9% of the time.
+  - **Large edges:** at the replay's own, optimistic, estimate, 28 days is enough.
+  - **A quarter of that edge:** 60 days gives 0.63–0.93 power.
+  - **Small edges** (+1–3% per trade) can't be detected even in 120 days.
+- **The exploratory scripts behind T1–T9** are kept, exactly as run, in the owner's `data/research/exploratory/` (and in the package). They're not in this repo: publishing them is the owner's call.
+  - **Caveat:** T9 read 10-06's PumpSwap file while it was still being written, so its exact rows can't be reconstructed.
+  - **Caveat:** T8 ran on commit d7f0429 plus a small uncommitted patch, both saved.
+- **Found while exporting: fork copies in the paid feed.**
+  - **10-07, at processed commitment:** about 4% of trade events arrive a second time in another slot, about 1% with different amounts. The engine drops the second copy (signature plus event index), so for those it keeps whichever arrived first, possibly the abandoned fork's.
+  - **10-03..10-06 (no event index):** repeats were mostly same-slot transport duplicates, about 0.3% of trades, which replays count twice.
+  - **Not changed yet.** The options are confirmed commitment (slower) or letting a later-slot copy supersede the first.
+
+---
+
 ## 2026-10-07 — Entry #65: The fifth review: one lock per coin, receipts pinned until confirmed, stores bound to their wallet
 
 **Source:** a fifth external review (revision 661e033). The earlier fixes passed its independent checks, including abrupt-process-exit tests of the outbox and the result store. Three new checks failed. Its contracts are rewritten as this project's own tests (`tests/test_review_astra5.py`, 12 tests); the reviewer's file wasn't run here. All pass, and so does the full suite (449, 1 skipped).
