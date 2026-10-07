@@ -42,10 +42,15 @@ POOL_LEN = 270                                       # the 1.20.0 IDL's layout, 
 # Where an older Pool account may END (pump.fun's README: "pools written before an appended field existed are
 # shorter than the current layout; read the missing trailing fields as 0 / false"): after coin_creator, then each
 # appended field. A length between these is a truncated account, never an old layout.
-POOL_ENDS = (243, 244, 245, 261, 269, 270, 271)
-# The known prefix: pump.fun's public IDL at commit cb188ce (2026-09-29) ends at is_holder_reward (byte 270); the npm
-# SDK 1.20.0 IDL at can_edit_creator_fee. Bytes past 271 are undocumented (a tenth review found no newer source).
-POOL_LAYOUT = "pump-public-docs idl@cb188ce: 271-byte known prefix"
+POOL_ENDS = (243, 244, 245, 261, 269, 270, 271, 279, 287)
+# The layout: pump.fun's public IDL at commit 8cda1fa (a twelfth review, 2026-10-07; sha256 b7d8c57a...) and npm SDK
+# 2.1.0 (POOL_SIZE = 287): after is_holder_reward (byte 270) come protocol_fees (u64 at 271) and creator_fees (u64 at
+# 279) - the fees v2 trades keep in the quote vault until swept. Bytes past 287 are the program's allocation slack:
+# zero, or undocumented (flagged, never interpreted). The earlier IDL (cb188ce) ended at 271.
+POOL_SIZE = 287
+POOL_LAYOUT = "pump-public-docs idl@8cda1fa / pump-swap-sdk 2.1.0: 287-byte Pool"
+SDK = "2.1.0"                                        # the quote math the observer uses ("1.20.0": the historical goldens)
+SDK_VERSIONS = ("1.20.0", "2.1.0")
 I128 = (-(1 << 127), (1 << 127) - 1)
 U64 = (1 << 64) - 1
 
@@ -186,15 +191,18 @@ def raw_buy_quote_input(quote: int, slippage: float, base_reserve: int, quote_re
 
 
 def raw_sell_base_input(base: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                        virtual: int = 0, coin_creator: str = "x") -> dict:
-    """SDK sellBaseInput: sell exactly `base` atoms - the quote received after fees (and the slippage minimum)."""
+                        virtual: int = 0, coin_creator: str = "x", fee_buckets: int = 0) -> dict:
+    """SDK sellBaseInput: sell exactly `base` atoms - the quote received after fees (and the slippage minimum).
+    `fee_buckets` (SDK 2.1.0's feeBucketsTotal = Pool.protocol_fees + Pool.creator_fees): fees v2 trades left in the
+    vault. They aren't liquidity: the program pays a sell's gross output less its LP fee only from the vault minus
+    them (1.20.0 had no buckets: 0 reproduces it). Price still uses the whole vault + virtual reserves."""
     if base_reserve == 0 or quote_reserve == 0:
         raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
     eff = quote_reserve + virtual
     out = _tdiv(eff * base, base_reserve + base)
     lp, proto = fee(out, fees["lp"]), fee(out, fees["protocol"])
     creator = 0 if coin_creator == DEFAULT_KEY else fee(out, fees["creator"])
-    if quote_reserve < out - lp:
+    if quote_reserve - fee_buckets < out - lp:
         raise QuoteError("Insufficient real quote reserves to cover the sell output.")
     final = out - lp - proto - creator
     if final < 0:
@@ -203,27 +211,37 @@ def raw_sell_base_input(base: int, slippage: float, base_reserve: int, quote_res
 
 
 def raw_sell_quote_input(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                         virtual: int = 0, coin_creator: str = "x") -> dict:
-    """SDK sellQuoteInput: receive `quote` atoms after fees - the base to sell (an INVERSE quote: forward-check it)."""
+                         virtual: int = 0, coin_creator: str = "x", fee_buckets: int = 0, sdk: str = SDK) -> dict:
+    """SDK sellQuoteInput: receive `quote` atoms after fees - the base to sell (an INVERSE quote: forward-check it).
+    1.20.0 refused a quote above the vault; 2.1.0 drops that and instead checks the sell it produces - its gross
+    output less the LP fee - against real reserves (the vault less the fee buckets)."""
+    if sdk not in SDK_VERSIONS:
+        raise QuoteError(f"unknown SDK version {sdk}", "input")
     if base_reserve == 0 or quote_reserve == 0:
         raise QuoteError("Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero.")
-    if quote > quote_reserve:
+    if sdk == "1.20.0" and quote > quote_reserve:
         raise QuoteError("Cannot receive more quote tokens than the pool quote reserves.")
     eff = quote_reserve + virtual
     c_bps = 0 if coin_creator == DEFAULT_KEY else fees["creator"]
     raw = ceil_div(quote * 10_000, 10_000 - (fees["lp"] + fees["protocol"] + c_bps))
     if raw >= eff:
         raise QuoteError("Invalid input: Desired quote amount exceeds available reserve.")
-    return {"internalRawQuote": raw, "base": ceil_div(base_reserve * raw, eff - raw),
-            "minQuote": _tdiv(quote * _slip(slippage, -1), 10 ** 9)}
+    base = ceil_div(base_reserve * raw, eff - raw)
+    if sdk != "1.20.0":
+        out = _tdiv(eff * base, base_reserve + base)
+        if quote_reserve - fee_buckets < out - fee(out, fees["lp"]):
+            raise QuoteError("Insufficient real quote reserves to cover the sell output.")
+    return {"internalRawQuote": raw, "base": base, "minQuote": _tdiv(quote * _slip(slippage, -1), 10 ** 9)}
 
 
 def forward_sell_check(quote: int, slippage: float, base_reserve: int, quote_reserve: int, fees: dict,
-                       virtual: int = 0, coin_creator: str = "x") -> dict:
+                       virtual: int = 0, coin_creator: str = "x", fee_buckets: int = 0, sdk: str = SDK) -> dict:
     """Does selling the inverse quote's base amount actually net `quote`? (The SDK's component rounding can leave it
     a few atoms short: never rely on the inverse amount, or a minimum receive derived from it, without this.)"""
-    inv = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
-    fwd = raw_sell_base_input(inv["base"], slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    inv = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator, fee_buckets,
+                               sdk)
+    fwd = raw_sell_base_input(inv["base"], slippage, base_reserve, quote_reserve, fees, virtual, coin_creator,
+                              fee_buckets)
     return {"output": fwd, "targetQuote": quote, "meetsTarget": fwd["uiQuote"] >= quote,
             "shortfallAtoms": max(0, quote - fwd["uiQuote"])}
 
@@ -281,19 +299,31 @@ def buy_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual=
     return _executable(out, ("base", "internalQuoteWithoutFees", "maxQuote"), ("base", "internalQuoteWithoutFees", "maxQuote"))
 
 
-def sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
-    """Checked sellBaseInput."""
+def _buckets(fee_buckets, quote_reserve) -> int:
+    """The fee buckets a sell can't draw on: whole atoms, at most the vault (the vault holds them)."""
+    if not 0 <= _atoms(fee_buckets, "fee buckets") <= quote_reserve:
+        raise QuoteError(f"fee buckets {fee_buckets} outside [0, the quote vault]: invalid pool state", "state")
+    return fee_buckets
+
+
+def sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x",
+                    fee_buckets=0) -> dict:
+    """Checked sellBaseInput, against real reserves (the vault less the fee buckets)."""
     _qualify(base, slippage, base_reserve, quote_reserve, fees, virtual)
-    out = raw_sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    _buckets(fee_buckets, quote_reserve)
+    out = raw_sell_base_input(base, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator, fee_buckets)
     return _executable(out, ("uiQuote", "internalQuoteAmountOut"), ("uiQuote", "minQuote", "internalQuoteAmountOut"))
 
 
-def sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x") -> dict:
-    """Checked sellQuoteInput: also refused when selling its base amount wouldn't actually net `quote`."""
+def sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual=0, coin_creator="x",
+                     fee_buckets=0) -> dict:
+    """Checked sellQuoteInput: also refused when selling its base amount wouldn't actually net `quote`, or its sell
+    would draw on the fee buckets."""
     _qualify(quote, slippage, base_reserve, quote_reserve, fees, virtual)
-    out = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    _buckets(fee_buckets, quote_reserve)
+    out = raw_sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator, fee_buckets)
     _executable(out, ("internalRawQuote", "base"), ("internalRawQuote", "base", "minQuote"))
-    chk = forward_sell_check(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator)
+    chk = forward_sell_check(quote, slippage, base_reserve, quote_reserve, fees, virtual, coin_creator, fee_buckets)
     if not chk["meetsTarget"]:
         raise QuoteError(f"selling {out['base']} atoms nets {chk['shortfallAtoms']} atoms short of {quote}", "output")
     return out
@@ -301,16 +331,15 @@ def sell_quote_input(quote, slippage, base_reserve, quote_reserve, fees, virtual
 
 # --------------------------------------------------------------------------- accounts
 def decode_pool(data: bytes) -> dict:
-    """A pump AMM Pool account. Checked on mainnet 2026-10-07 (100 pools): accounts are 287-301 bytes - the struct
-    plus space the program allocated - and pump.fun's README documents one field past the 1.20.0 IDL
-    (`is_holder_reward`, byte 270; "trading is unchanged"). Some pools carry further, UNDOCUMENTED non-zero bytes past
-    it: they're reported (`undocumented_tail`), since the pricing doc says only effective reserves enter a quote, and
-    an observer can count or refuse such pools. Older, shorter accounts are read with their missing trailing fields
-    as 0 / false, but only when they end exactly at a field boundary: anything else is a truncated account."""
+    """A pump AMM Pool account, by the official 287-byte layout (IDL 8cda1fa, SDK 2.1.0). Mainnet accounts are
+    287-301 bytes (the struct plus allocation slack). Older, shorter accounts are read with their missing trailing
+    fields as 0 / false - the official rule ("read them as 0 on pools written before the upgrade") - but only when
+    they end exactly at a field boundary: anything else is a truncated account. Bools must be 0 or 1. Bytes past 287
+    are slack: non-zero ones are UNDOCUMENTED - flagged (`undocumented_tail`, their length and sha256), never read."""
     from solders.pubkey import Pubkey
     n = len(data)
-    if n < 243 or (n < 271 and n not in POOL_ENDS):
-        raise QuoteError(f"unsupported Pool layout: {n} bytes")
+    if n < 243 or (n < POOL_SIZE and n not in POOL_ENDS):
+        raise QuoteError(f"unsupported Pool layout: {n} bytes (not a field boundary)")
     if data[:8] != POOL_DISCRIMINATOR:
         raise QuoteError("not a Pool account (discriminator)")
 
@@ -323,17 +352,22 @@ def decode_pool(data: bytes) -> dict:
         if data[o] > 1:
             raise QuoteError("invalid bool in Pool account")
         return bool(data[o])
+
+    def u64(o):
+        return struct.unpack_from("<Q", data, o)[0] if n >= o + 8 else 0
     bump, index = data[8], struct.unpack_from("<H", data, 9)[0]
     lp_supply, = struct.unpack_from("<Q", data, 203)
     virtual = int.from_bytes(data[245:261], "little", signed=True) if n >= 261 else 0
-    creator_fee_bps = struct.unpack_from("<Q", data, 261)[0] if n >= 269 else 0
+    suffix = data[POOL_SIZE:]
     return {"pool_bump": bump, "index": index, "creator": key(11), "base_mint": key(43), "quote_mint": key(75),
             "lp_mint": key(107), "pool_base_token_account": key(139), "pool_quote_token_account": key(171),
             "lp_supply": lp_supply, "coin_creator": key(211), "is_mayhem_mode": flag(243),
-            "is_cashback_coin": flag(244), "virtual_quote_reserves": virtual, "creator_fee_bps": creator_fee_bps,
-            "can_edit_creator_fee": flag(269), "is_holder_reward": flag(270), "bytes": n,
-            "layout": POOL_LAYOUT, "undocumented_tail": any(data[271:]),
-            "tail_sha256": hashlib.sha256(data[271:]).hexdigest() if any(data[271:]) else ""}
+            "is_cashback_coin": flag(244), "virtual_quote_reserves": virtual, "creator_fee_bps": u64(261),
+            "can_edit_creator_fee": flag(269), "is_holder_reward": flag(270),
+            "protocol_fees": u64(271), "creator_fees": u64(279),
+            "bytes": n, "serialized_end": min(n, POOL_SIZE), "padding_bytes": len(suffix),
+            "padding_sha256": hashlib.sha256(suffix).hexdigest(), "layout": POOL_LAYOUT,
+            "undocumented_tail": any(suffix), "tail_sha256": hashlib.sha256(suffix).hexdigest() if any(suffix) else ""}
 
 
 # Token-2022 mint extensions that don't change what a transfer moves or costs: the metadata pointer (18) and the

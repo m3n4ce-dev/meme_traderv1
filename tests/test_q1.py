@@ -9,7 +9,7 @@ from meme_trader.sniper import q1
 from meme_trader.sniper import quotes as q
 from meme_trader.sniper.t9_portfolio import REGISTERED_RISK, RISK_POLICIES
 
-OK = {"reason": "ok", "v": 2, "qualified": True, "unqualified": []}
+OK = {"reason": "ok", "v": 3, "qualified": True, "unqualified": []}
 PREFIX = {**OK, "qualified": False, "unqualified": ["undocumented_pool_bytes"]}
 
 
@@ -21,7 +21,9 @@ def test_available_and_qualified_are_kept_apart():
     c = q1.classify("ok", 1, {**OK, "qualified": False, "unqualified": ["no_freshness_reference"]})
     assert not c["available"] and not c["qualified"]                                  # freshness unverified
     c = q1.classify("ok", 1, {"reason": "ok", "qualified": True})                     # a record from before v2
-    assert c["raw"] and not c["available"] and "before v2" in c["why"]
+    assert c["raw"] and not c["available"] and "before v3" in c["why"]
+    c = q1.classify("ok", 1, {**OK, "v": 2})                     # v2: the 271-byte layout, whole-vault sells
+    assert c["raw"] and not c["available"] and not c["qualified"]
     c = q1.classify("skipped", 0, {"reason": "missed"})
     assert not c["available"] and c["zero_attempts"]
     assert not q1.classify("unmeasured", 1, {"reason": "late_response"})["available"]

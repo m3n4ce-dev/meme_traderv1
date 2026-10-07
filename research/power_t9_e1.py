@@ -4,6 +4,12 @@ the paper runner (meme_trader/sniper/t9_portfolio.py).
     python research/power_t9_e1.py [--sims 150] [--null-sims 500] [--boots 400] [--hurdle 1.0] [--procs 8]
                                    [--json out.json]                                                 (needs numpy)
 
+Version 7 (a twelfth review, 2026-10-07): version 6's grid, seeds and draws with ONE change - every position's cost
+bound is the scenario's full cost (1.2% + the extra), for its measured return, its reservation, its write-off and the
+hard budget alike (v6 reserved and impaired at 1.2% while measured trades paid up to 4%). Same seed as v6, so each
+v7 cell pairs with its v6 cell. Records the environment (python, numpy, platform, installed packages' hash). Versions
+<= 6 reproduce from their recorded revisions.
+
 Version 6 (an eleventh review, 2026-10-07): PAIRED sensitivities. v5's drift cells had their own seeds, so a
 difference between cells mixed the process change with Monte Carlo noise. Now each simulated window draws its signals,
 outages, quotes, late-price shocks and bootstrap resamples ONCE, and runs every variant on them (common random
@@ -219,13 +225,14 @@ def _run_arm(port: Portfolio, t_sig: np.ndarray, coin: list, r: np.ndarray, entr
     valid exit quote's time and return; impaired when none came within the retries."""
     due = t_sig + DELAY_S + HOLD_S
     r_fill = np.where(first > due, _late_return(r, extra, first - due, z, drift), r)
+    cost = FEE + extra                    # the SAME cost for the measured return, the reserve and a write-off (12th)
     for i in range(len(t_sig)):
         if not entry_ok[i]:
             continue
         if first[i] > 0:
-            port.try_enter(t_sig[i], coin[i], float(r_fill[i]), exit_at=float(first[i]))
+            port.try_enter(t_sig[i], coin[i], float(r_fill[i]), fee=cost, exit_at=float(first[i]))
         else:
-            port.try_enter(t_sig[i], coin[i], None)
+            port.try_enter(t_sig[i], coin[i], None, fee=cost)
 
 
 def _bootstrap(rng, x: np.ndarray, boots: int, block: int) -> np.ndarray:
@@ -562,15 +569,24 @@ def main_v6(a) -> int:
                   f"{x['median_stop_days']:.0f}, total {x['median_total']:+.2f}, worst day {x['median_worst_day']:+.2f}, "
                   f"drawdown {x['median_drawdown']:.2f}", flush=True)
     if a.json:
-        doc = {"version": 6, "seed": SEED + 6, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell; "
-               "within a cell every variant runs on the same draws (common random numbers)",
+        import importlib.metadata as md
+        import platform
+        env = {"python": sys.version.split()[0], "numpy": md.version("numpy"), "platform": platform.platform(),
+               "packages_sha256": hashlib.sha256("\n".join(sorted(f"{d.metadata['Name']}=={d.version}"
+                                                                   for d in md.distributions())).encode()).hexdigest()}
+        doc = {"version": 7, "seed": SEED + 6, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell "
+               "(v6's seed: v7 cells pair with v6's); within a cell every variant runs on the same draws",
+               "change_from_v6": "each position's cost bound = FEE + extra for its reservation, impairment and the "
+                                 "hard budget (v6: 1.2% whatever the scenario's cost)", "environment": env,
                "variants": [f"{d}/{r}" for d, r in VARIANTS], "base_variant": f"{VARIANTS[0][0]}/{VARIANTS[0][1]}",
-               "risk_policies": {"gross": "entries halt once the day's gross losses + impairments + overdue reservations "
-                                          "reach DAY_STOP (the registration's)",
-                                 "hard": "admit only if the day's net loss + every open position's total loss + this "
-                                         "one's stays within DAY_STOP",
-                                 "net+cap": f"entries halt once the day's net loss + overdue reservations reach DAY_STOP, "
-                                            f"or gross losses reach {tp.OUTER_CAP} x DAY_STOP"},
+               "risk_policies": {"gross": "an ENTRY-HALT TRIGGER: entries halt once the day's gross losses + "
+                                          "impairments + overdue reservations reach DAY_STOP (the original registration)",
+                                 "hard": "a worst-case budget under the modelled costs: admit only if the day's net "
+                                         "loss + every open position's stake and cost bound + this one's stays within "
+                                         "DAY_STOP (no allowance for repeated failed-transaction fees)",
+                                 "net+cap": f"an ENTRY-HALT TRIGGER: entries halt once the day's net loss + overdue "
+                                            f"reservations reach DAY_STOP, or gross losses reach {tp.OUTER_CAP} x "
+                                            f"DAY_STOP (T9-E1's policy, the owner's choice)"},
                "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle, **prov,
                "constants": {"bank": tp.BANK, "size": tp.SIZE, "max_open": tp.MAX_OPEN, "day_stop": tp.DAY_STOP,
                              "outer_cap": tp.OUTER_CAP, "hold_s": tp.HOLD_S, "delay_s": tp.DELAY_S,
@@ -594,9 +610,9 @@ def main(argv=None) -> int:
     ap.add_argument("--hurdle", type=float, default=1.0, help="SOL the total must reach (the registration's H)")
     ap.add_argument("--procs", type=int, default=1)
     ap.add_argument("--json", default="")
-    ap.add_argument("--version", type=int, default=6, choices=(5, 6))
+    ap.add_argument("--version", type=int, default=7, choices=(5, 7))
     a = ap.parse_args(argv)
-    if a.version == 6:
+    if a.version == 7:
         return main_v6(a)
     root = Path(__file__).resolve().parents[1]
     prov = provenance([Path(__file__).resolve(), root / "meme_trader/sniper/t9_portfolio.py"])   # as run, not as left

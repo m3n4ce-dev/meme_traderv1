@@ -1,4 +1,4 @@
--- The transactional ledger: DDL for review (docs/LEDGER_DESIGN.md, revision 3). NOT used by the bot yet.
+-- The transactional ledger: DDL for review (docs/LEDGER_DESIGN.md, revision 4). NOT used by the bot yet.
 -- One SQLite database is the account's authority; the in-memory book is a projection of SEALED events.
 -- Amounts are canonical signed integer TEXT (lamports, token atoms): '0', '123', '-123' - no '+', no leading zeros,
 -- no '-0'. SQLite's SUM() on such TEXT can turn into floating point past int64, so no balance is ever computed in SQL:
@@ -57,11 +57,11 @@ CREATE TABLE IF NOT EXISTS events (
     payload_sha256 TEXT NOT NULL,
     -- the caller's STABLE key for this economic effect (rev 3, an eleventh review): a retry of the same effect - a
     -- crash after commit and before the acknowledgement, a replayed receipt - finds it and gets the original back;
-    -- the same key with different content is a conflict, never a second event. Unique per account and kind. The
-    -- writer always sets both; a sealed event without them wasn't written by it and fails startup (left nullable so
-    -- a bare-SQL fixture or migration row is caught by the startup check, which says why, not just by a constraint)
-    effect_key  TEXT,
-    content_sha256 TEXT,                           -- sha256 of (account, kind, legs, payload): what "the same" means
+    -- the same key with different content is a conflict, never a second event. Unique per account and kind.
+    -- (rev 4, a twelfth review: NOT NULL again - an invariant isn't weakened to keep old fixtures; a database from an
+    -- older schema is quarantined on open, see reference.py)
+    effect_key  TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,                  -- sha256 of (account, kind, corrects, legs, payload, effects)
     seal_sums   TEXT,                              -- JSON {asset: "0"} written by the writer at seal: every asset nets 0
     seal_sha256 TEXT,                              -- sha256 of the canonical postings, set at seal
     UNIQUE (account_id, kind, effect_key)
@@ -144,8 +144,16 @@ CREATE TABLE IF NOT EXISTS observations (
     err         TEXT,
     content_sha256 TEXT,                           -- the decoded event's content, if fetched and decoded
     block_height INTEGER,                          -- the chain's block height when observed (an absence's proof)
+    history_searched INTEGER NOT NULL DEFAULT 0 CHECK (history_searched IN (0, 1)),   -- a full-history lookup
+    -- what it PROVES (rev 4): typed, never read from an error string alone. success: landed, no error; executed
+    -- failure: landed with an error; absent: not found by a full-history search; inconclusive: anything else
+    outcome     TEXT NOT NULL CHECK (outcome IN ('success', 'executed_failure', 'absent', 'inconclusive')),
     observed_at REAL NOT NULL,
-    digest      TEXT NOT NULL UNIQUE               -- sha256(signature, index, commitment, source, slot, err, content, height)
+    digest      TEXT NOT NULL UNIQUE,              -- sha256 of every field above: recomputed at startup
+    CHECK ((outcome = 'success' AND slot IS NOT NULL AND err IS NULL)
+        OR (outcome = 'executed_failure' AND slot IS NOT NULL AND err IS NOT NULL AND err != 'absent')
+        OR (outcome = 'absent' AND slot IS NULL AND history_searched = 1 AND block_height IS NOT NULL)
+        OR outcome = 'inconclusive')
 );
 CREATE INDEX IF NOT EXISTS observations_sig ON observations (signature, event_index);
 -- observations are immutable (rev 3): a new answer is a new row
@@ -195,17 +203,45 @@ WHEN NEW.attempt_id IS NOT OLD.attempt_id OR NEW.order_id IS NOT OLD.order_id OR
   OR NEW.blockhash IS NOT OLD.blockhash OR NEW.last_valid_height IS NOT OLD.last_valid_height
   OR NEW.signed_tx IS NOT OLD.signed_tx OR NEW.tx_sha256 IS NOT OLD.tx_sha256 OR NEW.created_at IS NOT OLD.created_at
 BEGIN SELECT RAISE(ABORT, 'an attempt''s transaction is immutable'); END;
+-- a settled attempt is final (rev 4): its state and the observation that proved it are frozen together; the proof
+-- reference is set only by the update that settles it. A correction is new evidence, never an overwrite.
+CREATE TRIGGER IF NOT EXISTS attempts_settled_final BEFORE UPDATE ON attempts
+WHEN OLD.state IN ('landed_ok', 'landed_failed', 'expired_absent', 'not_sent')
+  OR (NEW.resolved_by IS NOT OLD.resolved_by
+      AND NOT (OLD.resolved_by IS NULL AND NEW.state IN ('landed_ok', 'landed_failed', 'expired_absent')))
+BEGIN SELECT RAISE(ABORT, 'a settled attempt and its proof are final'); END;
 CREATE TRIGGER IF NOT EXISTS attempts_transition BEFORE UPDATE OF state ON attempts
 WHEN NOT ((OLD.state = 'signed' AND NEW.state IN ('submitted', 'not_sent'))
        OR (OLD.state IN ('submitted', 'unknown') AND NEW.state IN ('unknown', 'landed_ok', 'landed_failed',
                                                                    'expired_absent')))
 BEGIN SELECT RAISE(ABORT, 'not a legal attempt transition'); END;
+-- a terminal state needs a FINALIZED observation of this signature whose typed outcome is that state's (rev 4):
+-- landed_ok <- success; landed_failed <- executed_failure; expired_absent <- absent (a full-history search, made above
+-- the last valid block height). A processed or confirmed answer is recorded, but never settles - so it never frees
+-- the order for a fresh signature.
 CREATE TRIGGER IF NOT EXISTS attempts_evidence BEFORE UPDATE OF state ON attempts
-WHEN NEW.state IN ('landed_ok', 'landed_failed', 'expired_absent') AND (NEW.resolved_by IS NULL
-     OR (SELECT signature FROM observations WHERE obs_id = NEW.resolved_by) IS NOT OLD.signature
-     OR (NEW.state = 'expired_absent' AND NOT EXISTS (SELECT 1 FROM observations o WHERE o.obs_id = NEW.resolved_by
-         AND o.commitment = 'finalized' AND o.err = 'absent' AND o.block_height > OLD.last_valid_height)))
-BEGIN SELECT RAISE(ABORT, 'a terminal attempt state needs the chain observation that proves it'); END;
+WHEN NEW.state IN ('landed_ok', 'landed_failed', 'expired_absent') AND NOT EXISTS (
+     SELECT 1 FROM observations o WHERE o.obs_id = NEW.resolved_by AND o.signature = OLD.signature
+        AND o.commitment = 'finalized'
+        AND ((NEW.state = 'landed_ok' AND o.outcome = 'success')
+          OR (NEW.state = 'landed_failed' AND o.outcome = 'executed_failure')
+          OR (NEW.state = 'expired_absent' AND o.outcome = 'absent' AND o.block_height > OLD.last_valid_height)))
+BEGIN SELECT RAISE(ABORT, 'a terminal attempt state needs the finalized chain observation that proves it'); END;
+-- every state an attempt passes through, append-only (written by the database itself)
+CREATE TABLE IF NOT EXISTS attempt_transitions (
+    n           INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id  TEXT NOT NULL REFERENCES attempts (attempt_id),
+    from_state  TEXT NOT NULL,
+    to_state    TEXT NOT NULL,
+    resolved_by INTEGER REFERENCES observations (obs_id)
+);
+CREATE TRIGGER IF NOT EXISTS attempts_history AFTER UPDATE OF state ON attempts
+BEGIN INSERT INTO attempt_transitions (attempt_id, from_state, to_state, resolved_by)
+      VALUES (NEW.attempt_id, OLD.state, NEW.state, NEW.resolved_by); END;
+CREATE TRIGGER IF NOT EXISTS attempt_transitions_no_update BEFORE UPDATE ON attempt_transitions
+BEGIN SELECT RAISE(ABORT, 'attempt history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS attempt_transitions_no_delete BEFORE DELETE ON attempt_transitions
+BEGIN SELECT RAISE(ABORT, 'attempt history is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS attempts_no_delete BEFORE DELETE ON attempts
 BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END;
 -- an order's unresolved attempt is unique: no fresh signature while one might still land

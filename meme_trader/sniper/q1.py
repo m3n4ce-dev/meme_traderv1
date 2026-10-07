@@ -42,16 +42,19 @@ def _day0(day: str) -> float:
     return float(calendar.timegm(time.strptime(day, "%Y-%m-%d")))
 
 
+REQUIRED_RECORD = 3                 # amendment 1: the fixed observer (official 287-byte layout, real-reserve sells)
+
+
 def classify(state: str, tries: int, r: dict) -> dict:
     ok = state == "ok" and r.get("reason") == "ok"
-    v2 = r.get("v", 1) >= 2 and "qualified" in r
-    gaps = list(r.get("unqualified") or []) if v2 else ["unknown_record"]
-    available = ok and v2 and set(gaps) <= {"undocumented_pool_bytes"}
-    qualified = ok and v2 and r.get("qualified") is True and not gaps
+    current = r.get("v", 1) >= REQUIRED_RECORD and "qualified" in r
+    gaps = list(r.get("unqualified") or []) if current else ["unknown_record"]
+    available = ok and current and set(gaps) <= {"undocumented_pool_bytes"}
+    qualified = ok and current and r.get("qualified") is True and not gaps
     if not ok:
         why = f"{state}: {r.get('reason', '?')}"
-    elif not v2:
-        why = "ok, record from before v2 (unknown)"
+    elif not current:
+        why = f"ok, record from before v{REQUIRED_RECORD} (unknown)"
     elif qualified:
         why = "ok, qualified"
     else:

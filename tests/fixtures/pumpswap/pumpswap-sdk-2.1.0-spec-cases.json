@@ -1,0 +1,128 @@
+{
+ "source": "@pump-fun/pump-swap-sdk@2.1.0 (npm tarball; sha512 integrity checked against the registry 2026-10-07: sha512-O0ulb5In/pMzxpcWIkzU17N27HQNZhGGo...)",
+ "idl": "pump-fun/pump-public-docs idl/pump_amm.json @ 8cda1fa30ea658b20909d8aedf002047119388d2 (sha256 b7d8c57a4d9c4dd0109a9ab893052352333252d4eedced10ac091d4d66cab89b)",
+ "method": "PORTED, not executed: each case's inputs and expected result are copied from the SDK's own spec files (expected values written by pump.fun). The SDK's code wasn't run here.",
+ "files_sha256": {
+  "src/sdk/sell.ts": "97bf00f0f7b4d1d694a0143f603b8f103bdcc0943a86cfdc75492eb52ca8d94b",
+  "src/sdk/buy.ts": "f0da0f9a62fe2eab0c5780205b61abcce8d20686f81b7896a9b00db377bc0f12",
+  "src/__tests__/boost.spec.ts": "bfe67a78a7a89d794b0ad476acc599b0ff2ee8e0281fff5447edbafae677fb59",
+  "src/__tests__/tradeV2.spec.ts": "14f92f55cdec7520be4ac9d97c53ddcf482cca96d1c7556960dc4180ba5a71b2",
+  "src/sdk/offlinePumpAmm.ts": "ac8312ce476d56f6ce9d47019ba779144fa4c3f3b9db2939693f4b12a727b50b"
+ },
+ "pool_size": 287,
+ "fees_bps": {
+  "lp": 30,
+  "protocol": 20,
+  "creator": 0,
+  "coin_creator": "default (no creator fee)",
+  "from": "boost.spec.ts globalConfig: lpFeeBasisPoints 30, protocolFeeBasisPoints 20, coinCreatorFeeBasisPoints 0"
+ },
+ "cases": [
+  {
+   "id": "boost: the vault covers it, its real reserves don't",
+   "spec": "boost.spec.ts 'rejects sells the vault covers only with accrued fee buckets'",
+   "api": "sellBaseInput",
+   "base": 1000000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 900000,
+   "feeBuckets": 0,
+   "expected": {
+    "internalQuoteAmountOut": "950000"
+   }
+  },
+  {
+   "id": "boost: the same sell with 100000 of fee buckets",
+   "spec": "boost.spec.ts (same case, feeBucketsTotal 100_000)",
+   "api": "sellBaseInput",
+   "base": 1000000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 900000,
+   "feeBuckets": 100000,
+   "expected": {
+    "throw": "Insufficient real quote reserves to cover the sell output."
+   }
+  },
+  {
+   "id": "boost: output beyond the real reserves",
+   "spec": "boost.spec.ts 'rejects sells whose output exceeds the real quote reserves'",
+   "api": "sellBaseInput",
+   "base": 1000,
+   "baseReserve": 1000,
+   "quoteReserve": 1000,
+   "virtual": 1000000,
+   "feeBuckets": 0,
+   "expected": {
+    "throw": "Insufficient real quote reserves to cover the sell output."
+   }
+  },
+  {
+   "id": "boost: sellQuoteInput's gross outflow, 999000",
+   "spec": "boost.spec.ts 'checks sellQuoteInput's gross outflow'",
+   "api": "sellQuoteInput",
+   "quote": 999000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 1000000,
+   "feeBuckets": 0,
+   "expected": {
+    "throw": "Insufficient real quote reserves to cover the sell output."
+   }
+  },
+  {
+   "id": "boost: sellQuoteInput 990000 fits",
+   "spec": "boost.spec.ts (same, quote 990_000)",
+   "api": "sellQuoteInput",
+   "quote": 990000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 1000000,
+   "feeBuckets": 0,
+   "expected": {
+    "ok": true
+   }
+  },
+  {
+   "id": "boost: ... until 10000 of it is fee buckets",
+   "spec": "boost.spec.ts (same, feeBucketsTotal 10_000)",
+   "api": "sellQuoteInput",
+   "quote": 990000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 1000000,
+   "feeBuckets": 10000,
+   "expected": {
+    "throw": "Insufficient real quote reserves to cover the sell output."
+   }
+  },
+  {
+   "id": "tradeV2: fee buckets are not liquidity",
+   "spec": "tradeV2.spec.ts 'PumpAmmSdk sells check the vault net of pool.protocolFees + pool.creatorFees'",
+   "api": "sellBaseInput",
+   "base": 1000000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 900000,
+   "feeBuckets": 100000,
+   "protocol_fees": 60000,
+   "creator_fees": 40000,
+   "expected": {
+    "throw": "Insufficient real quote reserves to cover the sell output."
+   }
+  },
+  {
+   "id": "tradeV2: after the sweep",
+   "spec": "tradeV2.spec.ts (swept: buckets 0, virtual 1_000_000, sell 500_000)",
+   "api": "sellBaseInput",
+   "base": 500000,
+   "baseReserve": 1000000,
+   "quoteReserve": 1000000,
+   "virtual": 1000000,
+   "feeBuckets": 0,
+   "expected": {
+    "ok": true
+   }
+  }
+ ]
+}
