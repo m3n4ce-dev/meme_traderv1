@@ -4,6 +4,28 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #77: The owner's three decisions - T9-E1's loss rule, the recorder on the paid stream, Q1 frozen
+
+1. **T9-E1's daily loss rule is `net+cap`** (`t9_portfolio.REGISTERED_RISK`).
+   - **What it does:** entries halt for the day once its net loss (plus overdue reservations) reaches 0.5 SOL, or its gross losses reach 1.0 SOL. Both numbers were frozen before power v6 ran.
+   - **Why:** the owner asked for the rule with the best returns. In v6 it had the highest total and pass rate in every scenario with an edge: half the replay's winner rate, flat, at A3, pass 0.87 against 0.73, total +31 against +20 SOL.
+   - **Its cost:** with no edge it loses more (−5.7 against −3.3 SOL over 90 days at A2), and its median worst day is about −0.9 SOL. The reviewer had advised keeping the gross rule.
+   - **The default:** `Portfolio()` stays "gross", so the earlier reviews' contracts keep their meaning.
+   - **Scope:** paper; nothing else about the bot changes.
+2. **The wallet recorder streams from the bot's paid provider** (`wallets.stream_from: feed`, set locally), with PublicNode as the automatic fallback. While on the fallback, it retries the paid stream every 5 minutes. The stream's host is shown in the recorder's status; the URL is never logged.
+   - **Why:** v2 records split the revival test's 16.5 s chain-to-decision lag into 10.9 s from the free stream and 5.6 s from the recorder's 5 s flush plus the test's read. The paid stream measured ~1.5 s.
+   - **Its cost:** about 0.9 MB/s on the flat-rate plan.
+   - **The default** stays `public`.
+3. **Q1 is frozen** (`research/registrations/Q1-quote-qualification.md`, scored by `sniper/q1.py`, `python -m meme_trader.sniper q1-report`).
+   - **The window:** 2026-10-08 to 2026-10-21 UTC. It extends a day at a time, to at most 28 days, only while a guard is short.
+   - **The reviewer's targets, kept:** clustered pool-day lower bounds of 95% (eventual) and 90% (first try) per exit cell; 200 matured exits per cell; 30 pools; 100 pool-days.
+   - **One change:** two estimands.
+     - **Availability** (the provider's coherent, fresh, in-time read) is what may replace A1–A5 in power.
+     - **Execution qualification** additionally needs the pool's layout documented. A failure caused by undocumented pool bytes reads `FAIL (undocumented pool layout)`.
+   - **Why the change:** most revival pools carry undocumented bytes, so a single qualified target would have turned a documentation gap into a false outage rate.
+
+---
+
 ## 2026-10-07 — Entry #76: The eleventh review: credentials kept out of every record, quotes on a strict clock and qualified honestly, price marks in chain order, the ledger's acceptance work, paired risk and drift sensitivities
 
 **Source:** an eleventh external review (GPT 6.1 Sol, revision 829bd7c).

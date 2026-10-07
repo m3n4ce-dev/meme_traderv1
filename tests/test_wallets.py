@@ -218,3 +218,36 @@ def test_register_freeze_eval_end_to_end(tmp_path, monkeypatch):
     (pol_dir / "wallets-v1.yaml").write_text((pol_dir / "wallets-v1.yaml").read_text().replace("runner_x: 3.0", "runner_x: 2.0"))
     with pytest.raises(study.StudyError, match="changed since registration"):
         study.cmd_eval(study.load_policy("wallets-v1", pol_dir), data_dir)
+
+
+# --------------------------------------------------------------------------- the stream's source (2026-10-07)
+def test_the_stream_source_is_public_by_default_and_the_feeds_endpoint_first_when_asked(tmp_path):
+    import asyncio
+
+    import aiohttp
+
+    from meme_trader import redact
+    from meme_trader.wallets import recorder as rec
+    cfg = _cfg()
+    feed = "wss://paid.example/?api_key=DUMMY_RECORDER_KEY_123"
+    assert rec.stream_urls(cfg, feed) == rec.WS_URLS                                 # "public" unless configured
+    cfg["stream_from"] = "feed"
+    assert rec.stream_urls(cfg, feed) == [feed] + rec.WS_URLS                         # paid first, PublicNode fallback
+    assert rec.stream_urls(cfg, "") == rec.WS_URLS                                    # no feed endpoint: public
+    assert "DUMMY_RECORDER_KEY_123" not in redact.redact(f"error on {feed.replace('wss', 'https')}")
+
+    r = Recorder(cfg, tmp_path, ws_urls=rec.stream_urls(cfg, feed))
+    r.active = True
+    calls = []
+
+    async def fake(s, url, host, fallback):
+        calls.append((host, fallback))
+        if len(calls) == 1:
+            raise aiohttp.ClientConnectionError(f"cannot connect to {url}")
+        raise asyncio.CancelledError
+    r._stream_from = fake
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(r.stream_loop(None))
+    assert calls == [("paid.example", False), ("solana-rpc.publicnode.com", True)]   # the primary down: the fallback
+    assert all("DUMMY_RECORDER_KEY_123" not in e for e in r.errors) and "paid.example" in r.errors[0]
+
