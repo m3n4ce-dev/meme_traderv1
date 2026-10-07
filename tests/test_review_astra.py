@@ -71,8 +71,8 @@ def test_an_unknown_order_counts_as_never_landed_only_with_proof():
     assert f.unknown and f.landed and not f.expired                                    # landed: wait for its amounts
     f = resolve(Chain(status={"err": {"InstructionError": [0, "x"]}}), blockhash="bh")
     assert not f.ok and not f.unknown and f.fees_lost > 0                              # landed and failed
-    assert not resolve(Chain(status=None), age_s=60).expired                            # no blockhash: too young
-    assert resolve(Chain(status=None), age_s=200).expired                               # ...older than any blockhash
+    assert not resolve(Chain(status=None), age_s=60).expired                            # no blockhash: no proof...
+    assert not resolve(Chain(status=None), age_s=99_999).expired                        # ...however old (reconcile it)
 
 
 class Unknown:
@@ -166,14 +166,15 @@ def test_a_late_trade_doesnt_roll_the_price_back():
 
 
 # --------------------------------------------------------------------------- D, E
-def test_a_paper_sell_can_cost_more_than_it_fetches_and_mayhem_shares_use_2b():
+def test_a_paper_sell_can_cost_more_than_it_fetches_and_mayhem_shares_are_of_the_tradable_supply():
     dust = asyncio.run(PaperExecutor(P.sniper.execution).sell(M, Curve(30.0, 1_073_000_000.0), 1.0))
     assert dust.ok and dust.sol < 0                                          # the fee is bigger than the proceeds
     s = TokenState(M, Launch(M, 0.0, "dev", symbol="MH"), 0.0)
     s.holders["whale"] = 100e6
     assert s.top_holders_pct(1) == pytest.approx(10.0)
     s.on_trade(Trade(M, 1.0, MAYHEM_AGENT, "buy", 0.1, 1e6, 31, 1.07e9), 5)
-    assert s.mayhem and s.top_holders_pct(1) == pytest.approx(5.0)          # 100M of 2B minted
+    assert s.mayhem and s.top_holders_pct(1) == pytest.approx(10.0)         # of the 1B on the curve: the other ~1B
+    assert s.market_cap_sol == pytest.approx(s.curve.price * 2e9)           # is the agent's; market cap counts all 2B
 
 
 # --------------------------------------------------------------------------- the owner: no Mayhem coins

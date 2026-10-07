@@ -1,0 +1,1113 @@
+diff --git a/meme_trader/agents/executor.py b/meme_trader/agents/executor.py
+index cb564b1..c2e81ec 100644
+--- a/meme_trader/agents/executor.py
++++ b/meme_trader/agents/executor.py
+@@ -20,6 +20,12 @@ class Executor:
+         self.wallet = wallet
+         if params.mode == "live" and (wallet is None or not jupiter.has_key()):
+             raise RuntimeError("live mode needs a wallet and JUPITER_API_KEY")
++        if params.mode == "live" and not getattr(params, "allow_unproven_live_executor", False):
++            # Two external reviews (2026-10-06): this executor confirms and measures balances, but has none of the
++            # pump.fun engine's unresolved-order lifecycle (signature history, blockhash expiry, no re-send while
++            # unknown). Until it shares that lifecycle, it doesn't trade real money.
++            raise RuntimeError("the DexScreener bot's live executor is blocked until it shares the pump.fun engine's "
++                               "unresolved-order handling (see docs/BUILD_LOG.md #62). Paper mode works.")
+ 
+     # ---- pre-trade checks -------------------------------------------------
+     def _quote(self, order: Order) -> dict:
+diff --git a/meme_trader/sniper/edge.py b/meme_trader/sniper/edge.py
+index 3ef779a..1b2fe6e 100644
+--- a/meme_trader/sniper/edge.py
++++ b/meme_trader/sniper/edge.py
+@@ -10,6 +10,7 @@ from collections import defaultdict
+ 
+ SOURCES = {"late": "Graduation plays", "sniper": "Sniper", "copy": "Copy trading", "callout": "Callouts", "manual": "Your own trades"}
+ MIN_N = 30
++MIN_DAYS = 5               # independent day blocks before any "promising" or "real" verdict
+ 
+ 
+ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) -> dict:
+@@ -36,8 +37,8 @@ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) ->
+     best = sorted(rows, key=lambda t: -t["pnl"])
+     without3 = sum(t["pnl"] for t in best[3:])
+     days: dict[str, list] = defaultdict(list)
+-    for t in rows:
+-        days[time.strftime("%Y-%m-%d", time.localtime(t["opened"]))].append(t)
++    for t in rows:                                     # UTC days, as the range above and the research replays
++        days[time.strftime("%Y-%m-%d", time.gmtime(t["opened"]))].append(t)
+     by_day = [{"day": d, "n": len(v), "pnl": sum(t["pnl"] for t in v),
+                "ret_pct": sum(t["pnl"] for t in v) / sum(t["cost"] for t in v) * 100,
+                "win_rate": sum(t["pnl"] > 0 for t in v) / len(v)} for d, v in sorted(days.items())]
+@@ -54,6 +55,11 @@ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) ->
+         level, verdict = "early", f"Too early to say: {len(rows)} trades. Wait for at least {MIN_N}."
+     elif hi < 0:
+         level, verdict = "bad", "Losing, and not by bad luck: even the hopeful end of the range is below zero."
++    elif len(groups) < MIN_DAYS:                       # a range from one or two days is mostly within-day noise
++        level, verdict = "early", (f"Too few days to judge: {len(groups)} UTC day{'s' if len(groups) != 1 else ''} of "
++                                   f"trades. Wait for at least {MIN_DAYS}: same-day trades share their market.")
++    elif hi < 0:
++        level, verdict = "bad", "Losing, and not by bad luck: even the hopeful end of the range is below zero."
+     elif lo > 0 and without3 > 0 and len(rows) >= 100 and span_d >= 7:
+         level, verdict = "good", "Looks real so far: positive even without its three best trades, over a week or more. Keep it running unchanged."
+     elif lo > 0 and without3 > 0:
+diff --git a/meme_trader/sniper/engine.py b/meme_trader/sniper/engine.py
+index f731dea..dba6b08 100644
+--- a/meme_trader/sniper/engine.py
++++ b/meme_trader/sniper/engine.py
+@@ -269,6 +269,9 @@ class Engine:
+         self.linked_x: dict[str, dict] = {}                # what a coin's X link is (read as it gets active)
+         self._x_next_at, self._x_day = 0.0, ("", 0)
+         self._x_cache: dict[str, tuple[float, dict]] = {}  # link -> (read at, what it is): a shared link is read once
++        self._mayhem_q: deque = deque()                     # coins whose curve account is to be read for Mayhem mode
++        self._mayhem_busy: dict[str, int] = {}              # mint -> failed reads so far (in the queue or reading)
++        self._mayhem_next = 0.0
+         self._last_x_scan = 0.0
+         # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
+         from .gradlog import GradLog
+@@ -449,6 +452,10 @@ class Engine:
+         why = self._global_block(manual=source == "manual")
+         if why:
+             return why
++        if source != "manual" and self._skip_mayhem():     # the owner: no Mayhem coins for any automated buy
++            why = self._mayhem_block(self.tokens.get(mint))
++            if why:
++                return why
+         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
+             trading = sum(1 for p in self.positions.values() if p.source != "callout")
+             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
+@@ -467,6 +474,53 @@ class Engine:
+         """market.skip_mayhem (the owner, 2026-10-06): the bots stay out of Mayhem-mode coins."""
+         return bool((self.p.get("market") or {}).get("skip_mayhem", True))
+ 
++    def _mayhem_block(self, s) -> str:
++        """Why an automated buy of `s` can't go ahead under skip_mayhem: it is Mayhem, or (the real bot) nobody has read
++        its curve yet - unknown doesn't count as safe. Replays, demos and tests don't read accounts: there, only a
++        seen agent trade counts."""
++        if s is None:
++            return ""
++        if s.mayhem:
++            return "Mayhem mode"
++        if self.feed.realtime and self.persist and not s.mayhem_checked:
++            self._check_mayhem(s)
++            return "checking Mayhem mode"
++        return ""
++
++    def _check_mayhem(self, s) -> None:
++        """Queue a read of the coin's curve account (live feed only; once per coin)."""
++        if self.feed.realtime and self.persist and s.launch is not None and not s.mayhem and not s.mayhem_checked \
++                and s.mint not in self._mayhem_busy and len(self._mayhem_q) < 500:
++            self._mayhem_busy[s.mint] = 0
++            self._mayhem_q.append(s.mint)
++
++    def _mayhem_tick(self) -> None:
++        """Up to 4 reads a second, off the event loop; a failed read is retried twice, then left unknown."""
++        if not self._mayhem_q or time.time() < self._mayhem_next:
++            return
++        self._mayhem_next = time.time() + 0.25
++        mint = self._mayhem_q.popleft()
++
++        async def read():
++            from .mayhem import lookup
++            try:
++                yes = await asyncio.to_thread(lookup, mint)
++            except Exception:
++                n = self._mayhem_busy.get(mint, 0) + 1
++                if n < 3:
++                    self._mayhem_busy[mint] = n
++                    self._mayhem_q.append(mint)
++                else:
++                    self._mayhem_busy.pop(mint, None)
++                return
++            self._mayhem_busy.pop(mint, None)
++            s = self.tokens.get(mint)
++            if s is not None:
++                s.mayhem_checked = True
++                if yes:
++                    s.mayhem = True
++        asyncio.create_task(read())
++
+     @staticmethod
+     def _mtime(path: Path) -> float:
+         try:
+@@ -810,6 +864,21 @@ class Engine:
+                           notes=[f"copy {label}", f"leader {e.sol:.2f} SOL"], source=f"copy:{label}", leader=e.trader,
+                           ref_price=e.sol / e.tokens if e.tokens else s.curve.price)
+ 
++    def _still_eligible(self, s: TokenState, kind: str) -> str:
++        """After an AI vote (seconds later): its hard gates again - Mayhem, the window, red flags, the creator's
++        launches, the insider cluster - not its momentum, which naturally moves while the team votes."""
++        if s.mayhem and self._skip_mayhem():
++            return "Mayhem mode"
++        if kind == "late":
++            ok, why = evaluate_late_entry(s, self.now, self.p.late, self._late_red(s))
++            if not ok and why in ("window", "red flag", "serial deployer", "insider cluster", "Mayhem mode", "too young"):
++                return why
++        elif kind == "sniper":
++            d = evaluate_entry(s, self.now, self.p.entry, self._ctx(s))
++            if d.action == "reject":
++                return d.notes[0] if d.notes else "no longer eligible"
++        return ""
++
+     def _copy_blocked(self, s: TokenState, e: Trade) -> str:
+         c, en = self.p.copy, self.p.entry
+         blocked = self.entries_blocked(c.buy_sol)
+@@ -882,6 +951,10 @@ class Engine:
+             if pr.require_positive_ev and self._ev(s.p) < 0:
+                 s.score_notes = [f"negative EV ({self._ev(s.p):+.0f}%)"] + s.score_notes
+                 return
++        if self._skip_mayhem() and self._mayhem_block(s):
++            if s.mayhem:
++                s.decided = "rejected: Mayhem mode"
++            return                                       # being read: decided on a later tick
+         blocked = self.entries_blocked() if self.p.entry.enabled else "sniper off"
+         practice = bool(blocked) and self._practicing(blocked)
+         if blocked:
+@@ -1163,7 +1236,7 @@ class Engine:
+         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
+         notes = notes + [f"desk x{v.size_mult:.2f}"]
+         size = self._size(s, kind, score, buy_sol, v.size_mult, notes)
+-        why = self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
++        why = self._still_eligible(s, kind) or self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
+             ("the curve is too thin to size a buy" if size <= 0 else "") or \
+             (f"price moved {moved:+.0f}% during review" if moved > self.p.desk.max_price_move_pct else "") or \
+             ("dev sold" if (not late_dev_ok(s, self.p.late) if kind == "late" else s.dev_sold) else "")
+@@ -1239,7 +1312,7 @@ class Engine:
+             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
+                                                     "add": bool((meta or {}).get("add")),
+                                                     "notes": list(notes), "source": source, "leader": leader},
+-                                   fill.blockhash)
++                                   fill.blockhash, fill.landed)
+             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
+                               "its cash stays reserved until the chain says", s.mint)
+             return
+@@ -1466,7 +1539,7 @@ class Engine:
+         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
+             self._book_fees_lost(fill, s)
+             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason},
+-                                   fill.blockhash)
++                                   fill.blockhash, fill.landed)
+             self.say("error", f"sell {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - no new "
+                               "sell until the chain says", s.mint)
+             return
+@@ -1511,10 +1584,29 @@ class Engine:
+             self._close(pos, s)
+         self.save_state()
+ 
+-    def _track_unresolved(self, sig: str, order: dict, blockhash: str = "") -> None:
+-        self.unresolved[sig] = {**order, "sent_at": time.time(), "blockhash": blockhash}
++    def _track_unresolved(self, sig: str, order: dict, blockhash: str = "", landed: bool = False) -> None:
++        self.unresolved[sig] = {**order, "sent_at": time.time(), "blockhash": blockhash, "landed": bool(landed)}
+         self.save_state()
+ 
++    def reconcile_unresolved(self, sig: str, outcome: str) -> str:
++        """The owner settles an order the chain can't prove either way (no blockhash recorded): "not landed" after
++        checking the wallet's history (a buy's cash is released, a coin's sells resume). An order the chain showed
++        landed can't be settled as not landed. "" or why not."""
++        o = self.unresolved.get(sig)
++        if o is None:
++            return "no such unresolved order"
++        if outcome != "not landed":
++            return "only 'not landed' can be settled by hand; a landed order is booked from its transaction"
++        if o.get("landed"):
++            return "the chain showed this order landed: it can't be settled as not landed"
++        del self.unresolved[sig]
++        if o["side"] == "buy":
++            self.book.reserved.pop(o["mint"], None)
++        self.pending.discard(o["mint"])
++        self.say("info", f"{o['side']} {sig[:8]}… settled by the owner as not landed", o["mint"])
++        self.save_state()
++        return ""
++
+     async def _resolve_unresolved(self) -> None:
+         """Ask the chain about orders whose outcome was unknown. Landed: book them (a late buy becomes a
+         managed position). It counts as never landed only with proof (the executor's `expired`): an RPC error or a
+@@ -1536,6 +1628,12 @@ class Engine:
+                 fill = await resolve(sig, mint, o["side"], blockhash=o.get("blockhash", ""), age_s=age)
+             except Exception:
+                 continue
++            if fill.landed and not o.get("landed"):     # once seen landed, it never becomes "never landed"
++                o["landed"] = True
++                self.save_state()
++            if fill.unknown and fill.expired and o.get("landed"):
++                fill = SniperFill(False, unknown=True, landed=True, signature=sig,
++                                  error="it landed earlier: its record is missing now, not its trade")
+             if fill.unknown and not fill.expired:
+                 if age >= UNRESOLVED_ALERT_S and not o.get("alerted"):
+                     o["alerted"] = True
+@@ -1716,6 +1814,7 @@ class Engine:
+             self._maybe_reload_model()
+         await self._maybe_callout()
+         await self._maybe_late()
++        self._mayhem_tick()
+         self._model_picks()
+         self._x_intel()
+         if self.gradlog is not None:
+@@ -1988,6 +2087,8 @@ class Engine:
+             if self.feed.realtime and self.persist and s.mint not in self.linked_x and s.launch is not None \
+                     and s.launch.twitter and not s.migrated and s.curve.progress * 100 >= L.min_curve_pct - 15:
+                 self._read_x_link(s)
++            if s.curve.progress * 100 >= L.min_curve_pct - 15 and not s.migrated and self._skip_mayhem():
++                self._check_mayhem(s)                    # known before it qualifies, so the buy isn't delayed
+             if not s.decided or s.late_tried or s.mint in self.positions or s.mint in self.pending \
+                     or s.mint in self.reviewing or not s.price_known:
+                 continue
+@@ -2000,6 +2101,10 @@ class Engine:
+                 if why in SKIP_FOR_GOOD:                   # it qualified but looks like the dump profile: never this coin
+                     s.late_tried = True
+                 continue
++            if self._skip_mayhem() and self._mayhem_block(s):   # not known yet: read it, look again next scan
++                if s.mayhem:
++                    s.late_tried = True
++                continue
+             if practice:
+                 if self._practice_n >= 3:                # a few at a time: each review is 4 model calls
+                     break
+diff --git a/meme_trader/sniper/execution.py b/meme_trader/sniper/execution.py
+index 922c0f2..a82e1e4 100644
+--- a/meme_trader/sniper/execution.py
++++ b/meme_trader/sniper/execution.py
+@@ -37,9 +37,6 @@ class SniperFill:
+         return self.sol / self.tokens if self.tokens else 0.0
+ 
+ 
+-UNKNOWN_EXPIRES_S = 150    # older than any blockhash lives (~60-90 s): with no blockhash recorded, the age proves it
+-
+-
+ class PaperExecutor:
+     def __init__(self, ex):
+         self.fee = ex.curve_fee_pct + ex.platform_fee_pct
+@@ -180,17 +177,11 @@ class LiveExecutor:
+             return fill
+         if not landed:                               # not confirmed and not found: we don't know yet
+             return SniperFill(False, unknown=True, signature=sig, blockhash=bh, error="not confirmed yet - outcome unknown")
+-        # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
+-        if action == "buy":
+-            try:
+-                tokens = w.token_balance(mint) / 1e6         # we never buy a mint we already hold
+-            except Exception:
+-                tokens = 0.0
+-            if tokens <= 0:
+-                return SniperFill(False, unknown=True, landed=True, signature=sig, blockhash=bh,
+-                                  error="confirmed but token balance not visible yet")
+-            return SniperFill(True, sol=float(amount), tokens=tokens, signature=sig, error="estimated")
+-        return SniperFill(True, sol=estimate_sol, tokens=float(amount), signature=sig, error="estimated")
++        # confirmed, but the transaction itself isn't retrievable yet: it LANDED, its amounts are unknown. No guess
++        # (the wallet's whole balance can include an earlier position; a quote isn't a fill): it stays unresolved,
++        # its cash reserved, until resolve() reads the transaction's own amounts (a second review, 2026-10-06).
++        return SniperFill(False, unknown=True, landed=True, signature=sig, blockhash=bh,
++                          error="confirmed; its amounts aren't retrievable yet")
+ 
+     def _close_if_empty(self, mint: str) -> float:
+         """Close the emptied token account; SOL actually reclaimed (only once its close is confirmed)."""
+@@ -268,9 +259,9 @@ class LiveExecutor:
+                     if valid:
+                         return unknown("not on-chain yet; it can still land")
+                     return unknown("not in the chain's history and its blockhash has expired: it never landed", expired=True)
+-                if age_s >= UNKNOWN_EXPIRES_S:
+-                    return unknown("not in the chain's history, long past any blockhash's life: it never landed", expired=True)
+-                return unknown("not on-chain yet")
++                # no blockhash recorded: wall-clock age doesn't prove block-height expiry (a stalled chain or RPC can
++                # outlast it), so it stays unresolved until someone reconciles it (Engine.reconcile_unresolved)
++                return unknown("not on-chain; no blockhash recorded to prove it can't still land - reconcile it")
+             fill = self._fill_from(d, action, sig)
+             if fill.ok and action == "sell":
+                 try:
+diff --git a/meme_trader/sniper/funding.py b/meme_trader/sniper/funding.py
+index b69cf51..bf30f2a 100644
+--- a/meme_trader/sniper/funding.py
++++ b/meme_trader/sniper/funding.py
+@@ -142,7 +142,7 @@ def cluster_report(s, wallets: list[str], funders: dict, fanout: Counter, exchan
+     for f, ws in groups.items():
+         if len(ws) >= 2:
+             linked.update(ws)                     # several early buyers share one (non-exchange) funder
+-    pct = sum(s.holders.get(w, 0.0) for w in linked) / getattr(s, "supply", TOTAL_SUPPLY) * 100
++    pct = sum(s.holders.get(w, 0.0) for w in linked) / TOTAL_SUPPLY * 100     # of the tradable 1B (tracker.TRADABLE)
+     biggest = max((len(v) for v in groups.values()), default=0)
+     known = sum(1 for w in wallets if funders.get(w, ("", ""))[0])
+     return {"pct": pct, "linked": len(linked), "biggest_group": biggest, "known": known, "cohort": len(wallets)}
+diff --git a/meme_trader/sniper/research.py b/meme_trader/sniper/research.py
+index e8d71f3..3f11ad5 100644
+--- a/meme_trader/sniper/research.py
++++ b/meme_trader/sniper/research.py
+@@ -160,10 +160,60 @@ def code_revision() -> str:
+     return (rev or "unknown") + ("+dirty" if dirty else "")
+ 
+ 
++def manifest(files: list | None = None) -> dict:
++    """What a result rests on beyond its settings (a second review, 2026-10-06): the code (commit, and the exact
++    uncommitted patch by its hash, saved beside the research log), the installed packages, the model files, and each
++    input recording (size, and a hash of its first and last MB: cheap, and it changes if the file does)."""
++    import hashlib
++    from importlib import metadata
++
++    from ..config import ROOT
++
++    out: dict = {"code_revision": code_revision()}
++    try:
++        diff = subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD", "--", "meme_trader", "config/params.example.yaml"],
++                              capture_output=True, text=True, timeout=10).stdout
++    except (OSError, subprocess.SubprocessError):
++        diff = ""
++    if diff:
++        h = hashlib.sha256(diff.encode()).hexdigest()[:16]
++        out["patch"] = h
++        try:
++            d = ROOT / "research" / "patches"
++            d.mkdir(parents=True, exist_ok=True)
++            (d / f"{h}.patch").write_text(diff)
++        except OSError:
++            pass
++    pkgs = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"])
++    out["packages"] = hashlib.sha256("\n".join(pkgs).encode()).hexdigest()[:16]
++    out["models"] = {}
++    for name in ("model.json", "model-trees.json"):
++        f = ROOT / "data" / name
++        if f.exists():
++            out["models"][name] = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
++    ins = {}
++    for f in files or []:
++        f = Path(f)
++        try:
++            size = f.stat().st_size
++            with f.open("rb") as fh:
++                head = fh.read(1 << 20)
++                fh.seek(max(0, size - (1 << 20)))
++                tail = fh.read(1 << 20)
++            ins[f.name] = {"bytes": size, "sha_ends": hashlib.sha256(head + tail).hexdigest()[:16]}
++        except OSError:
++            ins[f.name] = {"bytes": None}
++    if ins:
++        out["inputs"] = ins
++    return out
++
++
+ def write_lock(pol: dict, at: str, h: str) -> None:
+     sn = json.loads(json.dumps(policy_params(pol)["sniper"], default=str))
++    m = manifest()
+     lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn,
+-                                          "code_revision": code_revision()}, indent=1, sort_keys=True) + "\n")
++                                          "code_revision": m["code_revision"], "manifest": m},
++                                         indent=1, sort_keys=True) + "\n")
+ 
+ 
+ def code_note(pol: dict) -> dict:
+@@ -639,6 +689,13 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
+     rep["gates"] = gates_check(pol, rep)
+     rep["verdict"] = "PASS" if rep["gates"]["pass"] else "FAIL"
+     rep.update(code_note(pol))
++    rep["manifest"] = manifest(paths)
++    if rep.get("code_changed_since_freeze"):            # not the code that was registered: no verdict on it
++        rep["verdict_on_frozen_code"] = None
++        rep["verdict"] = f"INVALID (code changed since the freeze: {rep['code_at_freeze']} -> {rep['code_revision']}); " \
++                         f"exploratory {rep['verdict']} on today's code"
++    elif rep.get("code_changed_since_freeze") is None:
++        rep["provenance"] = "the code at the freeze wasn't recorded: this verdict can't prove it ran the frozen code"
+     stored.parent.mkdir(parents=True, exist_ok=True)
+     stored.write_text(json.dumps(rep, indent=1, default=str))
+     log_experiment({"kind": "final", "policy": pol["name"], "hash": rep["hash"], "verdict": rep["verdict"],
+diff --git a/meme_trader/sniper/revival.py b/meme_trader/sniper/revival.py
+index 03e7335..b926386 100644
+--- a/meme_trader/sniper/revival.py
++++ b/meme_trader/sniper/revival.py
+@@ -1,18 +1,33 @@
+-"""Second-life momentum: a live forward test on established coins. Nothing is traded.
++"""Second-life momentum: an exploratory forward test on established coins. Nothing is traded.
+ 
+ Found in the wallet study's recording of PumpSwap trades (pump.fun coins 2+ days old with $5k+ liquidity, Oct 4-6):
+ when such a coin jumps 40%+ in 5 minutes on 4x its usual volume, buying a minute later and holding 1-2 hours made money
+-on each of the three days, after 1.2% costs, and more with the fill 60 s late than 5 s late. Unlike the bonding curve,
+-speed doesn't decide it. But a few revivals carried it (+664% to +1318% on real volume): without each day's best trade
+-it was about flat. Three days can be luck, so this follows every signal from now on, on trades it never saw.
++on each of the three days, after 1.2% costs, and more with the fill 60 s late than 5 s late. A few revivals carried it
++(+664% to +1318% on real volume): without each day's best trade it was about flat. Three days can be luck.
+ 
+-Reads the recorder's live file (data/wallets/trades-YYYY-MM-DD.jsonl, flushed every ~5 s). Each signal opens a follow
+-per fill delay; entries and exits fill at the first trade at least that long after the signal (or the exit's trigger),
+-costs COST round trip. Results: data/revival.jsonl, Analytics -> Exit lab -> Second-life momentum.
++EXPLORATORY: 3 rules x 2 fill delays x 3 exits are correlated looks at the same signals, not independent tests. A
++confirmatory test freezes ONE rule, delay, exit and order size, then starts fresh (a second review, 2026-10-06).
++
++How it follows, so that a result means something a bot could have done:
++* Clocks. Trades carry their chain time; the evaluator also knows when it READ them (the recorder flushes every ~5 s,
++  and after a restart it reads what it missed). A signal is decided when it was seen; the buy fills at the first trade
++  at least `delay` after that decision; a stop is noticed when its trade is read and sells `delay` after; a hold sells at
++  the first trade `delay` after its time is up. Nothing fills before it could have been decided.
++* Costs per follow: 0.3% fee a side plus price impact for ORDER_SOL against the pool's SOL depth then (its last
++  liquidity reading at or before the signal, from the recorder's pools.json); a flat 1.2% only when depth is unknown.
++* No sale, no result. A pool that stops trading leaves its follow CENSORED (no executable sale was seen), counted
++  apart with its last-trade mark, never booked as a P&L.
++* A control. Each signal also follows a random other active, established pool at the same moment, on the same delays
++  and exits: what "any coin, same time" made.
++* Restarts. Open follows, cooldowns and the file position are saved (data/revival_state.json); on restart it resumes
++  where it stopped. Every signal stays in the books: closed, censored, or open.
++
++Results: data/revival.jsonl, Analytics -> Exit lab -> Second-life momentum.
+ """
+ from __future__ import annotations
+ 
+ import json
++import random
+ import statistics
+ import time
+ from collections import deque
+@@ -20,42 +35,88 @@ from pathlib import Path
+ 
+ RULES = {"+40% in 5 min, volume x4": (0.40, 4.0), "+30% in 5 min, volume x4": (0.30, 4.0),
+          "+20% in 5 min, volume x4": (0.20, 4.0)}
+-DELAYS = (5, 60)                                   # seconds from the signal to the fill
++DELAYS = (5, 60)                                   # seconds from the decision to the fill
+ EXITS = {"hold 1 h": (None, 3600), "hold 2 h": (None, 7200), "stop 30%, hold 1 h": (0.30, 3600)}
+-COST = 0.012                                       # round trip: 0.3% fee + ~0.3% price impact, each side
++FEE = 0.003                                        # PumpSwap: ~0.25% to the pool + protocol, each side
++ORDER_SOL = 0.25                                   # the order size the impact is costed for
++FLAT_COST = 0.012                                  # round trip, when the pool's depth isn't known
+ HISTORY_S = 3900                                   # a pool's last 65 min: 5-min move against the hour before
+ CHECK_S = 30                                       # a pool is checked at most this often
+ COOLDOWN_S = 7200                                  # one signal per pool and rule in this long
+-WARMUP_BYTES = 20_000_000                          # on start, the file's last ~20 MB rebuild the pools' recent history
++ACTIVE_S = 300                                     # a control pool traded within this long
++WARMUP_BYTES = 20_000_000                          # history (no signals) read before the resume point
++DEAD_S = 1800                                      # due, and no trade this long after: censored
+ 
+ 
+ class Revival:
+-    def __init__(self, data_dir: Path, now: float | None = None):
++    def __init__(self, data_dir: Path, now: float | None = None, seed: int = 7):
+         self.src = Path(data_dir) / "wallets"
+-        self.out = Path(data_dir) / "revival.jsonl"
++        self.out = Path(data_dir) / "revival-v2.jsonl"           # v2: decision clocks, censoring, costs, control
++        self.state_path = Path(data_dir) / "revival-v2-state.json"
+         self.started = now if now is not None else time.time()
+         self.path: Path | None = None
+         self.offset = 0
++        self.warm_from: int | None = None              # history-only bytes to read first (offset after a restart)
+         self.rest = b""
+         self.pools: dict[str, deque] = {}            # pool -> (t, px, sol) of its last HISTORY_S
+         self.meta: dict[str, tuple] = {}             # pool -> (symbol, mint)
+         self.checked: dict[str, float] = {}
+-        self.fired: dict[tuple, float] = {}          # (pool, rule) -> last signal time
+-        self.open: dict[str, list[dict]] = {}       # pool -> its follows still running
++        self.fired: dict[str, float] = {}            # "pool|rule" -> last signal time (chain)
++        self.open: dict[str, list[dict]] = {}        # pool -> follows still running
+         self.done: list[dict] = []
+         self.newest_t = 0.0
++        self.lags: deque = deque(maxlen=500)          # seconds between a trade's chain time and our reading it
++        self.liq: dict = {}
++        self.liq_at = 0.0
++        self.sol_usd = 0.0
++        self.rng = random.Random(seed)
++        self._dirty = False
++        self._saved_at = 0.0
++        self.gaps: list = []                           # (from, to) wall times this evaluator wasn't reading
++        self.last_wall = 0.0
+         try:
+             self.done = [json.loads(x) for x in self.out.read_text().splitlines() if x.strip()]
+         except (OSError, ValueError):
+             self.done = []
++        try:
++            st = json.loads(self.state_path.read_text())
++            self.path = Path(st["path"]) if st.get("path") else None
++            self.offset = int(st.get("offset", 0))
++            self.warm_from = max(0, self.offset - WARMUP_BYTES) if self.path else None
++            self.fired = dict(st.get("fired") or {})
++            self.open = {p: fs for p, fs in (st.get("open") or {}).items() if fs}
++            if st.get("saved") and self.started - float(st["saved"]) > 120:
++                self.gaps.append((float(st["saved"]), self.started))     # down: no sell could go out then
++        except (OSError, ValueError, KeyError, TypeError):
++            pass
++
++    # ------------------------------------------------------------------ persistence
++    def save(self, force: bool = False) -> None:
++        if not (self._dirty or force) or (not force and time.time() - self._saved_at < 10):
++            return
++        st = {"path": str(self.path) if self.path else "", "offset": self.offset,
++              "fired": {k: v for k, v in self.fired.items() if self.newest_t - v < COOLDOWN_S},
++              "open": self.open, "saved": time.time()}
++        tmp = self.state_path.with_suffix(".tmp")
++        try:
++            tmp.write_text(json.dumps(st))
++            tmp.replace(self.state_path)
++            self._dirty, self._saved_at = False, time.time()
++        except OSError:
++            pass
+ 
+     # ------------------------------------------------------------------ reading
+     def _file_for(self, now: float) -> Path:
+         return self.src / f"trades-{time.strftime('%Y-%m-%d', time.gmtime(now))}.jsonl"
+ 
+     def tick(self, now: float | None = None, max_bytes: int = 8_000_000) -> int:
+-        """Read what the recorder wrote since the last call; returns the rows processed."""
++        """Read what the recorder wrote since the last call (seen at wall time `now`); returns rows processed."""
+         now = now if now is not None else time.time()
++        if self.last_wall and now - self.last_wall > 120:
++            self.gaps.append((self.last_wall, now))
++            self.gaps = self.gaps[-20:]
++        self.last_wall = now
++        self._load_liq(now)
+         want = self._file_for(now)
+         n = 0
+         if self.path is None:
+@@ -64,20 +125,46 @@ class Revival:
+                 size = want.stat().st_size
+             except OSError:
+                 return 0
+-            self.offset = max(0, size - WARMUP_BYTES)
+-            self.rest = b""
+-            if self.offset:
+-                with want.open("rb") as f:          # start on a whole line
+-                    f.seek(self.offset)
+-                    self.offset += len(f.readline())
+-        if want != self.path:                        # a new UTC day: finish yesterday's file, then switch
+-            n += self._read(max_bytes)
++            self.offset, self.warm_from = size, max(0, size - WARMUP_BYTES)
++        if self.warm_from is not None:                 # history before the resume point: pools only
++            self._warm(max_bytes)
++        if want != self.path:                          # a new UTC day: finish yesterday's file, then switch
++            n += self._read(max_bytes, now)
+             self.path, self.offset, self.rest = want, 0, b""
+-        n += self._read(max_bytes)
++            self._dirty = True
++        n += self._read(max_bytes, now)
+         self._expire(now)
++        self.save()
+         return n
+ 
+-    def _read(self, max_bytes: int) -> int:
++    def _warm(self, max_bytes: int) -> None:
++        """History before the resume point, a chunk a tick (pools only: no signals, no follows)."""
++        try:
++            with self.path.open("rb") as f:
++                f.seek(self.warm_from)
++                chunk = f.read(min(max_bytes, self.offset - self.warm_from))
++        except OSError:
++            self.warm_from = None
++            return
++        if not chunk:
++            self.warm_from = None
++            return
++        start, end = 0, chunk.rfind(b"\n")
++        if self.warm_from and not getattr(self, "_warm_aligned", False):
++            start = chunk.find(b"\n") + 1             # start on a whole line
++            self._warm_aligned = True
++        if end < start:
++            self.warm_from = None
++            return
++        self.warm_from += end + 1
++        if self.warm_from >= self.offset:
++            self.warm_from = None
++        for line in chunk[start:end].split(b"\n"):
++            r = self._row(line)
++            if r:
++                self._remember(*r)
++
++    def _read(self, max_bytes: int, seen: float) -> int:
+         try:
+             with self.path.open("rb") as f:
+                 f.seek(self.offset)
+@@ -87,6 +174,7 @@ class Revival:
+         if not chunk:
+             return 0
+         self.offset += len(chunk)
++        self._dirty = True
+         data = self.rest + chunk
+         cut = data.rfind(b"\n")
+         if cut < 0:
+@@ -95,18 +183,43 @@ class Revival:
+         self.rest = data[cut + 1:]
+         n = 0
+         for line in data[:cut].split(b"\n"):
+-            try:
+-                r = json.loads(line)
+-                t, px, sol = float(r["t"]), float(r["px"]), float(r["sol"])
+-            except (ValueError, KeyError, TypeError):
+-                continue
+-            if px > 0 and sol > 0:
+-                self.on_trade(r["pool"], t, px, sol, r.get("sym"), r.get("mint"))
++            r = self._row(line)
++            if r:
++                self.on_trade(*r, seen=seen)
+                 n += 1
+         return n
+ 
++    @staticmethod
++    def _row(line: bytes):
++        try:
++            r = json.loads(line)
++            t, px, sol = float(r["t"]), float(r["px"]), float(r["sol"])
++        except (ValueError, KeyError, TypeError):
++            return None
++        return (r["pool"], t, px, sol, r.get("sym"), r.get("mint")) if px > 0 and sol > 0 else None
++
++    def _load_liq(self, now: float) -> None:
++        if now - self.liq_at < 600:
++            return
++        self.liq_at = now
++        try:
++            pools = json.loads((self.src / "pools.json").read_text())
++            self.liq = {p: r.get("liq") or [] for p, r in pools.items()}
++            self.sol_usd = float(json.loads((self.src / "status.json").read_text()).get("sol_usd") or 0)
++        except (OSError, ValueError, AttributeError):
++            pass
++
++    def _cost(self, pool: str, t: float) -> tuple[float, str]:
++        """Round-trip cost of an ORDER_SOL order on `pool` at chain time `t`: fees + impact in and out."""
++        snaps = [usd for ts, usd in self.liq.get(pool, []) if ts <= t]
++        if not snaps or not self.sol_usd or snaps[-1] <= 0:
++            return FLAT_COST, "flat (depth unknown)"
++        sol_depth = snaps[-1] / 2 / self.sol_usd       # the pool's SOL side
++        impact = ORDER_SOL / max(sol_depth, 1e-9)
++        return 2 * FEE + 2 * impact, f"fees + impact on {sol_depth:.0f} SOL depth"
++
+     # ------------------------------------------------------------------ the rule and the follows
+-    def on_trade(self, pool: str, t: float, px: float, sol: float, sym=None, mint=None) -> None:
++    def _remember(self, pool: str, t: float, px: float, sol: float, sym=None, mint=None) -> deque:
+         self.newest_t = max(self.newest_t, t)
+         q = self.pools.get(pool)
+         if q is None:
+@@ -115,26 +228,50 @@ class Revival:
+         q.append((t, px, sol))
+         while q and q[0][0] < t - HISTORY_S - 60:
+             q.popleft()
++        return q
++
++    def on_trade(self, pool: str, t: float, px: float, sol: float, sym=None, mint=None, seen: float | None = None) -> None:
++        seen = t if seen is None else max(seen, t)
++        self.lags.append(seen - t)
++        q = self._remember(pool, t, px, sol, sym, mint)
+         fs = self.open.get(pool)
+         if fs:
+             for f in fs:
+-                self._follow(f, t, px)
++                self._follow(f, t, px, seen)
+             fs[:] = [f for f in fs if not f.get("finished")]
+             if not fs:
+                 del self.open[pool]
+-        if t - self.checked.get(pool, -1e18) < CHECK_S or t < self.started or not q or t - q[0][0] < HISTORY_S - 60:
++            self._dirty = True
++        if t - self.checked.get(pool, -1e18) < CHECK_S or seen < self.started or not q or t - q[0][0] < HISTORY_S - 60:
+             return
+         self.checked[pool] = t
+         ret5, surge = self._signal(q, t, px)
+         if ret5 is None:
+             return
+         for name, (need, vol) in RULES.items():
+-            if ret5 >= need and surge >= vol and t - self.fired.get((pool, name), -1e18) >= COOLDOWN_S:
+-                self.fired[(pool, name)] = t
+-                for d in DELAYS:
+-                    self.open.setdefault(pool, []).append({"pool": pool, "symbol": self.meta[pool][0], "mint": self.meta[pool][1], "rule": name,
+-                                      "delay": d, "signal_t": t, "signal_px": px, "ret5": round(ret5, 3),
+-                                      "surge": round(surge, 1), "exits": {}})
++            key = f"{pool}|{name}"
++            if ret5 >= need and surge >= vol and t - self.fired.get(key, -1e18) >= COOLDOWN_S:
++                self.fired[key] = t
++                self._open(pool, name, t, seen, ret5, surge, control=False)
++                twin = self._control_pool(pool, t)
++                if twin:
++                    self._open(twin, name, t, seen, None, None, control=True)
++                self._dirty = True
++
++    def _open(self, pool: str, rule: str, t: float, seen: float, ret5, surge, control: bool) -> None:
++        cost, how = self._cost(pool, t)
++        sym, mint = self.meta.get(pool, (None, None))
++        for d in DELAYS:
++            self.open.setdefault(pool, []).append({
++                "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
++                "signal_t": t, "decided_at": seen, "lag_s": round(seen - t, 1), "ret5": ret5 and round(ret5, 3),
++                "surge": surge and round(surge, 1), "cost": round(cost, 4), "cost_how": how, "exits": {}})
++
++    def _control_pool(self, pool: str, t: float) -> str:
++        """A random other pool trading now with an hour of history: the same moment, any established coin."""
++        live = [p for p, q in self.pools.items() if p != pool and q and t - q[-1][0] <= ACTIVE_S
++                and t - q[0][0] >= HISTORY_S - 60]
++        return self.rng.choice(sorted(live)) if live else ""
+ 
+     @staticmethod
+     def _signal(q: deque, t: float, px: float) -> tuple:
+@@ -150,30 +287,37 @@ class Revival:
+             return None, 0.0
+         return px / px5 - 1, v5 / (v60 / 12)
+ 
+-    def _follow(self, f: dict, t: float, px: float) -> None:
++    def _follow(self, f: dict, t: float, px: float, seen: float) -> None:
+         if "p0" not in f:
+-            if t >= f["signal_t"] + f["delay"]:
++            if t >= f["decided_at"] + f["delay"]:      # the first trade after the decision plus the delay
+                 f["p0"], f["fill_t"] = px, t
+             return
+         for name, (stop, hold) in EXITS.items():
+             x = f["exits"].setdefault(name, {})
+-            if "pnl" in x:
++            if "pnl" in x or x.get("censored"):
+                 continue
+             if "sell_at" in x:
+                 if t >= x["sell_at"]:
+-                    x["pnl"] = round((px / f["p0"] - 1 - COST) * 100, 2)
++                    x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
+                     self._close(f, name, x, t)
+                 continue
+-            why = "stop" if stop is not None and px <= f["p0"] * (1 - stop) else "time" if t - f["fill_t"] >= hold else ""
+-            if why:
+-                x["why"], x["sell_at"] = why, t + f["delay"]
+-        if len(f["exits"]) == len(EXITS) and all("pnl" in x for x in f["exits"].values()):
++            if stop is not None and px <= f["p0"] * (1 - stop):
++                x["why"], x["sell_at"] = "stop", seen + f["delay"]           # noticed when read
++            elif t >= f["fill_t"] + hold:
++                due = f["fill_t"] + hold
++                for a, b in self.gaps:                 # due while this wasn't running: it sells when it's back
++                    if a <= due <= b:
++                        due = b
++                x["why"], x["sell_at"] = "time", due + f["delay"]
++        if len(f["exits"]) == len(EXITS) and all("pnl" in x or x.get("censored") for x in f["exits"].values()):
+             f["finished"] = True
+ 
+     def _close(self, f: dict, name: str, x: dict, t: float) -> None:
+-        row = {"closed": t, "signal_t": f["signal_t"], "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"],
+-               "rule": f["rule"], "delay": f["delay"], "exit": name, "why": x["why"], "pnl_pct": x["pnl"],
+-               "ret5": f["ret5"], "surge": f["surge"]}
++        row = {"closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
++               "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"], "rule": f["rule"], "delay": f["delay"],
++               "control": f.get("control", False), "exit": name, "why": x.get("why", ""), "pnl_pct": x.get("pnl"),
++               "censored": bool(x.get("censored")), "mark_pct": x.get("mark"), "cost": f.get("cost"),
++               "cost_how": f.get("cost_how"), "ret5": f.get("ret5"), "surge": f.get("surge")}
+         self.done.append(row)
+         try:
+             with self.out.open("a") as fh:
+@@ -182,19 +326,25 @@ class Revival:
+             pass
+ 
+     def _expire(self, now: float) -> None:
+-        """A pool that stopped trading: close what's due at its last price (a dead coin is a real result)."""
+-        for f in [f for fs in self.open.values() for f in fs]:
+-            q = self.pools.get(f["pool"])
+-            if not q or "p0" not in f or self.newest_t - q[-1][0] < 1800:
+-                continue
+-            for name, (stop, hold) in EXITS.items():
+-                x = f["exits"].setdefault(name, {})
+-                if "pnl" not in x and self.newest_t - f["fill_t"] >= hold:
+-                    x["why"] = x.get("why") or "no trades"
+-                    x["pnl"] = round((q[-1][1] / f["p0"] - 1 - COST) * 100, 2)
+-                    self._close(f, name, x, self.newest_t)
+-            if all("pnl" in x for x in f["exits"].values()) and len(f["exits"]) == len(EXITS):
+-                f["finished"] = True
++        """A follow whose pool went quiet: no trade means no sale was possible. Censored, with its last-trade mark
++        kept apart; never booked as a P&L (and not as a zero either)."""
++        for fs in self.open.values():
++            for f in fs:
++                q = self.pools.get(f["pool"])
++                last = q[-1][0] if q else f["signal_t"]
++                due = (f.get("fill_t") or f["decided_at"] + f["delay"])
++                for name, (stop, hold) in EXITS.items():
++                    x = f["exits"].setdefault(name, {})
++                    if "pnl" in x or x.get("censored"):
++                        continue
++                    if self.newest_t - max(last, due + hold) >= DEAD_S and self.newest_t >= due + hold:
++                        x["censored"], x["why"] = True, "no trades: no executable sale"
++                        if "p0" in f and q:
++                            x["mark"] = round((q[-1][1] / f["p0"] - 1) * 100, 2)
++                        self._close(f, name, x, self.newest_t)
++                        self._dirty = True
++                if len(f["exits"]) == len(EXITS) and all("pnl" in x or x.get("censored") for x in f["exits"].values()):
++                    f["finished"] = True
+         self.open = {p: [f for f in fs if not f.get("finished")] for p, fs in self.open.items()}
+         self.open = {p: fs for p, fs in self.open.items() if fs}
+         if len(self.pools) > 6000:                     # pools quiet for a while: their history is stale anyway
+@@ -202,20 +352,47 @@ class Revival:
+             self.pools = {p: q for p, q in self.pools.items() if (q and q[-1][0] >= cut) or p in self.open}
+ 
+     # ------------------------------------------------------------------ the view
++    @staticmethod
++    def _range90(rows: list[dict], boots: int = 1000, seed: int = 7) -> tuple:
++        """90% range of the mean, resampled by UTC day and then by follow within each day."""
++        days: dict[str, list] = {}
++        for r in rows:
++            days.setdefault(time.strftime("%Y-%m-%d", time.gmtime(r["signal_t"])), []).append(r["pnl_pct"])
++        groups = list(days.values())
++        if len(groups) < 2:
++            return None, None, len(groups)
++        rng = random.Random(seed)
++        means = sorted(statistics.fmean([x for g in rng.choices(groups, k=len(groups)) for x in rng.choices(g, k=len(g))])
++                       for _ in range(boots))
++        return means[int(0.05 * boots)], means[int(0.95 * boots) - 1], len(groups)
++
+     def view(self) -> dict:
+-        rows = self.done
+         table = []
+-        for rule in RULES:
+-            for d in DELAYS:
+-                for ex in EXITS:
+-                    xs = sorted(r["pnl_pct"] for r in rows if r["rule"] == rule and r["delay"] == d and r["exit"] == ex)
+-                    if not xs:
+-                        continue
+-                    table.append({"rule": rule, "delay_s": d, "exit": ex, "n": len(xs), "mean_pct": statistics.fmean(xs),
+-                                  "median_pct": statistics.median(xs), "win_rate": sum(1 for x in xs if x > 0) / len(xs),
+-                                  "mean_without_best3": statistics.fmean(xs[:-3]) if len(xs) > 3 else None})
+-        signals = len({(r["pool"], r["rule"], r["signal_t"]) for r in rows})
+-        return {"since": min((r["signal_t"] for r in rows), default=None), "signals": signals,
+-                "open": len({(f["pool"], f["rule"], f["signal_t"]) for fs in self.open.values() for f in fs}),
+-                "lag_s": round(time.time() - self.newest_t) if self.newest_t else None, "table": table,
+-                "best": sorted(rows, key=lambda r: -r["pnl_pct"])[:5]}
++        for control in (False, True):
++            for rule in RULES:
++                for d in DELAYS:
++                    for ex in EXITS:
++                        rows = [r for r in self.done if r["rule"] == rule and r["delay"] == d and r["exit"] == ex
++                                and bool(r.get("control")) == control]
++                        done = [r for r in rows if not r.get("censored") and r.get("pnl_pct") is not None]
++                        if not rows:
++                            continue
++                        xs = sorted(r["pnl_pct"] for r in done)
++                        lo, hi, ndays = self._range90(done) if done else (None, None, 0)
++                        table.append({"rule": rule, "delay_s": d, "exit": ex, "control": control, "n": len(xs),
++                                      "censored": len(rows) - len(done), "days": ndays,
++                                      "mean_pct": statistics.fmean(xs) if xs else None,
++                                      "median_pct": statistics.median(xs) if xs else None,
++                                      "win_rate": sum(1 for x in xs if x > 0) / len(xs) if xs else None,
++                                      "mean_without_best3": statistics.fmean(xs[:-3]) if len(xs) > 3 else None,
++                                      "lo_pct": lo, "hi_pct": hi})
++        mine = [r for r in self.done if not r.get("control")]
++        signals = len({(r["pool"], r["rule"], r["signal_t"]) for r in mine})
++        lags = sorted(self.lags)
++        return {"status": "exploratory", "variants": len(RULES) * len(DELAYS) * len(EXITS),
++                "order_sol": ORDER_SOL, "since": min((r["signal_t"] for r in mine), default=None), "signals": signals,
++                "open": len({(f["pool"], f["rule"], f["signal_t"]) for fs in self.open.values() for f in fs
++                             if not f.get("control")}),
++                "lag_s": round(time.time() - self.newest_t) if self.newest_t else None,
++                "read_lag_p50_s": round(lags[len(lags) // 2], 1) if lags else None, "table": table,
++                "best": sorted((r for r in mine if r.get("pnl_pct") is not None), key=lambda r: -r["pnl_pct"])[:5]}
+diff --git a/meme_trader/sniper/tracker.py b/meme_trader/sniper/tracker.py
+index b84f6b9..932c174 100644
+--- a/meme_trader/sniper/tracker.py
++++ b/meme_trader/sniper/tracker.py
+@@ -11,6 +11,10 @@ from .events import Launch, Social, Trade
+ # pump.fun's Mayhem-mode agent: a Mayhem token mints 2B, half of it to this wallet, which then trades it
+ MAYHEM_AGENT = "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
+ MAYHEM_SUPPLY = 2 * TOTAL_SUPPLY
++# Concentration (dev, bundle, snipers, insiders, top holders) is a share of the TRADABLE supply: the 1B on the curve.
++# A Mayhem coin mints 2B, but ~1B sits with the Mayhem agent (checked on-chain 2026-10-06): dividing by 2B would halve
++# every risk share on those coins. Market cap uses the full minted supply (`supply`).
++TRADABLE = TOTAL_SUPPLY
+ 
+ 
+ @dataclass
+@@ -47,10 +51,16 @@ class TokenState:
+     p_ts: float = -1e12
+     late_tried: bool = False      # graduation play already attempted
+     price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
+-    mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): seen when the agent trades it
++    mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): read from its curve, or its first agent trade
++    mayhem_checked: bool = False  # its curve account was read: `mayhem` is known, not just "not seen yet"
+     non_organic_trades: int = 0
+     curve_slot: int = 0           # the slot of the newest reserves applied to `curve`
+     slot_moves: list = field(default_factory=list)   # that slot's trades: (tokens before, tokens after, sol after)
++    slot_start: tuple | None = None                  # (v_tokens, v_sol) before that slot's first trade
++    net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
++    sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
++    early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
++    seen: dict = field(default_factory=dict)         # recent trade identities (signature, side, size, reserves)
+ 
+     @property
+     def created_ts(self) -> float:
+@@ -82,33 +92,60 @@ class TokenState:
+         self.price_known = True
+         self.peak_price = self.curve.price
+         if e.dev_buy_tokens > 0:
+-            self.holders[e.creator] = e.dev_buy_tokens
++            self.holders[e.creator] = self.net[e.creator] = e.dev_buy_tokens
+             self.buyers.add(e.creator)
+ 
+     def _apply_reserves(self, t: Trade) -> None:
+         """The curve after `t`, in chain order, not arrival order: some endpoints deliver trades late or out of order
+-        (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within
+-        one slot, the trades chain by reserves (each starts where another ended): the newest state is the one no
+-        other trade starts from. While a link is missing, a trade that doesn't continue the current state leaves it."""
++        (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within a
++        slot, each trade is a step from the reserves before it to the reserves after; in chain order the steps form one
++        path, so the slot's last state is the one reached once more than it's left - whatever order they arrived in,
++        and when the path revisits a state (buy, sell, buy). While a step is missing (several such states) the current
++        state stays; a slot whose steps return to where it started ends there."""
+         if not t.slot:                                   # no chain order known (synthetic, old recordings): arrival
+             self.curve = Curve(t.v_sol, t.v_tokens)
+             return
+         if t.slot < self.curve_slot:
+             return
+         if t.slot > self.curve_slot:
++            self.slot_start = (self.curve.v_tokens, self.curve.v_sol) if self.price_known else None
+             self.curve_slot, self.slot_moves = t.slot, []
+         before = t.v_tokens + t.tokens if t.side == "buy" else t.v_tokens - t.tokens
+-        first = not self.slot_moves
+         self.slot_moves.append((before, t.v_tokens, t.v_sol))
+-        starts = [b for b, _, _ in self.slot_moves]
+-        heads = [m for m in self.slot_moves if not any(abs(m[1] - b) < 1.0 for b in starts)]
+-        cur = self.curve.v_tokens
+-        if not first and abs(before - cur) >= 1.0 and any(abs(h[1] - cur) < 1.0 for h in heads):
+-            return          # a separate piece of the chain (its link hasn't arrived): keep the newest state known
+-        _, vt, vs = (heads or self.slot_moves)[-1]
+-        self.curve = Curve(vs, vt)
++        bal: dict[int, int] = {}
++        at: dict[int, tuple] = {}
++        for b0, a0, vs in self.slot_moves:
++            bal[round(b0)] = bal.get(round(b0), 0) - 1
++            bal[round(a0)] = bal.get(round(a0), 0) + 1
++            at[round(a0)] = (a0, vs)
++        ends = [k for k, v in bal.items() if v > 0]
++        if len(ends) == 1:
++            vt, vs = at[ends[0]]
++            self.curve = Curve(vs, vt)
++        elif not ends and self.slot_start:               # a closed loop: the slot ends where it began
++            self.curve = Curve(self.slot_start[1], self.slot_start[0])
++
++    def _duplicate(self, t: Trade) -> bool:
++        """The same trade delivered twice (a reconnect can replay it): counted once."""
++        if not t.signature:
++            return False
++        k = (t.signature, t.side, round(t.tokens), round(t.v_tokens))
++        if k in self.seen:
++            return True
++        self.seen[k] = None
++        if len(self.seen) > 256:
++            self.seen.pop(next(iter(self.seen)))
++        return False
++
++    def _early(self, w: str) -> None:
++        """early_sold as the sum over early buyers of min(sold, bought early): the same in any arrival order."""
++        new = min(self.sold_by.get(w, 0.0), self.early_bought.get(w, 0.0))
++        self.early_sold += new - self.early_c.get(w, 0.0)
++        self.early_c[w] = new
+ 
+     def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
++        if self._duplicate(t):
++            return
+         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
+             self._apply_reserves(t)
+             self.price_known = True
+@@ -129,38 +166,42 @@ class TokenState:
+                 self.mayhem = True
+             return
+         self.volume_sol += t.sol
+-        prev = self.holders.get(t.trader, 0.0)
++        w = t.trader
+         if t.side == "buy":
+             self.buys += 1
+-            self.buyers.add(t.trader)
+-            bal = prev + t.tokens
+-            if t.trader != self.creator:
++            self.buyers.add(w)
++            if w != self.creator:
+                 if t.ts - self.created_ts <= bundle_window_s:
+-                    self.early_bought[t.trader] = self.early_bought.get(t.trader, 0.0) + t.tokens
++                    self.early_bought[w] = self.early_bought.get(w, 0.0) + t.tokens
++                    self._early(w)
+                 if t.ts - self.created_ts <= sniper_window_s:
+-                    self.snipers.add(t.trader)
++                    self.snipers.add(w)
+         else:
+             self.sells += 1
+-            self.sellers.add(t.trader)
+-            bal = max(prev - t.tokens, 0.0)
+-            if t.trader == self.creator:
++            self.sellers.add(w)
++            if w == self.creator:
+                 self.dev_sold += t.tokens
+-            if t.trader in self.early_bought:
+-                self.early_sold += min(t.tokens, prev)
+-        self.holders[t.trader] = t.new_balance if t.new_balance >= 0 else bal
+-        if self.holders[t.trader] <= 0:
+-            del self.holders[t.trader]
++            self.sold_by[w] = self.sold_by.get(w, 0.0) + t.tokens
++            if w in self.early_bought:
++                self._early(w)
++        # balances as signed sums: a sell that arrives before its buy nets out instead of being clipped at 0
++        n = t.new_balance if t.new_balance >= 0 else self.net.get(w, 0.0) + (t.tokens if t.side == "buy" else -t.tokens)
++        self.net[w] = n
++        if n > 0:
++            self.holders[w] = n
++        else:
++            self.holders.pop(w, None)
+ 
+     # ---- metrics ------------------------------------------------------------
+     def dev_pct(self) -> float:
+-        return self.holders.get(self.creator, 0.0) / self.supply * 100 if self.creator else 0.0
++        return self.holders.get(self.creator, 0.0) / TRADABLE * 100 if self.creator else 0.0
+ 
+     def dev_initial_pct(self) -> float:
+-        return (self.launch.dev_buy_tokens / self.supply * 100) if self.launch else 0.0
++        return (self.launch.dev_buy_tokens / TRADABLE * 100) if self.launch else 0.0
+ 
+     def bundle_pct(self) -> float:
+         """Supply bought by non-dev wallets inside the bundle window (insider/sniper proxy)."""
+-        return sum(self.early_bought.values()) / self.supply * 100
++        return sum(self.early_bought.values()) / TRADABLE * 100
+ 
+     def fees_paid_sol(self, fee_pct: float = 1.25) -> float:
+         """Total trading fees paid on the curve so far - a proxy for real, paying demand."""
+@@ -168,20 +209,20 @@ class TokenState:
+ 
+     def sniper_pct(self) -> float:
+         """Supply currently held by wallets that bought within the sniper window (excl. dev)."""
+-        return sum(self.holders.get(w, 0.0) for w in self.snipers) / self.supply * 100
++        return sum(self.holders.get(w, 0.0) for w in self.snipers) / TRADABLE * 100
+ 
+     def insider_pct(self) -> float:
+         """Supply currently held by the dev + bundle-window wallets. (Funding-graph clustering would
+         catch more insiders - see roadmap.)"""
+         ws = set(self.early_bought) | ({self.creator} if self.creator else set())
+-        return sum(self.holders.get(w, 0.0) for w in ws) / self.supply * 100
++        return sum(self.holders.get(w, 0.0) for w in ws) / TRADABLE * 100
+ 
+     def early_sold_ratio(self) -> float:
+         total = sum(self.early_bought.values())
+         return self.early_sold / total if total else 0.0
+ 
+     def top_holders_pct(self, n: int) -> float:
+-        return sum(sorted(self.holders.values(), reverse=True)[:n]) / self.supply * 100
++        return sum(sorted(self.holders.values(), reverse=True)[:n]) / TRADABLE * 100
+ 
+     def window(self, now: float, seconds: float) -> list[tuple]:
+         """Organic trades of the last `seconds` (flow, buyers). Price history uses self.trades directly."""
+diff --git a/meme_trader/ui/server.py b/meme_trader/ui/server.py
+index 977426c..a62f7c9 100644
+--- a/meme_trader/ui/server.py
++++ b/meme_trader/ui/server.py
+@@ -583,6 +583,9 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
+                 err = engine.set_desk(True, who="key")   # rebuild the desk's client with the new key now
+                 note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
+             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
++        if action == "order_reconcile":           # Live: an unknown order the chain can't prove either way
++            why = engine.reconcile_unresolved(str(cmd.get("signature") or ""), str(cmd.get("outcome") or ""))
++            return {"ok": not why, "text": why or "settled as not landed"}
+         if action == "key_test":
+             ok, text = await keymod.test_key(str(cmd.get("name") or "ANTHROPIC_API_KEY"))
+             return {"ok": ok, "text": ("✓ " if ok else "✕ ") + text}
+diff --git a/meme_trader/ui/static/index.html b/meme_trader/ui/static/index.html
+index bc70214..d9b4572 100644
+--- a/meme_trader/ui/static/index.html
++++ b/meme_trader/ui/static/index.html
+@@ -5786,15 +5786,21 @@ function renderPicks(v) {               // the stronger model's picks, followed
+       ${vs.map(x => `<tr><td>${esc(x)}</td>${names.map(b => cell(bands[b].find(r => r.variant === x))).join("")}</tr>`).join("")}</tbody></table></div>`);
+ }
+ function renderRevival(v) {             // established coins jumping on volume, followed live: never traded
+-  const head = `<p class="note">Established pump.fun coins (2+ days old, on PumpSwap): when one jumps 20-40%+ in 5 minutes on 4x its usual volume, it's followed from that moment, filled 5 s or 60 s later, after 1.2% costs. On Oct 4-6 recordings this made money every day, but a few revivals carried it. This is the forward test, on trades it never saw. Nothing is bought.</p>`;
++  const head = `<p class="note"><b>Exploratory.</b> Established pump.fun coins (2+ days old, on PumpSwap): when one jumps 20-40%+ in 5 minutes on 4x its usual volume, it's followed from the moment the bot READ it, filled 5 s or 60 s after that, with fees and price impact for a ${v && v.order_sol || 0.25} SOL order on the pool's depth. A random other active coin is followed at the same moment as a control. A coin that stops trading is <i>censored</i> (no sale was possible), not booked. ${v ? v.variants : 18} correlated variants: read the pattern, not the best row. Nothing is bought.</p>`;
+   if (!v) { setHTML($("an-lab"), head + `<div class="empty">Off: it needs the wallet recorder running in stream mode.</div>`); return; }
+-  if (!v.table.length) { setHTML($("an-lab"), head + `<div class="empty">No follows closed yet${v.open ? ` (${v.open} signals being followed now)` : ""}${v.lag_s != null ? ` · trades read ${v.lag_s} s after they happen` : ""}. The first results come an hour after the first signal.</div>`); return; }
++  const lag = v.read_lag_p50_s != null ? ` · trades read ${v.read_lag_p50_s} s after they happen (median)` : "";
++  if (!v.table.length) { setHTML($("an-lab"), head + `<div class="empty">No follows closed yet${v.open ? ` (${v.open} signals being followed now)` : ""}${lag}. The first results come an hour after the first signal.</div>`); return; }
+   const best = (v.best || []).map(r => `${esc(r.symbol || "?")} ${pct(r.pnl_pct, 0)}`).join(" · ");
+-  setHTML($("an-lab"), head + `<p class="note">${v.signals} signals${v.open ? ` · ${v.open} being followed now` : ""}${v.since ? ` · since ${new Date(v.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""} · P&amp;L per follow after costs.${v.signals < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}${best ? ` Best so far: ${best}.` : ""}</p>
+-    <div class="tablewrap"><table><thead><tr><th>Signal</th><th>Fill</th><th>Exit</th><th class="r">Follows</th><th class="r">Mean</th><th class="r">Without best 3</th><th class="r">Median</th><th class="r">Won</th></tr></thead><tbody>
+-    ${v.table.map(r => `<tr><td>${esc(r.rule)}</td><td>${r.delay_s} s late</td><td>${esc(r.exit)}</td><td class="r num">${r.n}</td>
+-      <td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${r.mean_without_best3 == null ? "" : cls(r.mean_without_best3)}">${r.mean_without_best3 == null ? "–" : pct(r.mean_without_best3, 1)}</td>
+-      <td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td><td class="r num">${Math.round(r.win_rate * 100)}%</td></tr>`).join("")}</tbody></table></div>`);
++  const ctl = {}; v.table.filter(r => r.control).forEach(r => ctl[r.rule + "|" + r.delay_s + "|" + r.exit] = r);
++  const range = r => r.lo_pct == null ? `<span class="note">${r.days || 0} day${r.days === 1 ? "" : "s"}</span>` : `${pct(r.lo_pct, 1)} to ${pct(r.hi_pct, 1)}`;
++  setHTML($("an-lab"), head + `<p class="note">${v.signals} signals${v.open ? ` · ${v.open} being followed now` : ""}${v.since ? ` · since ${new Date(v.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""}${lag} · P&amp;L per follow after costs.${v.signals < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}${best ? ` Best so far: ${best}.` : ""}</p>
++    <div class="tablewrap"><table><thead><tr><th>Signal</th><th>Fill</th><th>Exit</th><th class="r">Follows</th><th class="r">Censored</th><th class="r">Mean</th><th class="r">90% range (by day)</th><th class="r">Without best 3</th><th class="r">Won</th><th class="r">Control coins: mean</th></tr></thead><tbody>
++    ${v.table.filter(r => !r.control).map(r => { const c = ctl[r.rule + "|" + r.delay_s + "|" + r.exit];
++      return `<tr><td>${esc(r.rule)}</td><td>${r.delay_s} s late</td><td>${esc(r.exit)}</td><td class="r num">${r.n}</td><td class="r num">${r.censored || 0}</td>
++      <td class="r num ${r.mean_pct == null ? "" : cls(r.mean_pct)}">${r.mean_pct == null ? "–" : pct(r.mean_pct, 1)}</td><td class="r num">${range(r)}</td>
++      <td class="r num ${r.mean_without_best3 == null ? "" : cls(r.mean_without_best3)}">${r.mean_without_best3 == null ? "–" : pct(r.mean_without_best3, 1)}</td>
++      <td class="r num">${r.win_rate == null ? "–" : Math.round(r.win_rate * 100) + "%"}</td>
++      <td class="r num ${c && c.mean_pct != null ? cls(c.mean_pct) : ""}">${c && c.mean_pct != null ? `${pct(c.mean_pct, 1)} <span class="note">(${c.n})</span>` : "–"}</td></tr>`; }).join("")}</tbody></table></div>`);
+ }
+ function renderExitLab() {
+   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;

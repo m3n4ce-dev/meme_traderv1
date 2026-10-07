@@ -10,6 +10,7 @@ from collections import defaultdict
 
 SOURCES = {"late": "Graduation plays", "sniper": "Sniper", "copy": "Copy trading", "callout": "Callouts", "manual": "Your own trades"}
 MIN_N = 30
+MIN_DAYS = 5               # independent day blocks before any "promising" or "real" verdict
 
 
 def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) -> dict:
@@ -36,8 +37,8 @@ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) -> 
     best = sorted(rows, key=lambda t: -t["pnl"])
     without3 = sum(t["pnl"] for t in best[3:])
     days: dict[str, list] = defaultdict(list)
-    for t in rows:
-        days[time.strftime("%Y-%m-%d", time.localtime(t["opened"]))].append(t)
+    for t in rows:                                     # UTC days, as the range above and the research replays
+        days[time.strftime("%Y-%m-%d", time.gmtime(t["opened"]))].append(t)
     by_day = [{"day": d, "n": len(v), "pnl": sum(t["pnl"] for t in v),
                "ret_pct": sum(t["pnl"] for t in v) / sum(t["cost"] for t in v) * 100,
                "win_rate": sum(t["pnl"] > 0 for t in v) / len(v)} for d, v in sorted(days.items())]
@@ -54,6 +55,9 @@ def check(trades: list[dict], source: str, boots: int = 4000, seed: int = 7) -> 
         level, verdict = "early", f"Too early to say: {len(rows)} trades. Wait for at least {MIN_N}."
     elif hi < 0:
         level, verdict = "bad", "Losing, and not by bad luck: even the hopeful end of the range is below zero."
+    elif len(groups) < MIN_DAYS:                       # a range from one or two days is mostly within-day noise
+        level, verdict = "early", (f"Too few days to judge: {len(groups)} UTC day{'s' if len(groups) != 1 else ''} of "
+                                   f"trades. Wait for at least {MIN_DAYS}: same-day trades share their market.")
     elif lo > 0 and without3 > 0 and len(rows) >= 100 and span_d >= 7:
         level, verdict = "good", "Looks real so far: positive even without its three best trades, over a week or more. Keep it running unchanged."
     elif lo > 0 and without3 > 0:

@@ -160,10 +160,60 @@ def code_revision() -> str:
     return (rev or "unknown") + ("+dirty" if dirty else "")
 
 
+def manifest(files: list | None = None) -> dict:
+    """What a result rests on beyond its settings (a second review, 2026-10-06): the code (commit, and the exact
+    uncommitted patch by its hash, saved beside the research log), the installed packages, the model files, and each
+    input recording (size, and a hash of its first and last MB: cheap, and it changes if the file does)."""
+    import hashlib
+    from importlib import metadata
+
+    from ..config import ROOT
+
+    out: dict = {"code_revision": code_revision()}
+    try:
+        diff = subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD", "--", "meme_trader", "config/params.example.yaml"],
+                              capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        diff = ""
+    if diff:
+        h = hashlib.sha256(diff.encode()).hexdigest()[:16]
+        out["patch"] = h
+        try:
+            d = ROOT / "research" / "patches"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{h}.patch").write_text(diff)
+        except OSError:
+            pass
+    pkgs = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"])
+    out["packages"] = hashlib.sha256("\n".join(pkgs).encode()).hexdigest()[:16]
+    out["models"] = {}
+    for name in ("model.json", "model-trees.json"):
+        f = ROOT / "data" / name
+        if f.exists():
+            out["models"][name] = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
+    ins = {}
+    for f in files or []:
+        f = Path(f)
+        try:
+            size = f.stat().st_size
+            with f.open("rb") as fh:
+                head = fh.read(1 << 20)
+                fh.seek(max(0, size - (1 << 20)))
+                tail = fh.read(1 << 20)
+            ins[f.name] = {"bytes": size, "sha_ends": hashlib.sha256(head + tail).hexdigest()[:16]}
+        except OSError:
+            ins[f.name] = {"bytes": None}
+    if ins:
+        out["inputs"] = ins
+    return out
+
+
 def write_lock(pol: dict, at: str, h: str) -> None:
     sn = json.loads(json.dumps(policy_params(pol)["sniper"], default=str))
+    m = manifest()
     lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn,
-                                          "code_revision": code_revision()}, indent=1, sort_keys=True) + "\n")
+                                          "code_revision": m["code_revision"], "manifest": m},
+                                         indent=1, sort_keys=True) + "\n")
 
 
 def code_note(pol: dict) -> dict:
@@ -639,6 +689,13 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
     rep["gates"] = gates_check(pol, rep)
     rep["verdict"] = "PASS" if rep["gates"]["pass"] else "FAIL"
     rep.update(code_note(pol))
+    rep["manifest"] = manifest(paths)
+    if rep.get("code_changed_since_freeze"):            # not the code that was registered: no verdict on it
+        rep["verdict_on_frozen_code"] = None
+        rep["verdict"] = f"INVALID (code changed since the freeze: {rep['code_at_freeze']} -> {rep['code_revision']}); " \
+                         f"exploratory {rep['verdict']} on today's code"
+    elif rep.get("code_changed_since_freeze") is None:
+        rep["provenance"] = "the code at the freeze wasn't recorded: this verdict can't prove it ran the frozen code"
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_text(json.dumps(rep, indent=1, default=str))
     log_experiment({"kind": "final", "policy": pol["name"], "hash": rep["hash"], "verdict": rep["verdict"],

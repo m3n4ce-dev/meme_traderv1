@@ -41,7 +41,7 @@ def test_short_runs_and_changing_settings_are_flagged():
     for k in range(6):                                           # six settings versions in two days
         t += trades("late", [rng.gauss(0.1, 0.1) for _ in range(20)], start=1_780_000_000 + k * 28_000, gap=1000, config=f"c{k}")
     v = check(t, "late")
-    assert v["level"] == "promising"                             # positive, but not a week of one setup
+    assert v["level"] == "early" and "Too few days" in v["verdict"]   # positive, but two days aren't 5 independent ones
     assert any("settings changed 5 times" in c for c in v["caveats"])
     assert any("Paper trades" in c for c in v["caveats"])
 
