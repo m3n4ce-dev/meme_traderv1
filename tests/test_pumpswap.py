@@ -1,6 +1,7 @@
 """meme_trader/sniper/pumpswap.py against the official PumpSwap SDK 1.20.0's own outputs (tests/fixtures/pumpswap)."""
 import base64
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -100,8 +101,25 @@ def test_bare_mints_decode_and_others_are_refused(v):
     assert m["supply"] == int(v["expectedSupply"]) and m["decimals"] == v["expectedDecimals"]
     with pytest.raises(ps.QuoteError):
         ps.decode_mint(data, ps.DEFAULT_KEY)                                     # wrong owner
+
+
+def t22(data: bytes, *exts: tuple) -> bytes:
+    """A Token-2022 mint: the base, padding to 165, the account type (1 = mint), then TLV extensions."""
+    out = data[:82] + b"\0" * (165 - 82) + b"\x01"
+    for t, body in exts:
+        out += struct.pack("<HH", t, len(body)) + body
+    return out
+
+
+def test_token_2022_mints_with_metadata_are_read_and_other_extensions_refused():
+    data = base64.b64decode(G["mintDecodeVectors"][0]["dataBase64"])
+    m = ps.decode_mint(t22(data, (18, b"\0" * 64), (19, b"\0" * 120)), ps.TOKEN_2022_PROGRAM)
+    assert m["extensions"] == [18, 19] and m["supply"] == int(G["mintDecodeVectors"][0]["expectedSupply"])
+    for bad in ((1, b"\0" * 108), (14, b"\0" * 64), (12, b"\0" * 32)):         # transfer fee, hook, delegate
+        with pytest.raises(ps.QuoteError, match="unsupported mint extensions"):
+            ps.decode_mint(t22(data, (18, b"\0" * 64), bad), ps.TOKEN_2022_PROGRAM)
     with pytest.raises(ps.QuoteError):
-        ps.decode_mint(data + b"\x01" + b"\0" * 100, ps.TOKEN_2022_PROGRAM)      # extensions: refused
+        ps.decode_mint(t22(data, (18, b"\0" * 64)), ps.TOKEN_PROGRAM)             # a long legacy mint isn't one
 
 
 def test_inputs_the_sdk_leaves_to_its_caller_are_refused():

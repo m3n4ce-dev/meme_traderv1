@@ -1,0 +1,353 @@
+"""The live PumpSwap price watcher: fresh, executable quotes from coherent on-chain state, with a reason for every
+quote it couldn't give. Measurement only - nothing is signed or sent.
+
+Each quote is ONE `getMultipleAccounts` read at `confirmed` of the pool, its two vaults, the base mint, the AMM's
+global config and the fee program's fee config, so everything priced comes from the same context slot. It's then:
+- validated: every account present and owned by the right program; the pool's discriminator and layout; the pool
+  still pointing at the vaults and mints first discovered (else `pool_changed`); the vaults' mints and authority (the
+  pool); the vaults not frozen; a SOL quote; the mint without unsupported extensions (`pumpswap.decode_mint`); buys or
+  sells not disabled; the response within MAX_RESPONSE_S; its context slot no more than MAX_SLOT_LAG behind the feed's
+  newest slot at the same commitment;
+- priced by `pumpswap.py` (the official SDK's integer math): fees from the fee config's schedule, effective quote
+  reserves = vault + signed virtual reserves, sells checked against the real vault.
+A quote is not a fill: landing, slippage after it and transaction failure aren't modeled here.
+
+`QuoteBook` schedules quotes and keeps every attempt (data/quotes.db): an entry quote at a follow's decision + delay,
+then exit quotes at each hold's due time, retried every RETRY_EVERY_S until RETRY_S after it (the registered policy),
+else the exit is unmeasured with its last reason. Results: `view()` - coverage by reason, both arms, and quote-priced
+P&L next to the forward test's print-priced one.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import struct
+import threading
+import time
+from collections import Counter, defaultdict
+from pathlib import Path
+
+from . import pumpswap as ps
+
+AMM, FEE_PROGRAM = ps.PUMP_AMM_PROGRAM, "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+GLOBAL_CONFIG_DISC = bytes([149, 8, 156, 202, 160, 252, 176, 217])
+FEE_CONFIG_DISC = bytes([143, 52, 146, 187, 219, 123, 76, 155])
+COMMITMENT = "confirmed"
+MAX_RESPONSE_S = 5.0                 # a quote is fresh only if the read came back this fast (proposed; to calibrate)
+MAX_SLOT_LAG = 2                     # ... and its state is at most this many slots behind the feed's newest
+RETRY_EVERY_S, RETRY_S = 30, 900     # an exit with no valid quote: retried this often, for this long (registered)
+ENTRY_GRACE_S = 60                   # an entry quote is tried for this long after its decision, then skipped
+TX_COST_SOL = 0.001005               # one transaction's priority + base fee (the paper bot's), for net P&L
+
+
+def _pda(seeds: list[bytes], program: str) -> str:
+    from solders.pubkey import Pubkey
+    return str(Pubkey.find_program_address(seeds, Pubkey.from_string(program))[0])
+
+
+def global_config_address() -> str:
+    return _pda([b"global_config"], AMM)
+
+
+def fee_config_address() -> str:
+    from solders.pubkey import Pubkey
+    return _pda([b"fee_config", bytes(Pubkey.from_string(AMM))], FEE_PROGRAM)
+
+
+class Reject(Exception):
+    """A quote that can't be given: a reason code (for coverage) and a detail."""
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(f"{reason}: {detail}" if detail else reason)
+        self.reason, self.detail = reason, detail
+
+
+# --------------------------------------------------------------------------- account layouts (IDL 1.20.0, SPL)
+def decode_token_account(data: bytes, owner: str) -> dict:
+    """An SPL token account (legacy 165 bytes; Token-2022 165 + account type + extensions)."""
+    from solders.pubkey import Pubkey
+    if owner not in (ps.TOKEN_PROGRAM, ps.TOKEN_2022_PROGRAM):
+        raise Reject("wrong_owner", "vault not owned by a token program")
+    if len(data) < 165 or (len(data) > 165 and (owner != ps.TOKEN_2022_PROGRAM or data[165] != 2)):
+        raise Reject("unsupported_layout", f"token account of {len(data)} bytes")
+    state = data[108]
+    if state != 1:
+        raise Reject("vault_frozen" if state == 2 else "vault_uninitialized")
+    return {"mint": str(Pubkey.from_bytes(data[0:32])), "authority": str(Pubkey.from_bytes(data[32:64])),
+            "amount": struct.unpack_from("<Q", data, 64)[0]}
+
+
+def decode_global_config(data: bytes) -> dict:
+    if len(data) < 949 or data[:8] != GLOBAL_CONFIG_DISC:
+        raise Reject("unsupported_layout", "global config")
+    lp, proto = struct.unpack_from("<QQ", data, 40)
+    creator, = struct.unpack_from("<Q", data, 313)
+    return {"lp": lp, "protocol": proto, "creator": creator, "disable_flags": data[56],
+            "creator_fee_configurable": bool(data[940])}
+
+
+def decode_fee_config(data: bytes) -> dict:
+    if len(data) < 8 + 1 + 32 + 24 + 4 or data[:8] != FEE_CONFIG_DISC:
+        raise Reject("unsupported_layout", "fee config")
+    o = 8 + 1 + 32
+
+    def fees(o):
+        lp, proto, creator = struct.unpack_from("<QQQ", data, o)
+        return {"lp": lp, "protocol": proto, "creator": creator}, o + 24
+
+    def tiers(o):
+        n, = struct.unpack_from("<I", data, o)
+        o += 4
+        if n > 256 or o + 40 * n > len(data):
+            raise Reject("unsupported_layout", "fee tiers")
+        out = []
+        for _ in range(n):
+            f, _ = fees(o + 16)
+            out.append({"threshold": int.from_bytes(data[o:o + 16], "little"), "fees": f})
+            o += 40
+        return out, o
+    flat, o = fees(o)
+    t, o = tiers(o)
+    st, o = tiers(o)
+    if o + 24 > len(data):
+        raise Reject("unsupported_layout", "fee config")
+    exotic, o = fees(o)
+    return {"flat": flat, "tiers": t, "stable_tiers": st, "exotic": exotic}
+
+
+# --------------------------------------------------------------------------- one quote
+def rpc_accounts(url: str, keys: list[str], timeout: float = 8.0) -> tuple[int, list]:
+    """getMultipleAccounts at COMMITMENT: (context slot, [(owner, data bytes) or None])."""
+    import base64
+
+    import httpx
+    r = httpx.post(url, timeout=timeout, json={"jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
+                                               "params": [keys, {"encoding": "base64", "commitment": COMMITMENT}]})
+    r.raise_for_status()
+    d = r.json()
+    if "error" in d:
+        raise RuntimeError(f"getMultipleAccounts: {str(d['error'])[:160]}")
+    res = d["result"]
+    return int(res["context"]["slot"]), [(a["owner"], base64.b64decode(a["data"][0])) if a else None
+                                         for a in res["value"]]
+
+
+class Quoter:
+    """Quotes `pool` for a buy of `amount` lamports or a sell of `amount` base atoms. `url()` gives the RPC URL (never
+    recorded: only its host), `ref_slot()` the feed's newest slot at the same commitment (0 = unknown)."""
+
+    def __init__(self, url, ref_slot=lambda: 0, fetch=rpc_accounts, clock=time.time):
+        self.url, self.ref_slot, self.fetch, self.clock = url, ref_slot, fetch, clock
+        self.static: dict[str, dict] = {}                # pool -> the accounts it pointed at when discovered
+        self.global_config, self.fee_config = global_config_address(), fee_config_address()
+
+    def _discover(self, pool: str) -> dict:
+        _, (acc,) = self.fetch(self.url(), [pool])
+        if acc is None:
+            raise Reject("missing_account", "pool")
+        owner, data = acc
+        if owner != AMM:
+            raise Reject("wrong_owner", "pool")
+        try:
+            p = ps.decode_pool(data)
+        except ps.QuoteError as ex:
+            raise Reject("unsupported_layout", str(ex)) from None
+        st = {k: p[k] for k in ("pool_base_token_account", "pool_quote_token_account", "base_mint", "quote_mint")}
+        self.static[pool] = st
+        return st
+
+    def quote(self, pool: str, side: str, amount: int) -> dict:
+        from urllib.parse import urlparse
+        rec = {"pool": pool, "side": side, "amount": str(amount), "requested_at": round(self.clock(), 3),
+               "commitment": COMMITMENT}
+        try:
+            url = self.url()
+            rec["host"] = urlparse(url).hostname or ""
+            st = self.static.get(pool) or self._discover(pool)
+            if st["quote_mint"] != ps.WSOL:
+                raise Reject("non_sol_quote", st["quote_mint"])
+            keys = [pool, st["pool_base_token_account"], st["pool_quote_token_account"], st["base_mint"],
+                    self.global_config, self.fee_config]
+            t0 = self.clock()
+            slot, accs = self.fetch(url, keys)
+            rec["responded_at"] = round(self.clock(), 3)
+            rec["response_s"] = round(rec["responded_at"] - t0, 3)
+            rec["context_slot"], rec["ref_slot"] = slot, int(self.ref_slot() or 0)
+            names = ("pool", "base_vault", "quote_vault", "base_mint", "global_config", "fee_config")
+            missing = [n for n, a in zip(names, accs) if a is None]
+            if missing:
+                raise Reject("missing_account", ",".join(missing))
+            (po, pd), (bo, bd), (qo, qd), (mo, md), (go, gd), (fo, fd) = accs
+            if po != AMM or go != AMM or fo != FEE_PROGRAM:
+                raise Reject("wrong_owner", "pool or config")
+            try:
+                p = ps.decode_pool(pd)
+            except ps.QuoteError as ex:
+                raise Reject("unsupported_layout", str(ex)) from None
+            if any(p[k] != st[k] for k in st):
+                self.static.pop(pool, None)              # rediscovered next time
+                raise Reject("pool_changed", "the pool points at other accounts than first discovered")
+            base, quote = decode_token_account(bd, bo), decode_token_account(qd, qo)
+            if base["mint"] != p["base_mint"] or quote["mint"] != p["quote_mint"] or \
+                    base["authority"] != pool or quote["authority"] != pool:
+                raise Reject("vault_mismatch")
+            try:
+                mint = ps.decode_mint(md, mo)
+            except ps.QuoteError as ex:
+                raise Reject("mint_extensions" if "extension" in str(ex) else "unsupported_layout", str(ex)) from None
+            g, fc = decode_global_config(gd), decode_fee_config(fd)
+            if g["disable_flags"] & (0b1000 if side == "buy" else 0b10000):
+                raise Reject("trading_disabled", side)
+            eff = quote["amount"] + p["virtual_quote_reserves"]
+            rec.update(base_reserve=str(base["amount"]), quote_vault=str(quote["amount"]),
+                       virtual_quote=str(p["virtual_quote_reserves"]), effective_quote=str(eff),
+                       mayhem=p["is_mayhem_mode"], undocumented_tail=p["undocumented_tail"],
+                       mint_extensions=mint["extensions"], pool_bytes=p["bytes"])
+            fees = ps.fees_bps({**g, "creator_fee_configurable": g["creator_fee_configurable"]}, fc, p["creator"],
+                               p["base_mint"], mint["supply"], base["amount"], eff, p["quote_mint"],
+                               p["is_mayhem_mode"], p["creator_fee_bps"])
+            rec["fees_bps"] = fees
+            fn = ps.buy_quote_input if side == "buy" else ps.sell_base_input
+            try:
+                out = fn(int(amount), 0, base["amount"], quote["amount"], fees, p["virtual_quote_reserves"],
+                         p["coin_creator"])
+            except ps.QuoteError as ex:
+                raise Reject("insufficient_liquidity" if "reserve" in str(ex) else "quote_error", str(ex)) from None
+            rec["output"] = str(out["base"] if side == "buy" else out["uiQuote"])
+            if rec["response_s"] > MAX_RESPONSE_S:
+                raise Reject("slow_response", f"{rec['response_s']} s")
+            if rec["ref_slot"] and slot < rec["ref_slot"] - MAX_SLOT_LAG:
+                raise Reject("stale_state", f"{rec['ref_slot'] - slot} slots behind the feed")
+            rec["reason"] = "ok"
+        except Reject as ex:
+            rec["reason"], rec["detail"] = ex.reason, ex.detail[:200]
+        except Exception as ex:                          # the RPC itself: timeouts, HTTP errors, malformed answers
+            rec["reason"] = "timeout" if "imeout" in type(ex).__name__ else "rpc_error"
+            rec["detail"] = f"{type(ex).__name__}: {str(ex)[:160]}"
+        return rec
+
+
+# --------------------------------------------------------------------------- the schedule and its record
+class QuoteBook:
+    """Quote jobs and every attempt, in SQLite (data/quotes.db). A job: a key, a pool, buy/sell, an amount, when it's
+    due and until when it may be retried. An entry job that succeeds creates its exit jobs (one per hold), each due
+    `hold` seconds after the entry quote and sized by the tokens it bought."""
+
+    def __init__(self, path: Path, quoter: Quoter, clock=time.time):
+        self.db = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, pool TEXT NOT NULL, "
+                        "side TEXT NOT NULL, amount TEXT NOT NULL, due REAL NOT NULL, deadline REAL NOT NULL, "
+                        "state TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0, result TEXT, meta TEXT, "
+                        "created REAL NOT NULL)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs (state, due)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS attempts (job TEXT NOT NULL, n INTEGER NOT NULL, rec TEXT NOT NULL, "
+                        "PRIMARY KEY (job, n))")
+        self.quoter, self.clock = quoter, clock
+        self.lock = threading.Lock()                     # the event loop requests while a worker thread runs jobs
+        self._view, self._view_at = None, 0.0
+
+    def request(self, key: str, kind: str, pool: str, side: str, amount: int, due: float, deadline: float,
+                meta: dict | None = None) -> bool:
+        """A new job (an existing key is left alone: requests are idempotent across restarts)."""
+        with self.lock:
+            cur = self.db.execute("INSERT OR IGNORE INTO jobs (id, kind, pool, side, amount, due, deadline, state, "
+                                  "meta, created) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                                  (key, kind, pool, side, str(int(amount)), due, deadline, json.dumps(meta or {}),
+                                   self.clock()))
+        return bool(cur.rowcount)
+
+    def due(self, now: float, limit: int = 20) -> list[tuple]:
+        with self.lock:
+            return self.db.execute("SELECT id, kind, pool, side, amount, deadline, tries, meta FROM jobs WHERE "
+                                   "state = 'pending' AND due <= ? ORDER BY due LIMIT ?", (now, limit)).fetchall()
+
+    def run(self, now: float | None = None, limit: int = 20) -> int:
+        """Run the due jobs (blocking: call it off the event loop). Returns how many were attempted."""
+        jobs = self.due(self.clock() if now is None else now, limit)
+        for key, kind, pool, side, amount, deadline, tries, meta in jobs:
+            meta = json.loads(meta or "{}")
+            t = self.clock()
+            if t > deadline:                             # missed (the process was down, or a backlog): never quoted late
+                with self.lock:
+                    self._finish(key, "unmeasured" if kind == "exit" else "skipped",
+                                 {"reason": "missed", "detail": "past its deadline when run"})
+                continue
+            rec = self.quoter.quote(pool, side, int(amount))     # (the RPC call: outside the lock)
+            self.lock.acquire()
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                self.db.execute("INSERT OR REPLACE INTO attempts (job, n, rec) VALUES (?, ?, ?)",
+                                (key, tries + 1, json.dumps(rec)))
+                if rec["reason"] == "ok":
+                    self.db.execute("UPDATE jobs SET state = 'ok', tries = ?, result = ? WHERE id = ?",
+                                    (tries + 1, json.dumps(rec), key))
+                    if kind == "entry":
+                        for name, hold in (meta.get("holds") or {}).items():
+                            at = rec["responded_at"] + hold
+                            self.db.execute("INSERT OR IGNORE INTO jobs (id, kind, pool, side, amount, due, deadline, "
+                                            "state, meta, created) VALUES (?, 'exit', ?, 'sell', ?, ?, ?, 'pending', ?, ?)",
+                                            (f"{meta['follow']}|{name}", pool, rec["output"], at, at + RETRY_S,
+                                             json.dumps({**meta, "exit": name, "entry_lamports": str(amount)}), t))
+                else:
+                    nxt = t + (RETRY_EVERY_S if kind == "exit" else 10)
+                    if nxt <= deadline:
+                        self.db.execute("UPDATE jobs SET due = ?, tries = ? WHERE id = ?", (nxt, tries + 1, key))
+                    else:
+                        self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
+                                        ("unmeasured" if kind == "exit" else "skipped", tries + 1, json.dumps(rec), key))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+            finally:
+                self.lock.release()
+        return len(jobs)
+
+    def _finish(self, key: str, state: str, rec: dict) -> None:
+        self.db.execute("UPDATE jobs SET state = ?, result = ? WHERE id = ?", (state, json.dumps(rec), key))
+
+    def view(self, max_age_s: float = 30) -> dict:
+        """Coverage by job kind and arm (first try, eventually, by reason), and quote-priced net P&L per variant."""
+        if self._view is not None and self.clock() - self._view_at < max_age_s:
+            return self._view
+        with self.lock:
+            rows = self.db.execute("SELECT id, kind, state, tries, result, meta FROM jobs WHERE state != 'pending'"
+                                   ).fetchall()
+            pending = self.db.execute("SELECT COUNT(*) FROM jobs WHERE state = 'pending'").fetchone()[0]
+        cov: dict = defaultdict(Counter)
+        first_ok: Counter = Counter()
+        pnl: dict = defaultdict(list)
+        entries = {}
+        for key, kind, state, tries, result, meta in rows:
+            m, r = json.loads(meta or "{}"), json.loads(result or "{}")
+            arm = "control" if m.get("control") else "signal"
+            cov[(kind, arm)][state if state == "ok" else f"{state}: {r.get('reason', '?')}"] += 1
+            first_ok[(kind, arm)] += state == "ok" and tries == 1
+            if kind == "entry" and state == "ok":
+                entries[m.get("follow")] = r
+            if kind == "exit" and state == "ok":
+                cost = int(m.get("entry_lamports", 0)) / 1e9
+                got = int(r.get("output", 0)) / 1e9
+                if cost > 0:
+                    net = (got - TX_COST_SOL) / (cost + TX_COST_SOL) - 1      # each transaction's network fee
+                    pnl[(m.get("rule", ""), m.get("delay"), m.get("exit"), arm)].append(net * 100)
+        out_cov = {f"{k[0]} / {k[1]}": {"done": sum(v.values()), "first_try_ok": first_ok[k], **dict(v)}
+                   for k, v in sorted(cov.items())}
+        out_pnl = [{"rule": k[0], "delay_s": k[1], "exit": k[2], "arm": k[3], "n": len(xs),
+                    "mean_pct": round(sum(xs) / len(xs), 2), "median_pct": round(sorted(xs)[len(xs) // 2], 2)}
+                   for k, xs in sorted(pnl.items(), key=lambda kv: tuple(str(x) for x in kv[0]))]
+        self._view = {"coverage": out_cov, "quote_pnl": out_pnl, "pending": pending,
+                      "note": "quotes are not fills; exploratory (the revival forward test's follows), not a declared "
+                              "qualification window"}
+        self._view_at = self.clock()
+        return self._view
+
+    def attempts(self) -> list[dict]:
+        """Every attempt, for the review package (pool addresses and amounts are public chain data)."""
+        with self.lock:
+            rows = self.db.execute("SELECT a.job, a.n, a.rec, j.kind, j.meta FROM attempts a JOIN jobs j ON j.id = a.job "
+                                   "ORDER BY a.rowid").fetchall()
+        return [{"job": j, "try": n, "kind": k, **{x: y for x, y in json.loads(m or "{}").items() if x != "holds"},
+                 **json.loads(rec)} for j, n, rec, k, m in rows]

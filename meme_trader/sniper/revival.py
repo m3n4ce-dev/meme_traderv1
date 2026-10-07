@@ -96,6 +96,7 @@ class Revival:
         self.out = Path(data_dir) / "revival-v2.jsonl"           # v2: decision clocks, censoring, costs, control
         self.state_path = Path(data_dir) / "revival-v2-state.json"    # (before the store: read once, then ignored)
         self.store = Store(Path(data_dir) / "revival-v2.db")
+        self.quotes = None                             # a quotes.QuoteBook: live executable quotes beside the prints
         self.ckpt_offset = 0                           # the file position every processed row is before
         self.started = now if now is not None else time.time()
         self.path: Path | None = None
@@ -348,10 +349,18 @@ class Revival:
         cost, how = self._cost(pool, t)
         sym, mint = self.meta.get(pool, (None, None))
         for d in DELAYS:
+            fid = f"{pool}|{rule}|{t:.0f}|{d}|{'c' if control else 's'}"
             self.open.setdefault(pool, []).append({
-                "id": f"{pool}|{rule}|{t:.0f}|{d}|{'c' if control else 's'}", "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
+                "id": fid, "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
                 "signal_t": t, "decided_at": seen, "lag_s": round(seen - t, 1), "ret5": ret5 and round(ret5, 3),
                 "surge": surge and round(surge, 1), "cost": round(cost, 4), "cost_how": how, "exits": {}})
+            if self.quotes is not None:                # the same follow, priced by live quotes (time exits only)
+                from .quotes import ENTRY_GRACE_S
+                due = seen + d
+                self.quotes.request(f"{fid}|entry", "entry", pool, "buy", int(ORDER_SOL * 1e9), due,
+                                    due + ENTRY_GRACE_S,
+                                    {"follow": fid, "rule": rule, "delay": d, "control": control, "mint": mint,
+                                     "holds": {name: hold for name, (stop, hold) in EXITS.items() if stop is None}})
 
     def _control_pool(self, pool: str, t: float) -> str:
         """A random other pool trading now with an hour of history: the same moment, any established coin."""
