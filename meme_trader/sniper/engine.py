@@ -2806,6 +2806,8 @@ class Engine:
                 "forks": {"conflicts": self.stats["fork_conflicts"], "kept": self.stats["fork_kept"],
                           "replaced": self.stats["fork_replaced"], "unresolvable": self.stats["fork_unresolvable"],
                           "pending": len(self.fork_pending), "lookup_errors": self.stats["fork_lookup_errors"],
+                          "tx_decoded": self.stats["fork_tx_decoded"], "tx_unknown": self.stats["fork_tx_unknown"],
+                          "tx_errors": self.stats["fork_tx_errors"],
                           "entries_held": self.stats["skipped_fork_conflict_unresolved"] +
                           self.stats["skipped_fork_conflict"]}}
 
