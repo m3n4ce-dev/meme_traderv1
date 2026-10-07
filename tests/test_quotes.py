@@ -203,3 +203,19 @@ def test_the_revival_forward_test_requests_quotes_for_both_arms(tmp_path):
     metas = [json.loads(r[3]) for r in rows]
     assert {m["control"] for m in metas} == {False, True} and set(metas[0]["holds"]) == {"hold 1 h", "hold 2 h"}
     assert sorted({r[1] for r in rows}) == [1000.0 + d for d in DELAYS]
+
+
+def test_the_review_package_carries_coverage_and_every_attempt(tmp_path):
+    from meme_trader.sniper.review_export import Export, Pseudo
+    clock = Clock(1000)
+    b = book(tmp_path, chain(), clock)
+    b.request("F|entry", "entry", POOL, "buy", 250_000_000, 1000, 1060,
+              {"follow": "F", "control": False, "holds": {"hold 1 h": 3600}})
+    b.run()
+    out = tmp_path / "out"
+    out.mkdir()
+    Export(tmp_path, out, Pseudo(b"test")).quotes()
+    summary = json.loads((out / "quotes_summary.json").read_text())
+    rows = [json.loads(x) for x in (out / "quote_attempts.jsonl").read_text().splitlines()]
+    assert summary["coverage"]["entry / signal"]["ok"] == 1 and summary["pending"] == 1      # its exit, scheduled
+    assert len(rows) == 1 and rows[0]["reason"] == "ok" and "SECRET" not in json.dumps(rows)
