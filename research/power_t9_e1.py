@@ -269,6 +269,7 @@ def provenance(paths: list[Path]) -> dict:
     import importlib.metadata as md
     return {"code_revision": git("rev-parse", "HEAD").strip(),
             "uncommitted_changes_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff.strip() else "",
+            "uncommitted_diff": diff if diff.strip() else "",
             "files_sha256": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},
             "packages": {"numpy": md.version("numpy")}, "python": sys.version.split()[0]}
 
@@ -282,6 +283,8 @@ def main(argv=None) -> int:
     ap.add_argument("--procs", type=int, default=1)
     ap.add_argument("--json", default="")
     a = ap.parse_args(argv)
+    root = Path(__file__).resolve().parents[1]
+    prov = provenance([Path(__file__).resolve(), root / "meme_trader/sniper/t9_portfolio.py"])   # as run, not as left
     grid = cells(a.sims, a.null_sims)
     jobs = [(i, c, a.hurdle, a.boots) for i, c in enumerate(grid)]
     if a.procs > 1:
@@ -297,10 +300,8 @@ def main(argv=None) -> int:
               f"{r['median_total']:+.2f} SOL, coverage {r['median_coverage']:.3f}, observed {r['median_observed']:.3f}",
               flush=True)
     if a.json:
-        root = Path(__file__).resolve().parents[1]
         doc = {"version": 3, "seed": SEED, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell",
-               "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle,
-               **provenance([Path(__file__).resolve(), root / "meme_trader/sniper/t9_portfolio.py"]),
+               "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle, **prov,
                "constants": {"bank": tp.BANK, "size": tp.SIZE, "max_open": tp.MAX_OPEN, "day_stop": tp.DAY_STOP,
                              "hold_s": tp.HOLD_S, "delay_s": tp.DELAY_S, "retry_s": tp.RETRY_S, "fee": FEE,
                              "attempt_s": ATTEMPT_S, "episodes_per_day": EPISODES_PER_DAY,
