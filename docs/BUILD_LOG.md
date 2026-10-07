@@ -4,6 +4,48 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-06 — Entry #62: The second review: proof all the way down, Mayhem checked on-chain, an honest forward test
+
+**Source:** a second external review (revision 38bfd0b, main with #84 and #85) with nine failing invariants. Each was rewritten as this project's own test (`tests/test_review_astra2.py`, plus `tests/test_revival.py`); the reviewer's file wasn't run here. All nine pass now.
+
+**Orders (live safety):**
+- **No guessed fills.** A buy or sell that confirmed but whose transaction can't be read yet is "landed, amounts unknown". It stays unresolved, with its cash reserved and the coin's sells paused, until its own transaction is readable. It is never finalized from the wallet's whole balance (which can include an earlier position) or from a quote.
+- **Landing is remembered.** "Landed" is saved with the unresolved order and is one-way. Once seen landed, a later "not found and expired" can't turn it into "never landed".
+- **No clock-based expiry.** An order with no recorded blockhash is never called expired because of how long it has waited (a stalled chain or RPC can outlast any timer). It stays open until the owner settles it (`order_reconcile` on the dashboard socket: "not landed", refused for an order seen landed).
+- **The DexScreener bot's live executor is blocked** until it shares this lifecycle; paper mode works.
+
+**Mayhem, the owner's rule, made airtight:**
+- **Read from the chain.** pump.fun's bonding curve account carries `is_mayhem_mode` at byte 81 (pump-public-docs). Checked on six live coins: 1 on all three Mayhem coins, 0 on the others. `sniper/mayhem.py` reads it with one `getAccountInfo` per coin, at up to 4 a second, as a coin nears the graduation window. So it's known before the coin qualifies, not when the Mayhem agent first trades it.
+- **Final authorization.** Every automated buy (bots, copy, callouts) needs the coin known not to be Mayhem. Unknown isn't safe: on the real bot the buy waits for the read. Manual buys are exempt.
+- **After the AI vote,** the coin's hard gates are checked again before the order: Mayhem, the window, red flags, the creator's launches, the insider cluster. Momentum isn't re-checked, since it naturally moves while the team votes.
+- **Shares corrected again.** A Mayhem coin mints 2B, but ~1B sits with the agent (`getTokenLargestAccounts`). #61 had switched the concentration shares to 2B, which halved every risk share on those coins. They're back on the tradable 1B, now explicit as `tracker.TRADABLE`. Market cap counts all 2B.
+
+**Chain order (prices AND balances):**
+- **Balances** are signed sums per wallet, so a sell that arrives before its buy nets to zero instead of being clipped at zero and leaving a phantom holding. Early-buyer dumps are the sum over early buyers of min(sold, bought early), the same in any arrival order.
+- **Reserves:** within a slot, each trade is a step from one reserve state to the next. The slot's last state is the one reached once more than it's left, so arrival order doesn't matter and a path that revisits a state (buy, sell, buy) still resolves; all six orders of the reviewer's example end right. With a step missing, the current state stays. A slot that loops back ends where it began.
+- **Duplicates:** a trade delivered twice (same signature, side, size and reserves) counts once.
+
+**Second-life momentum, v2 (`data/revival-v2.jsonl`; v1's rows are kept but not mixed in):**
+- **Decision clocks.** A signal is decided when the evaluator READ its trade (the recorder flushes every ~5 s; after a restart it reads what it missed). The buy fills at the first trade at least `delay` after that, and a stop sells `delay` after it's read. A hold that came due while the evaluator was down sells when it's back. The median read lag is shown.
+- **Censoring.** A pool that stops trading leaves its follow censored ("no executable sale"), counted apart with its last-trade mark, never booked as profit or as zero.
+- **Costs per follow:** 0.3% fee a side plus price impact for a 0.25 SOL order against the pool's SOL depth at the signal, from its last liquidity reading before then. A flat 1.2% only when depth is unknown.
+- **A control:** each signal also follows a random other active, established coin at the same moment.
+- **Restarts:** open follows, cooldowns and the file position are saved (`data/revival-v2-state.json`) and resumed.
+- **Uncertainty:** a 90% range per row, resampled by UTC day then follow; none with under two days.
+- **Labelled exploratory:** 18 correlated variants. A confirmatory test will freeze one rule, delay, exit and order size, with a start date, and won't be edited once running.
+
+**Research records:**
+- **Freezes** save a manifest: commit, the hash of any uncommitted patch (saved under `research/patches/`), installed packages, the model files, and each input recording's size and an end hash.
+- **A final verdict** on code that changed since the freeze reads "INVALID (code changed since the freeze)", with the result shown only as exploratory. When the freeze didn't record its code (graduation-v1), it says so.
+- **The edge check** groups days in UTC everywhere, and gives no "promising" or "real" verdict with fewer than 5 UTC days of trades.
+
+**Not done:**
+- **Paper fees:** paper still uses fixed fees, while the recordings carry each trade's actual fee.
+- **Pulse's P(2x):** not switched to the trees model. The deployed model's calibration on the tradable, non-Mayhem coins comes first, with the model version shown next to the number.
+- **The prediction target:** should be the executable net return under one frozen exit.
+
+---
+
 ## 2026-10-06 — Entry #61: An external review's findings fixed, and no Mayhem coins for the bots
 
 **Source:** a review of commit 2b31f6a that the owner ran through "Astra". Each finding was checked against the code here and reproduced from the description; its zip wasn't on this machine, and no code from it was run.

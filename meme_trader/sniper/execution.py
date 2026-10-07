@@ -37,9 +37,6 @@ class SniperFill:
         return self.sol / self.tokens if self.tokens else 0.0
 
 
-UNKNOWN_EXPIRES_S = 150    # older than any blockhash lives (~60-90 s): with no blockhash recorded, the age proves it
-
-
 class PaperExecutor:
     def __init__(self, ex):
         self.fee = ex.curve_fee_pct + ex.platform_fee_pct
@@ -180,17 +177,11 @@ class LiveExecutor:
             return fill
         if not landed:                               # not confirmed and not found: we don't know yet
             return SniperFill(False, unknown=True, signature=sig, blockhash=bh, error="not confirmed yet - outcome unknown")
-        # confirmed but the transaction itself isn't retrievable: estimate rather than lose the fill
-        if action == "buy":
-            try:
-                tokens = w.token_balance(mint) / 1e6         # we never buy a mint we already hold
-            except Exception:
-                tokens = 0.0
-            if tokens <= 0:
-                return SniperFill(False, unknown=True, landed=True, signature=sig, blockhash=bh,
-                                  error="confirmed but token balance not visible yet")
-            return SniperFill(True, sol=float(amount), tokens=tokens, signature=sig, error="estimated")
-        return SniperFill(True, sol=estimate_sol, tokens=float(amount), signature=sig, error="estimated")
+        # confirmed, but the transaction itself isn't retrievable yet: it LANDED, its amounts are unknown. No guess
+        # (the wallet's whole balance can include an earlier position; a quote isn't a fill): it stays unresolved,
+        # its cash reserved, until resolve() reads the transaction's own amounts (a second review, 2026-10-06).
+        return SniperFill(False, unknown=True, landed=True, signature=sig, blockhash=bh,
+                          error="confirmed; its amounts aren't retrievable yet")
 
     def _close_if_empty(self, mint: str) -> float:
         """Close the emptied token account; SOL actually reclaimed (only once its close is confirmed)."""
@@ -268,9 +259,9 @@ class LiveExecutor:
                     if valid:
                         return unknown("not on-chain yet; it can still land")
                     return unknown("not in the chain's history and its blockhash has expired: it never landed", expired=True)
-                if age_s >= UNKNOWN_EXPIRES_S:
-                    return unknown("not in the chain's history, long past any blockhash's life: it never landed", expired=True)
-                return unknown("not on-chain yet")
+                # no blockhash recorded: wall-clock age doesn't prove block-height expiry (a stalled chain or RPC can
+                # outlast it), so it stays unresolved until someone reconciles it (Engine.reconcile_unresolved)
+                return unknown("not on-chain; no blockhash recorded to prove it can't still land - reconcile it")
             fill = self._fill_from(d, action, sig)
             if fill.ok and action == "sell":
                 try:
