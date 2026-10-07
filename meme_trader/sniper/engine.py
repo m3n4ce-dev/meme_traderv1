@@ -19,7 +19,7 @@ import os
 import secrets
 import re
 import time
-from collections import Counter, defaultdict, deque
+from collections import Counter, OrderedDict, defaultdict, deque
 from pathlib import Path
 
 from ..config import EXAMPLE, ROOT, ConfigError, example_help, validate_sniper
@@ -124,8 +124,10 @@ class Book:
     cash promised to buy orders that haven't resolved yet, so concurrent approvals can't spend it twice."""
 
     def __init__(self, start_sol: float):
+        import uuid
         self.sol = start_sol
         self.start_sol = start_sol
+        self.account_id = uuid.uuid4().hex[:12]            # one account from a start or reset to the next (durable)
         self.day = ""
         self.day_pnl = 0.0
         self.closed: list[dict] = []
@@ -224,7 +226,9 @@ class Engine:
         self.booked_sigs = Receipts()                      # booking receipts, pinned until the outbox confirms (outbox.py)
         self.running_orders: Counter = Counter()           # mint -> live orders being executed right now
         self._recovered_ctx: dict[str, dict] = {}          # mint -> safety context from a recovered order's intent
-        self.fork_pending: dict[tuple, dict] = {}          # (signature, event index) -> {mint, since}: ask the chain
+        self.fork_pending: dict[tuple, dict] = {}          # (signature, event index) -> {mint, since, stage}: ask chain
+        self.fork_blocks: dict[str, str] = {}              # mint -> why its trade state isn't trusted (survives restarts)
+        self._events: OrderedDict = OrderedDict()          # recent trade identities -> content hash (disposition)
         self._fork_busy, self._last_fork_check = False, 0.0
         self._ack_alerted = False
         self._last_resolve = 0.0
@@ -397,7 +401,7 @@ class Engine:
         if not 0 < sol <= 10_000:
             raise ValueError("deposit must be more than 0 and at most 10000 SOL")
         b = self.book
-        b.sol += sol
+        self._cash(sol, "deposit")
         b.start_sol += sol
         b.peak_equity += sol
         if b.kill_base:
@@ -416,13 +420,36 @@ class Engine:
         if self.positions or self.pending or self.deferred:
             return "close the open positions first"
         start = float(self.p.capital.starting_sol)
+        old = self.book.account_id
         self.book = Book(start)
         self.book.day = time.strftime("%Y-%m-%d", time.gmtime(self.now))
+        self._account_event("reset", 0.0, start_sol=start, previous=old)
         self.defense_until, self.defense_reason = 0.0, ""
         self._snap_cache = self._analytics = self._summary_cache = None
         self.save_state()
         self.say("info", f"paper account started over at {start:g} SOL")
         return ""
+
+    def _cash(self, delta: float, kind: str, **kw) -> None:
+        """Every change to the account's cash goes through here, with a typed event in the account journal: the
+        account can be rebuilt from its events alone (a seventh review, 2026-10-07)."""
+        self.book.sol += delta
+        self._account_event(kind, delta, **kw)
+
+    def _account_event(self, kind: str, sol: float, **kw) -> None:
+        """data/account-<mode>.jsonl: buy, sell, failed_fee (attached to a position or not), deposit, reset, open,
+        adopted (an account from before this journal, at its balance then), wallet_sync and close (a link to the
+        trade row; no cash moves)."""
+        if not self.journal:
+            return
+        row = {"ts": round(self.now, 3), "account": self.book.account_id, "kind": kind, "sol": round(sol, 9),
+               "cash_after": round(self.book.sol, 9), **{k: v for k, v in kw.items() if v not in (None, "")}}
+        try:
+            DATA.mkdir(exist_ok=True)
+            with (DATA / f"account-{self.mode}.jsonl").open("a") as f:
+                f.write(json.dumps(row, default=str) + "\n")
+        except OSError:
+            self.stats["account_journal_errors"] += 1
 
     def _global_block(self, manual: bool = False) -> str:
         """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout). Your own
@@ -478,6 +505,8 @@ class Engine:
             s = self.tokens.get(mint)
             if s is not None and s.unsafe:
                 return s.unsafe
+            if self.fork_blocks.get(mint):                # known before a restart, or for a coin no longer tracked
+                return self.fork_blocks[mint]
         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
@@ -729,7 +758,8 @@ class Engine:
             self.last_event = self.now
             if self.record_file:
                 self.record_file.write(dumps(e) + "\n")
-            if isinstance(e, (Trade, Migration)):
+            disp = self._dispose(e) if isinstance(e, Trade) else ""
+            if isinstance(e, Migration) or disp == "new":  # market stats count trades, not their deliveries
                 row = self._pulse_row()
                 if isinstance(e, Migration):
                     row[5] += 1
@@ -745,7 +775,7 @@ class Engine:
         elif isinstance(e, Trade):
             if e.slot > self.last_slot:
                 self.last_slot = e.slot
-            await self._on_trade(e)
+            await self._on_trade(e, disp)
         elif isinstance(e, Migration):
             s = self.tokens.get(e.mint)
             if s:
@@ -817,7 +847,56 @@ class Engine:
                 md_event = Metadata(e.mint, self.feed.now(), e.twitter, e.telegram, e.website)
                 self.record_file.write(dumps(md_event) + "\n")
 
-    async def _on_trade(self, e: Trade) -> None:
+    def _dispose(self, e: Trade) -> str:
+        """What a delivered trade is, decided once (a seventh review, 2026-10-07): "new" - an event to act on;
+        "repeat" - the same event delivered again (nothing downstream sees it); "conflict" - a differing version of an
+        event already seen (a fork: only the coin's state machine takes it, to rebuild and ask the chain). Raw
+        deliveries stay in the recording for diagnostics; they're never extra economic events."""
+        if not e.signature or e.event_index < 0:
+            return "new"                                  # no identity (older recordings): uniqueness isn't invented
+        k = (e.signature, e.event_index)
+        h = hash((e.trader, e.side, round(e.sol, 9), round(e.tokens, 6), round(e.v_sol, 9), round(e.v_tokens, 6),
+                  e.new_balance, e.pool, e.mcap_sol))
+        seen = self._events.get(k)                        # one content hash, or a set once versions differ
+        if seen is None:
+            self._events[k] = h
+            if len(self._events) > 50_000:
+                self._events.popitem(last=False)
+            return "new"
+        if seen == h or (isinstance(seen, set) and h in seen):
+            return "repeat"
+        if isinstance(seen, set):
+            seen.add(h)
+        else:
+            self._events[k] = {seen, h}
+        return "conflict"
+
+    def _fanout(self, s: TokenState) -> None:
+        """A coin's corrections reach every consumer: new fork conflicts go to the chain lookup queue, rebuilt or
+        retracted events correct the followed wallets' bags, and the coin's safety block is kept in the registry."""
+        for k in s.new_conflicts:
+            self.fork_pending[k] = {"mint": s.mint, "since": self.now, "stage": "first"}
+            self.stats["fork_conflicts"] += 1
+        s.new_conflicts.clear()
+        for old, new in s.replacements:
+            if old is not None and old.trader in self.leaders.leaders:
+                self.leaders.replace(old, new)
+        s.replacements.clear()
+        if s.unsafe:
+            self.fork_blocks[s.mint] = s.unsafe
+        elif s.mint in self.fork_blocks and not s.partial:
+            del self.fork_blocks[s.mint]
+
+    async def _on_trade(self, e: Trade, disp: str | None = None) -> None:
+        disp = self._dispose(e) if disp is None else disp
+        if disp == "repeat":
+            return
+        if disp == "conflict":                            # the coin's state machine only: no new consumer events
+            s = self.tokens.get(e.mint)
+            if s is not None:
+                s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
+                self._fanout(s)
+            return
         a = self.audit.get(e.mint)
         if a is not None:                                  # gate audit: what happened after the decision?
             px = e.v_sol / e.v_tokens if e.pool == "pump" and e.v_tokens > 0 else (e.mcap_sol / 1e9 if e.mcap_sol else 0)
@@ -842,12 +921,10 @@ class Engine:
             if kol:                      # its launch wasn't seen, so its age is unknown: never a strategy candidate
                 s.decided, s.late_tried = "seen through a KOL's trade", True
             await self._watch(e.mint)
-        s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
-        if s.new_conflicts:                               # a fork: two different versions of one trade event
-            for k in s.new_conflicts:
-                self.fork_pending.setdefault(k, {"mint": s.mint, "since": self.now})
-                self.stats["fork_conflicts"] += 1
-            s.new_conflicts.clear()
+        if s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s) != "new":
+            self._fanout(s)                               # (the engine's registry evicted it: the coin still knew)
+            return
+        self._fanout(s)
         kw = self._known_wallets().get(e.trader)        # a KOL or a study wallet: the Charts tab's tracker
         if kw:
             self._note_known(e, s, *kw)
@@ -1432,7 +1509,7 @@ class Engine:
         self._rereserve(o["mint"])
         self._release(o["mint"])
         if s is None:
-            self.book.sol -= fill.fees_lost
+            self._cash(-fill.fees_lost, "failed_fee", mint=o["mint"], attached="")
             self.book.day_pnl -= fill.fees_lost
             return
         self._apply_buy(s, fill, o["score"], o["notes"], o["source"], o["leader"], o)
@@ -1477,7 +1554,8 @@ class Engine:
     def _book_fees_lost(self, fill: SniperFill, s: TokenState) -> None:
         """Failed transactions that landed still burned fees: real cash, and a real loss for today."""
         if fill.fees_lost > 0:
-            self.book.sol -= fill.fees_lost
+            self._cash(-fill.fees_lost, "failed_fee", mint=s.mint, attached="position" if s.mint in self.positions else "",
+                       ref=fill.signature)
             self.book.day_pnl -= fill.fees_lost
             self.say("error", f"{s.symbol}: failed transaction(s) still cost {fill.fees_lost:.6f} SOL in fees", s.mint)
 
@@ -1505,7 +1583,8 @@ class Engine:
             self.say("error", f"buy {s.symbol} failed: {fill.error}", s.mint, timing=fill.timing)
             self.save_state()
             return
-        self.book.sol -= fill.sol + fill.rent             # rent is cash locked in the token account until reclaimed
+        self._cash(-(fill.sol + fill.rent), "buy", mint=s.mint, rent=fill.rent, ref=fill.signature,
+                   add=bool((meta or {}).get("add")))     # rent is cash locked in the token account until reclaimed
         if (meta or {}).get("add") and s.mint in self.positions:
             self._merge_add(s, self.positions[s.mint], fill)
             return
@@ -1695,7 +1774,8 @@ class Engine:
             self.say("error", f"sell {s.symbol} failed: {fill.error}", s.mint)
             self.save_state()
             return
-        self.book.sol += fill.sol + fill.rent_reclaimed   # fill.sol can be negative: fees above proceeds
+        self._cash(fill.sol + fill.rent_reclaimed, "sell", mint=s.mint, rent_reclaimed=fill.rent_reclaimed,
+                   ref=fill.signature)                    # fill.sol can be negative: fees above proceeds
         if self.positions.get(s.mint) is not pos:          # closed meanwhile (e.g. reconcile): cash is still real
             self.save_state()
             return
@@ -1820,7 +1900,7 @@ class Engine:
                 else:
                     self._book_fees_lost(fill, s)
                     if fill.ok:
-                        self.book.sol += fill.sol + fill.rent_reclaimed
+                        self._cash(fill.sol + fill.rent_reclaimed, "sell", mint=mint, ref=sig, note="no position")
                     self.save_state()
 
     def _model_id(self) -> str:
@@ -1873,6 +1953,8 @@ class Engine:
         """Book a closed trade: the session's list, win/loss counts, defense mode, the log line and the trade journal."""
         pnl = row["pnl"]
         self.book.closed.append(row)
+        self._account_event("close", 0.0, mint=row.get("mint"), net_pnl=round(pnl, 9),
+                            gross_pnl=round(row.get("gross_pnl", pnl), 9), opened=row.get("opened"), source=row.get("source"))
         self.stats["wins" if pnl > 0 else "losses"] += 1
         self._update_defense()
         where = f" on {row['chain']}" if row.get("chain") else ""
@@ -1885,13 +1967,18 @@ class Engine:
 
     def _on_reconcile(self, e: Reconcile) -> None:
         """The chain's answer for a conflicting trade event (live: from `_reconcile_forks`; replays: as recorded)."""
-        self.fork_pending.pop((e.signature, e.event_index), None)
+        k = (e.signature, e.event_index)
+        if e.status != "confirmed" or e.err:              # final, failed or given up: no more lookups
+            self.fork_pending.pop(k, None)
+        elif k in self.fork_pending:                      # confirmed: provisional - checked again until finalized
+            self.fork_pending[k].update(stage="final", next=self.now + 10)
         s = self.tokens.get(e.mint)
         if s is None:
             return
-        r = s.resolve_conflict((e.signature, e.event_index), e.slot, e.status, e.source)
+        r = s.resolve_conflict(k, e.slot, e.status, e.source, e.err)
         if r:
             self.stats["fork_" + r] += 1
+        self._fanout(s)
 
     def _fork_rpc(self) -> tuple[str, str]:
         """Where to ask about fork copies: the feed's own provider over HTTP (it delivered them, and RPC Fast is a flat
@@ -1925,7 +2012,9 @@ class Engine:
         self._fork_busy = True
         try:
             url, host = self._fork_rpc()
-            items = list(self.fork_pending.items())[:256]
+            items = [(k, v) for k, v in self.fork_pending.items() if v.get("next", 0) <= self.now][:256]
+            if not items:
+                return
             try:
                 vals = await asyncio.to_thread(self._status_lookup, url, [k[0] for k, _ in items])
             except Exception:
@@ -1935,11 +2024,18 @@ class Engine:
             src = f"getSignatureStatuses@{host}"
             now = self.feed.now()
             for (k, info), st in zip(items, vals):
-                if st and st.get("slot") and st.get("confirmationStatus") in ("confirmed", "finalized"):
-                    ev = Reconcile(now, info["mint"], k[0], k[1], int(st["slot"]), st["confirmationStatus"], src)
+                ok = isinstance(st, dict) and isinstance(st.get("slot"), int) and st["slot"] > 0 and \
+                    st.get("confirmationStatus") in ("confirmed", "finalized") and "err" in st
+                if ok and st["err"] is not None:          # it landed, and FAILED: its trade never happened
+                    ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"], src,
+                                   err=json.dumps(st["err"])[:200])
+                elif ok and (st["confirmationStatus"] == "finalized" or info.get("stage") != "final"):
+                    ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"], src)
                 elif now - info["since"] >= FORK_GIVE_UP_S:
-                    ev = Reconcile(now, info["mint"], k[0], k[1], 0, "not found", src)
+                    why = "not finalized" if info.get("stage") == "final" else "not found"
+                    ev = Reconcile(now, info["mint"], k[0], k[1], 0, why, src)
                 else:
+                    info["next"] = self.now + (10 if info.get("stage") == "final" else 1)
                     continue
                 await self.handle(ev)
         finally:
@@ -2172,7 +2268,10 @@ class Engine:
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
-                 "booked_sigs": self.booked_sigs.to_json(),
+                 "booked_sigs": self.booked_sigs.to_json(), "account_id": self.book.account_id,
+                 "forks": {"blocks": {**self.fork_blocks, **{m: s.unsafe for m, s in self.tokens.items() if s.unsafe}},
+                           "pending": [[k[0], k[1], v["mint"], v["since"], v.get("stage", "first")]
+                                       for k, v in self.fork_pending.items()]},
                  "owner": self.outbox.owner if self.outbox is not None else None,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:], "pulse": [list(r) for r in self.pulse]}
@@ -2241,6 +2340,8 @@ class Engine:
                 s.holders[launch.creator] = s.net[launch.creator]
         s.partial = True                             # other wallets' balances from before the restart are unknown
         s.decided = "entered"
+        if self.fork_blocks.get(m):                  # its fork history is gone: the block stays until proven safe
+            s.safety_hold = self.fork_blocks[m]
         return s
 
     def _check_owner(self, d: dict) -> None:
@@ -2260,6 +2361,7 @@ class Engine:
 
     async def restore_state(self) -> None:
         if not self.state_path.exists():
+            self._account_event("open", 0.0, start_sol=self.book.start_sol)
             self._reconcile_outbox()                      # no saved book, but maybe signed orders
             now = self.feed.now()
             for o in self.unresolved.values():
@@ -2272,6 +2374,10 @@ class Engine:
         self._check_owner(d)
         b = d["book"]
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
+        if d.get("account_id"):
+            self.book.account_id = d["account_id"]
+        else:                                             # an account from before the journal: adopted at this balance
+            self._account_event("adopted", 0.0, start_sol=self.book.start_sol)
         self.book.day_pnl, self.book.halted = b["day_pnl"], b["halted"]
         self.book.closed = upgrade_pnl(b["closed"])              # rows from before net P&L: upgraded (pnl.py)
         from .mcapfill import apply as fill_mcaps
@@ -2291,6 +2397,11 @@ class Engine:
         cut = time.time() - 90 * 60                          # the Market Pulse chart keeps its last hour across a restart
         self.pulse.extend(r for r in d.get("pulse") or [] if isinstance(r, list) and len(r) == 6 and r[0] >= cut)
         self.unresolved = dict(d.get("unresolved") or {})
+        forks = d.get("forks") or {}                       # a known fork block is never forgotten by a restart
+        self.fork_blocks = {m: str(r) for m, r in (forks.get("blocks") or {}).items() if r}
+        for sig, ei, mint, since, stage in forks.get("pending") or []:
+            self.fork_pending[(sig, int(ei))] = {"mint": mint, "since": since, "stage": stage}
+            self.fork_blocks.setdefault(mint, "fork conflict unresolved (from before a restart)")
         from .outbox import Receipts
         self.booked_sigs = Receipts.load(d.get("booked_sigs"))
         self._reconcile_outbox()
@@ -2370,7 +2481,7 @@ class Engine:
             self.say("error", f"wallet holds {bal:.4f} SOL but the ledger expected {self.book.sol:.4f}: ledger "
                               f"lowered by {-gap:.4f} SOL (unbooked fees or a withdrawal), counted against today's "
                               "loss limit")
-            self.book.sol = bal
+            self._cash(bal - self.book.sol, "wallet_sync", note="the wallet held less than the ledger expected")
             self.book.day_pnl += gap
             self.save_state()
         elif gap > CASH_TOLERANCE_SOL and not self._surplus_noted:
