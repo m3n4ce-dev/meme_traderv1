@@ -18,6 +18,7 @@ import bisect, gzip, hashlib, itertools, json, statistics as st, sys, time  # no
 from collections import defaultdict
 sys.path.insert(0, ROOT)
 from meme_trader.sniper.replay_exec import CLOSED, Coverage, simulate  # noqa: E402
+from meme_trader.sniper.t9_signal import SIGNAL_VERSION, source_hash  # noqa: E402
 
 W = DATA + "wallets/"
 FILES = ["trades-2026-10-04.jsonl.gz", "trades-2026-10-05.jsonl.gz", "trades-2026-10-06.jsonl.gz"]
@@ -65,24 +66,11 @@ print("coverage", time.strftime("%m-%d %H:%M", time.gmtime(COV.start)), "->", ti
 
 
 def signals(p):
-    ts = [x[0] for x in p]
-    cum = [0.0]
-    for x in p:
-        cum.append(cum[-1] + x[3])
-    out, last = [], -1e18
-    for i, (t, px, buy, sol) in enumerate(p):
-        if t - last < 30 or t - p[0][0] < 3900:
-            continue
-        last = t
-        j5 = bisect.bisect_left(ts, t - 300)
-        j15 = bisect.bisect_left(ts, t - 900)
-        j65 = bisect.bisect_left(ts, t - 3900)
-        if j5 == 0 or j15 == 0:
-            continue
-        v5 = cum[i + 1] - cum[j5]
-        v60 = cum[j5] - cum[j65]
-        out.append((t, px / p[j5 - 1][1] - 1, px / p[j15 - 1][1] - 1, v5 / (v60 / 12) if v60 > 0 else 0.0))
-    return out
+    """The shared, versioned signal (meme_trader/sniper/t9_signal.py): (t, ret5, ret15, surge) per check. Version 2
+    (2026-10-07) takes the price AT OR BEFORE t-300, as registered; version 1 (this replay's first run) took the
+    price strictly before it."""
+    from meme_trader.sniper.t9_signal import signals as shared
+    return shared(p)
 
 
 SIG = {k: signals(p) for k, p in pools.items()}
@@ -170,6 +158,7 @@ for (rn, xn, d), g in groups.items():
     for c in COSTS:
         table.append({"rule": rn, "exit": xn, "delay": d, "cost": c, **summary(g, c)})
 out = {"generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "inputs": inputs,
+       "signal": {"version": SIGNAL_VERSION, "source_sha256": source_hash()},
        "coverage": {"start": COV.start, "end": COV.end, "gaps": gaps}, "rules": list(RULES), "exits": EXITS,
        "delays": DELAYS, "costs": COSTS, "episode_s": EPISODE_S, "table": table}
 json.dump(out, open(OUT + "t9_replay_v2.json", "w"), indent=1)

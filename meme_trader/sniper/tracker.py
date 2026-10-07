@@ -81,13 +81,26 @@ class TokenState:
     conflicts: dict = field(default_factory=dict)    # identity -> {"versions": [Trade], "status": ..., ...}
     new_conflicts: list = field(default_factory=list)   # identities the engine hasn't asked the chain about yet
     unrepairable: bool = False                       # a conflict it couldn't rebuild from (restored coin, full ledger)
+    safety_hold: str = ""                            # a block carried across a restart (the engine's fork registry)
+    replacements: list = field(default_factory=list)   # (old trade, new trade or None): for downstream consumers
+
+    # a conflict's status (a seventh review, 2026-10-07): "unresolved" (provisional state, unsafe), "confirmed" (the
+    # chain's confirmed answer: usable, still re-checked until finalized), "final" (finalized), "unresolvable" (no
+    # answer, or one matching no single delivered version) and "retracted" (the transaction failed on chain: its trade
+    # never happened). New differing content reopens any of them; weaker evidence never overrides "final".
+    SAFE: ClassVar[tuple] = ("confirmed", "final")
 
     @property
     def unsafe(self) -> str:
         """Why this coin's trade-derived state can't be trusted for a new automated entry, or ""."""
+        if self.safety_hold:
+            return self.safety_hold
         if self.unrepairable:
             return "fork conflict: state can't be rebuilt"
-        if any(c["status"] != "resolved" for c in self.conflicts.values()):
+        st = [c["status"] for c in self.conflicts.values()]
+        if "retracted" in st:
+            return "fork conflict: a version's transaction failed on chain"
+        if any(x not in self.SAFE for x in st):
             return "fork conflict unresolved"
         return ""
 
@@ -157,7 +170,7 @@ class TokenState:
         elif not ends and self.slot_start:               # a closed loop: the slot ends where it began
             self.curve = Curve(self.slot_start[1], self.slot_start[0])
 
-    def _duplicate(self, t: Trade) -> bool:
+    def _disposition(self, t: Trade) -> str:
         """The same trade EVENT delivered again: its identity is the transaction's signature and the event's place in
         it, not its content (one transaction can hold two identical buys). Without an event index (older recordings)
         nothing is dropped - uniqueness isn't invented.
@@ -168,59 +181,85 @@ class TokenState:
         the chain (`resolve_conflict`), and meanwhile it's rebuilt provisionally with the later slot's version - the
         one that landed in all 9 of 9 cases checked on 10-07. Never final without the chain's answer."""
         if not t.signature or t.event_index < 0:
-            return False
+            return "new"
         k = (t.signature, t.event_index)
+        new = _content(t)
         if k not in self.seen:
-            self.seen[k] = _content(t)
+            self.seen[k] = new
             if len(self.seen) > 4096:
                 self.seen.pop(next(iter(self.seen)))
-            return False
-        if self.seen[k] == _content(t):
-            return True
+            return "new"
         c = self.conflicts.get(k)
+        if self.seen[k] == new or (c is not None and any(v is not None and _content(v) == new for v in c["versions"])):
+            return "repeat"
         if c is None:
             first = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
-            c = self.conflicts[k] = {"versions": [first] if first is not None else [], "status": "unresolved"}
+            c = self.conflicts[k] = {"versions": [first] if first is not None else [], "status": "unresolved",
+                                     "history": []}
             self.new_conflicts.append(k)
-        if any(_content(v) == _content(t) for v in c["versions"]):
-            return True
+        elif c["status"] != "unresolved":                 # new contradicting content reopens a settled event
+            c["status"], c["reopened"] = "unresolved", c.get("reopened", 0) + 1
+            self.new_conflicts.append(k)
         c["versions"].append(t)
         applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
-        if c["status"] == "unresolved" and applied is not None and t.slot > applied.slot:
+        if applied is not None and t.slot > applied.slot:
             self._replace(k, t)                         # provisional: the later slot's version
-        return True
+        return "conflict"
 
-    def _replace(self, k: tuple, t: Trade) -> None:
-        """Rebuild the coin's trade-derived state with `t` in place of the version applied for identity k."""
+    def _replace(self, k: tuple, t: Trade | None) -> None:
+        """Rebuild the coin's trade-derived state with `t` in place of the version applied for identity k (None:
+        the event is retracted - its transaction failed). Downstream consumers get (old, new) in `replacements`."""
         if self.partial or self.ledger_full or k not in self.ledger_at:
             self.unrepairable = True                     # (restored mid-life, or too long to replay exactly)
             return
         i = self.ledger_at[k]
-        _, bw, sw = self.ledger[i]
+        old, bw, sw = self.ledger[i]
         self.ledger[i] = (t, bw, sw)
-        self.seen[k] = _content(t)
+        if t is not None:
+            self.seen[k] = _content(t)
+        self.replacements.append((old, t))
         fresh = TokenState(self.mint, self.launch, self.first_seen)
         if self.launch is not None and self._launched:
             fresh.on_launch(self.launch)
         for tr, b, s in self.ledger:
-            fresh._apply(tr, b, s)
+            if tr is not None:
+                fresh._apply(tr, b, s)
         for name in TRADE_FIELDS:
             setattr(self, name, getattr(fresh, name))
         self.mayhem = self.mayhem or fresh.mayhem
 
-    def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "") -> str:
-        """The chain's answer for a conflicting event: the slot its transaction landed in. The version delivered from
-        that slot becomes the applied one (the coin rebuilt if it wasn't), and the conflict is resolved. Idempotent.
-        Returns "kept", "replaced", "unresolvable" or "" (nothing to do)."""
+    def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "", err: str = "") -> str:
+        """The chain's answer for a conflicting event: the slot its transaction landed in, at what confirmation, and
+        whether it failed. Returns "kept", "replaced", "retracted", "unresolvable" or "" (nothing new).
+        - a FAILED transaction: its trade never happened - retracted from the coin, which stays unsafe;
+        - "finalized" is final; "confirmed" is usable but provisional, and a later finalized answer can revise it;
+          weaker evidence never overrides final, and a contradicting final answer makes it unresolvable;
+        - the landed slot must match exactly ONE delivered content: two differing copies from one slot can't be told
+          apart by slot, so it's unresolvable (unsafe) rather than a guess."""
         c = self.conflicts.get(k)
-        if c is None or c["status"] == "resolved":
+        if c is None:
             return ""
-        c.update(evidence={"slot": slot, "status": status, "source": source})
-        match = [v for v in c["versions"] if v is not None and v.slot == slot] if slot else []
-        if not match:
+        level = "final" if status == "finalized" else "confirmed" if status == "confirmed" else ""
+        if not err and c["status"] == "final":
+            if level != "final" or c.get("slot") == slot:
+                return ""                                # weaker, or the same final answer again
+        elif not err and c["status"] == level and c.get("slot") == slot:
+            return ""                                    # the same answer again: idempotent
+        ev = {"slot": slot, "status": status, "source": source, "err": err}
+        c["evidence"] = ev
+        c.setdefault("history", []).append(ev)
+        if err:
+            self._replace(k, None)
+            c["status"] = "retracted"
+            return "retracted"
+        if c["status"] == "final":                       # final contradicted by final: can't be both
+            c["status"] = "unresolvable"
+            return "unresolvable"
+        match = [v for v in c["versions"] if v is not None and v.slot == slot] if slot and level else []
+        if not match or len({_content(v) for v in match}) > 1:
             c["status"] = "unresolvable"                 # stays unsafe: never reported as clean
             return "unresolvable"
-        canon = match[-1]
+        canon = match[0]
         applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
         out = "kept"
         if applied is None or _content(applied) != _content(canon) or applied.slot != canon.slot:
@@ -229,7 +268,7 @@ class TokenState:
         if self.unrepairable:
             c["status"] = "unresolvable"
             return "unresolvable"
-        c["status"] = "resolved"
+        c["status"], c["slot"] = level, slot
         return out
 
     def _early(self, w: str) -> None:
@@ -238,9 +277,12 @@ class TokenState:
         self.early_sold += new - self.early_c.get(w, 0.0)
         self.early_c[w] = new
 
-    def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
-        if self._duplicate(t):
-            return
+    def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> str:
+        """Apply a delivered trade event; returns its disposition: "new" (applied), "repeat" (the same event again:
+        nothing changes) or "conflict" (a differing version of an event already seen - see `_disposition`)."""
+        d = self._disposition(t)
+        if d != "new":
+            return d
         if len(self.ledger) < LEDGER_MAX:
             if t.signature and t.event_index >= 0:
                 self.ledger_at[(t.signature, t.event_index)] = len(self.ledger)
@@ -248,6 +290,7 @@ class TokenState:
         else:
             self.ledger_full = True
         self._apply(t, bundle_window_s, sniper_window_s)
+        return "new"
 
     def _apply(self, t: Trade, bundle_window_s: float, sniper_window_s: float) -> None:
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:

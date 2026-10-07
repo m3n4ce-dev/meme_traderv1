@@ -35,6 +35,7 @@ WALLET_FIELDS = {"leader", "creator", "trader", "wallet", "funder", "owner", "us
 SENSITIVE_KEYS = ("url", "key", "secret", "token", "password", "wallet", "pubkey", "webhook", "services")
 # ("services": this machine's systemd units, e.g. sniper.hq.extra_services - local names, not research settings)
 BRIEF_SOURCES = ("late", "sniper")                       # the brief's 303 bot trades: paper mode, these strategies
+RESIDUAL_TOLERANCE_SOL = 0.01                            # declared in advance: an account reconciles within this
 
 
 def day_of(ts) -> str:
@@ -163,12 +164,21 @@ class Export:
         extra = set()
         out = []
         from .pnl import upgrade
+        sp = self.data / "sniper_state_paper.json"
+        booked = set()
+        if sp.exists():
+            for b in (json.loads(sp.read_text()).get("book") or {}).get("closed") or []:
+                booked.add((b.get("mint"), round(float(b.get("opened") or 0), 3)))
         for r in rows:
             r = self.ps.row(upgrade(r))
             o = {k: r.get(k) for k in fixed}
+            o["provenance"] = "trade log"
+            if r.get("mode") is None and (r.get("mint"), round(float(r.get("opened") or 0), 3)) in booked:
+                o["mode"] = "paper"                      # logged before its close path tagged a mode; the book has it
+                o["provenance"] = "trade log; mode recovered from the saved paper book"
             o["trade_id"] = hashlib.sha1(f"{r.get('mint')}|{r.get('opened')}|{r.get('source')}|{r.get('session')}"
                                          .encode()).hexdigest()[:16]
-            o["interval"], o["day_utc"] = interval_of(r), day_of(r.get("opened"))
+            o["interval"], o["day_utc"] = interval_of({**r, "mode": o["mode"]}), day_of(r.get("opened"))
             o["close_day_utc"] = day_of(r.get("closed"))
             for k in ("fees", "real"):
                 for kk, vv in (r.get(k) or {}).items():
@@ -176,7 +186,7 @@ class Export:
                     extra.add(f"{k}_{kk}")
             o["feat_json"] = json.dumps(r["feat"]) if r.get("feat") else ""
             out.append(o)
-        cols = fixed + sorted(extra) + ["feat_json"]
+        cols = fixed + ["provenance"] + sorted(extra) + ["feat_json"]
         with open(self.out / "paper_trades.csv", "w", newline="") as f:
             w = csv.DictWriter(f, cols, extrasaction="ignore")
             w.writeheader()
@@ -197,17 +207,34 @@ class Export:
         book = state.get("book") or {}
         closed = upgrade_all([dict(r) for r in book.get("closed") or []])
         start_ts = min((r["closed"] for r in closed), default=None)   # the current account's first close
-        paper = sorted((t for t in trades if t.get("mode") == "paper"), key=lambda t: t["closed"] or 0)
+        # ONE row set for the daily ledger and the cash check (a seventh review, 2026-10-07): the current account is
+        # the saved book's closes, each matched to its trade-log row; earlier periods are the paper rows before it
+        key = lambda r: (r.get("mint"), round(float(r.get("opened") or 0), 3))
+        logged = {key(t): t for t in trades}
+        current = []
+        for r in closed:
+            t = logged.get(key(r))
+            if t is None:                                # in the book, not in any trade log
+                t = {"mint": r.get("mint"), "opened": r.get("opened"), "closed": r.get("closed"),
+                     "close_day_utc": day_of(r.get("closed")), "gross_pnl": r.get("gross_pnl"), "pnl": r.get("pnl"),
+                     "failed_fees_sol": r.get("failed_fees_sol"), "source": r.get("source"),
+                     "provenance": "saved book only (not in the trade logs)"}
+            current.append(t)
+        cur_keys = {key(t) for t in current}
+        earlier = [t for t in trades if t.get("mode") == "paper" and key(t) not in cur_keys and
+                   (start_ts is None or (t["closed"] or 0) < start_ts - 1)]
+        self.counts["account_rows"] = {"current": len(current), "earlier": len(earlier),
+                                       "by_provenance": dict(Counter(t.get("provenance", "trade log") for t in current))}
         days: dict[tuple, dict] = {}
-        for t in paper:
-            acct = "current" if start_ts is not None and t["closed"] >= start_ts - 1 else "earlier"
-            g = days.setdefault((t["close_day_utc"], acct), {"positions": 0, "gross_pnl": 0.0, "failed_fees": 0.0,
-                                                               "net_pnl": 0.0, "sources": Counter()})
-            g["positions"] += 1
-            g["gross_pnl"] += float(t.get("gross_pnl") or 0.0)
-            g["failed_fees"] += float(t.get("failed_fees_sol") or 0.0)
-            g["net_pnl"] += float(t.get("pnl") or 0.0)
-            g["sources"][str(t.get("source", "")).split(":")[0]] += 1
+        for acct, rows in (("current", current), ("earlier", earlier)):
+            for t in rows:
+                g = days.setdefault((t["close_day_utc"], acct), {"positions": 0, "gross_pnl": 0.0, "failed_fees": 0.0,
+                                                                   "net_pnl": 0.0, "sources": Counter()})
+                g["positions"] += 1
+                g["gross_pnl"] += float(t.get("gross_pnl") or 0.0)
+                g["failed_fees"] += float(t.get("failed_fees_sol") or 0.0)
+                g["net_pnl"] += float(t.get("pnl") or 0.0)
+                g["sources"][str(t.get("source", "")).split(":")[0]] += 1
         span = _days(sorted({d for d, _ in days}))
         with open(self.out / "account_ledger.csv", "w", newline="") as f:
             w = csv.writer(f)
@@ -224,31 +251,64 @@ class Export:
                     cum[acct] += g["net_pnl"]
                     w.writerow([d, acct, g["positions"], round(g["gross_pnl"], 6), round(g["failed_fees"], 6),
                                 round(g["net_pnl"], 6), round(cum[acct], 6), json.dumps(dict(g["sources"]))])
-        rec = {"account_start": start_ts, "note": "the current account = since the first close in the saved book; "
-               "earlier resets (before it) weren't all journaled, so earlier periods can't be reconciled to cash"}
+        rec = {"account_id": state.get("account_id"), "account_start": start_ts,
+               "account_start_basis": "the first close in the saved book: the reset that began it wasn't journaled",
+               "note": "earlier periods' resets weren't all journaled, so they can't be reconciled to cash",
+               "tolerance_sol": RESIDUAL_TOLERANCE_SOL}
         if book:
-            net = sum(float(r["pnl"]) for r in closed)
+            net = sum(float(t.get("pnl") or 0) for t in current)        # the same rows as account_ledger.csv
             opened = list((state.get("positions") or {}).values())
             open_part = sum(float(p.get("proceeds_sol", 0)) - float(p.get("initial_cost_sol", 0)) -
                             float(p.get("rent_sol", 0)) - float(p.get("failed_fees_sol", 0)) for p in opened)
             expected = float(book["start_sol"]) + net + open_part
-            logged = {(t["mint"], round(t["opened"] or 0, 3)) for t in paper if start_ts and t["closed"] >= start_ts - 1}
-            saved = {(r["mint"], round(r["opened"], 3)) for r in closed}
+            in_logs = sum(1 for t in current if t.get("provenance") != "saved book only (not in the trade logs)")
             rec.update({
                 "start_sol_incl_deposits": book["start_sol"], "deposits": book.get("deposits") or [],
                 "closed_positions": len(closed), "closed_list_truncated": len(closed) >= 500,
-                "gross_pnl_sol": round(sum(float(r.get("gross_pnl", r["pnl"])) for r in closed), 6),
-                "failed_fees_on_positions_sol": round(sum(float(r.get("failed_fees_sol") or 0) for r in closed), 6),
+                "gross_pnl_sol": round(sum(float(t.get("gross_pnl") if t.get("gross_pnl") is not None else t.get("pnl") or 0)
+                                           for t in current), 6),
+                "failed_fees_on_positions_sol": round(sum(float(t.get("failed_fees_sol") or 0) for t in current), 6),
                 "net_pnl_sol": round(net, 6), "open_positions": len(opened), "open_positions_cash_effect_sol":
                 round(open_part, 6), "expected_cash_sol": round(expected, 6), "cash_sol": round(float(book["sol"]), 6),
                 "residual_sol": round(float(book["sol"]) - expected, 6),
+                "within_tolerance": abs(float(book["sol"]) - expected) <= RESIDUAL_TOLERANCE_SOL,
                 "residual_means": "cash spent outside any closed or open position: fees of failed buys that never "
                                   "opened one, and anything not journaled (negative = unexplained loss)",
-                "closes_in_book_not_in_trade_logs": len(saved - logged),
-                "closes_in_trade_logs_not_in_book": len(logged - saved)})
-        (self.out / "account_reconciliation.json").write_text(json.dumps(rec, indent=1))
+                "closes_in_book_found_in_trade_logs": in_logs,
+                "closes_in_book_not_in_trade_logs": len(current) - in_logs,
+                "closes_recovered_untagged": sum(1 for t in current if str(t.get("provenance", "")).startswith("trade log;"))})
+            rec["event_journal"] = self._events_check(state)
+        (self.out / "account_reconciliation.json").write_text(json.dumps(rec, indent=1, default=str))
         self._note("account_ledger.csv", rows=sum(1 for _ in open(self.out / "account_ledger.csv")) - 1)
         self._note("account_reconciliation.json", residual_sol=rec.get("residual_sol"))
+
+    def _events_check(self, state: dict) -> dict:
+        """The account rebuilt from its typed events (data/account-paper.jsonl, since 2026-10-07): the balance at
+        its opening event (open / adopted / reset) plus every cash event after, against the saved cash."""
+        p = self.data / "account-paper.jsonl"
+        acct = state.get("account_id")
+        if not p.exists() or not acct:
+            return {"available": False, "why": "no account journal yet (it starts with the 2026-10-07 code)"}
+        self.inputs.append(p)
+        rows = [r for r in read_jsonl(p)[0] if r.get("account") == acct]
+        opens = [i for i, r in enumerate(rows) if r.get("kind") in ("open", "adopted", "reset")]
+        if not opens:
+            return {"available": False, "why": "this account has no opening event in the journal"}
+        i0 = opens[-1]
+        base = float(rows[i0].get("cash_after") or 0.0)
+        later = rows[i0 + 1:]
+        by = defaultdict(float)
+        for r in later:
+            by[r["kind"]] += float(r.get("sol") or 0.0)
+        expected = base + sum(by.values())
+        cash = float((state.get("book") or {}).get("sol") or 0.0)
+        return {"available": True, "opening": rows[i0].get("kind"), "opening_ts": rows[i0].get("ts"),
+                "opening_cash": base, "events": len(later), "cash_by_kind": {k: round(v, 9) for k, v in by.items()},
+                "unattached_failed_fees_sol": round(sum(float(r.get("sol") or 0) for r in later
+                                                        if r.get("kind") == "failed_fee" and not r.get("attached")), 9),
+                "expected_cash_sol": round(expected, 9), "cash_sol": round(cash, 9),
+                "residual_sol": round(cash - expected, 9),
+                "within_tolerance": abs(cash - expected) <= RESIDUAL_TOLERANCE_SOL}
 
     def journal(self) -> None:
         files = sorted(self.data.glob("journal-*.jsonl"))
@@ -632,7 +692,8 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
         reg = ROOT / "research" / "registrations"
     if reg.exists():
         shutil.copytree(reg, out / "registrations")
-    for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json"):
+    for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json", "power_t9_e1_v2.out",
+                 "power_t9_e1_v2.json"):
         if (data / "research" / name).exists():
             (out / "registrations").mkdir(exist_ok=True)
             shutil.copy2(data / "research" / name, out / "registrations" / name)

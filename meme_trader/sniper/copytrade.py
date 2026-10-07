@@ -106,6 +106,20 @@ class LeaderBook:
             del self.bags[(t.trader, t.mint)]
         return frac
 
+    def replace(self, old: Trade, new: Trade | None) -> None:
+        """A fork repair: the version of a leader's trade already counted (`old`) was wrong - the chain kept `new`, or
+        none (it failed). Their bag is corrected by the difference, so later sell fractions use the real inventory."""
+        b = self.bags[(old.trader, old.mint)]
+        sign = 1 if old.side == "buy" else -1
+        b.tokens -= sign * old.tokens
+        b.cost -= old.sol if old.side == "buy" else 0.0
+        if new is None:
+            self.stats[old.trader].trades -= 1
+        else:
+            b.tokens += (1 if new.side == "buy" else -1) * new.tokens
+            b.cost += new.sol if new.side == "buy" else 0.0
+        b.tokens, b.cost = max(b.tokens, 0.0), max(b.cost, 0.0)
+
     def copies_last_hour(self, wallet: str, now: float) -> int:
         q = self.recent_copies[wallet]
         while q and q[0] < now - 3600:

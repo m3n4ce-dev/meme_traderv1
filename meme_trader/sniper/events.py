@@ -114,6 +114,7 @@ class Reconcile:
     slot: int = 0                # the landed slot; 0 = not established (not found, or matches no delivered copy)
     status: str = ""             # the RPC's confirmation status, or why it couldn't be established
     source: str = ""             # how it was established (method, provider host)
+    err: str = ""                # the transaction FAILED on chain (its error): its trade never happened
     kind: str = "reconcile"
 
 

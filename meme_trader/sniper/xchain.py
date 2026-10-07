@@ -473,7 +473,7 @@ class XChain:
         tokens = size_usd * (1 - (fee + info.get("buy_tax", 0)) / 100) / (q["price"] * (1 + imp / 100))
         cost_usd = size_usd + gas
         cost_sol = cost_usd / sol_usd
-        e.book.sol -= cost_sol
+        e._cash(-cost_sol, "buy", mint=r["pool"], chain=r["chain"])
         key = self._k(r["chain"], r["pool"])
         pos = {"key": key, "chain": r["chain"], "chain_name": r.get("chain_name") or r["chain"], "pool": r["pool"],
                "token": r["token"], "symbol": r.get("symbol") or "?", "name": r.get("name") or "", "url": r.get("dex") or "",
@@ -544,7 +544,7 @@ class XChain:
         pos["cost_sol_left"] -= cost_part
         pos["proceeds_sol"] += sol
         pos["proceeds_usd"] += usd
-        e.book.sol += sol
+        e._cash(sol, "sell", mint=pos["pool"], chain=pos["chain"])
         e.book.day_pnl += sol - cost_part
         pos["exits"].append([now, reason, round(frac, 3), round(sol, 6)])
         if real:
