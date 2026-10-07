@@ -32,7 +32,8 @@ from ..config import ROOT
 
 B58 = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])")
 WALLET_FIELDS = {"leader", "creator", "trader", "wallet", "funder", "owner", "user", "dev", "buyer", "seller", "caller"}
-SENSITIVE_KEYS = ("url", "key", "secret", "token", "password", "wallet", "pubkey", "webhook")
+SENSITIVE_KEYS = ("url", "key", "secret", "token", "password", "wallet", "pubkey", "webhook", "services")
+# ("services": this machine's systemd units, e.g. sniper.hq.extra_services - local names, not research settings)
 BRIEF_SOURCES = ("late", "sniper")                       # the brief's 303 bot trades: paper mode, these strategies
 
 
