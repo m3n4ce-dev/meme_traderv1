@@ -106,7 +106,7 @@ def _pick_variants(delay_s: float) -> dict[str, dict]:
     return out
 
 
-LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass")   # followed on the graduation-play exits
+LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass", "late-blocked")   # on the graduation-play exits
 SNIPER_CALLS = ("sniper-pass", "sniper-skip")      # sniper votes that bought nothing: followed on the sniper's exits
 PICKS = "model-pick"                               # the trees' picks: a follow, not a trade
 PICK_BANDS = (("30%+", .30, 1.01), ("25-30%", .25, .30))
