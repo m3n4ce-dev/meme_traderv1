@@ -212,7 +212,7 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                     rep = report(load_trades(DATA, 14, engine.mode) if engine.persist else closed, engine.mode)
                     return {**rep, "text": as_text(rep)}
                 edge_cache[:] = [time.time(), await asyncio.to_thread(build)]
-            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper"), "desk_pass": engine.lab.view("desk-pass"), "late_blocked": engine.lab.view("late-blocked"), "picks": engine.lab.picks_view(), "revival": engine.revival.view() if getattr(engine, "revival", None) else None}, "edge_check": edge_cache[1],
+            d = {**d, "exit_lab": {"late": engine.lab.view("late"), "sniper": engine.lab.view("sniper"), "desk_pass": engine.lab.view("desk-pass"), "late_blocked": engine.lab.view("late-blocked"), "sniper_blocked": engine.lab.view("sniper-blocked"), "picks": engine.lab.picks_view(), "revival": engine.revival.view() if getattr(engine, "revival", None) else None, "quotes": engine.quotes.view() if getattr(engine, "quotes", None) else None}, "edge_check": edge_cache[1],
                  "team_record": engine.desk_scorecard()}   # ("edge" is analytics' own)
         return _json(d)
 

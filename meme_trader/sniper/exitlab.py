@@ -108,6 +108,7 @@ def _pick_variants(delay_s: float) -> dict[str, dict]:
 
 LATE_KINDS = ("late", "desk-pass", "practice-buy", "practice-pass", "late-blocked")   # on the graduation-play exits
 SNIPER_CALLS = ("sniper-pass", "sniper-skip")      # sniper votes that bought nothing: followed on the sniper's exits
+BLOCKED = ("late-blocked", "sniper-blocked")       # entries the bot couldn't make (off, halted, paused): practice
 PICKS = "model-pick"                               # the trees' picks: a follow, not a trade
 PICK_BANDS = (("30%+", .30, 1.01), ("25-30%", .25, .30))
 
@@ -356,7 +357,7 @@ class ExitLab:
     def view(self, kind: str = "late") -> dict:
         """Per variant: entries, mean and median P&L % per entry, win rate; sorted by mean, best first."""
         rows = [r for r in self.done if r.get("accounting") == ACCOUNTING and (
-            r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS + SNIPER_CALLS + (PICKS,)))]
+            r["kind"] == kind or (kind == "sniper" and r["kind"] not in LATE_KINDS + SNIPER_CALLS + BLOCKED + (PICKS,)))]
         by: dict[str, list[float]] = {}
         for r in rows:
             by.setdefault(r["variant"], []).append(r["pnl_pct"])

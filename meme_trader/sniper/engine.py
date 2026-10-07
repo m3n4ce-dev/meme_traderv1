@@ -310,6 +310,12 @@ class Engine:
             if feed.realtime and self.persist and ik.get("graduated", True) else None      # the real bot only, no demos
         from .revival import Revival                     # second-life momentum: a forward test on the recorder's trades
         self.revival = Revival(DATA) if feed.realtime and self.persist and ik.get("revival", True) else None
+        self.quotes = None                               # the live PumpSwap price watcher (quotes.py), measurement only
+        self._quotes_busy, self._quotes_at = False, 0.0
+        if self.revival is not None and ik.get("quotes", True):
+            from .quotes import QuoteBook, Quoter
+            self.quotes = QuoteBook(DATA / "quotes.db", Quoter(lambda: self._fork_rpc()[0], lambda: self.last_slot))
+            self.revival.quotes = self.quotes
         self._last_revival = 0.0
         self.xfeed = None                                  # the dashboard's X feed (posts naming a coin), when it runs
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
@@ -1054,7 +1060,7 @@ class Engine:
             await self._check_entry(s)
 
     async def _check_entry(self, s: TokenState) -> None:
-        if not self.p.entry.enabled and not self._practicing("sniper off"):
+        if not self.p.entry.enabled and not self._practicing("sniper off") and not self.feed.realtime:
             s.decided = "sniper off"                       # callouts / graduation plays still consider it
             return
         d = evaluate_entry(s, self.now, self.p.entry, self._ctx(s))
@@ -1097,6 +1103,8 @@ class Engine:
             if self.p.entry.enabled:
                 self.stats["skipped_" + blocked.split(":")[0].replace(" ", "_")] += 1
             if not practice or self._practice_n >= 3:
+                if not practice and not blocked.startswith("max positions"):     # always practicing (the owner)
+                    self._follow_blocked(s, "sniper-blocked", blocked)
                 return
         verdict = await self._funding_gate(s)
         if verdict == "wait":
@@ -2210,7 +2218,20 @@ class Engine:
         finally:
             self._fork_busy = False
 
+    async def _run_quotes(self) -> None:
+        self._quotes_busy = True
+        try:
+            await asyncio.to_thread(self.quotes.run)
+        except Exception as ex:                          # (a quote can't break the bot; counted and shown)
+            self.stats["quote_errors"] += 1
+            self.say("error", f"price watcher: {ex!r}")
+        finally:
+            self._quotes_busy = False
+
     async def _tick(self) -> None:
+        if self.quotes is not None and not self._quotes_busy and time.time() - self._quotes_at >= 1:
+            self._quotes_at = time.time()
+            asyncio.ensure_future(self._run_quotes())
         if self.fork_pending and self.feed.realtime and self.persist and not self._fork_busy \
                 and self.now - self._last_fork_check >= 1:     # a flagged coin waits for this: ask every second
             self._last_fork_check = self.now
@@ -2719,6 +2740,16 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _follow_blocked(self, s: TokenState, kind: str, blocked: str) -> None:
+        """The sniper would have bought `s` but can't (it's off, the kill switch, a pause, low SOL): followed in the
+        exit lab from the raw price with every sniper exit, so the strategy keeps practicing. Measurement only, and
+        without the funding gate (its lookups cost credits). The coin is marked decided so it isn't re-evaluated."""
+        if not self.feed.realtime:
+            return
+        s.decided = f"followed while blocked ({blocked.split(':')[0]})"
+        self.lab.start(s.mint, s.symbol, kind, s.curve.price, self.now, self.p, price_kind="raw_mark",
+                       stake_sol=float(self.p.capital.buy_sol), extra={"blocked": blocked[:60]})
 
     def _follow_blocked_late(self, blocked: str) -> None:
         """Entries are blocked (the kill switch, a pause, low SOL): the coins the graduation play would have bought are
