@@ -235,6 +235,7 @@ class Engine:
         self.fork_evidence: dict[tuple, dict] = {}         # (signature, event index) -> the strongest chain answer
         self.fork_unproved: dict[tuple, dict] = {}         # conflicts answered by status only: {mint, since, given_up}
         self._code_rev: str | None = None                  # (for the fork conflict log; read once)
+        self._epoch = f"{int(time.time())}-{os.getpid()}"   # this process's run: the conflict log's restart boundary
         self._late_followed: dict[str, float] = {}         # coins followed in the exit lab while entries were blocked
         self._events: OrderedDict = OrderedDict()          # recent trade identities -> content hash (disposition)
         self._fork_busy, self._last_fork_check = False, 0.0
@@ -2104,8 +2105,8 @@ class Engine:
         if self._code_rev is None:
             from .research import code_revision
             self._code_rev = code_revision()
-        row = {"ts": round(self.feed.now(), 3), "kind": kind, "signature": k[0], "event_index": k[1],
-               "code": self._code_rev, **kw}
+        row = {"ts": round(self.feed.now(), 3), "kind": kind, "id": f"{k[0]}|{k[1]}", "signature": k[0],
+               "event_index": k[1], "code": self._code_rev, "epoch": self._epoch, **kw}
         if e is not None:
             u = self.fork_unproved.get(k)
             row.update(mint=e.mint, status=e.status, slot=e.slot, failed=bool(e.err),
