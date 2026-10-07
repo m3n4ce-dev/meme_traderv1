@@ -4,6 +4,52 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #78: The twelfth review: the official 287-byte Pool and real-reserve sells, Q1 moved before it opened, one cost bound, typed ledger proofs
+
+**Source:** a twelfth external review (GPT 6.1 Sol, revision 012f9dd).
+- **The reviewer's 12 new properties:** 10 failed before, and **all 12 pass now.**
+- **Earlier contracts:** 68 of its 70 still pass. The two that don't are its own eleventh-round direct-SQL fixtures. The reviewer asked for the restored `NOT NULL` invariant rather than weakening it for them, so their properties are re-run with strict fixtures in `tests/test_ledger_design.py`.
+- **Suite:** 814 passed.
+
+1. **Q1 amendment 1, made before the window opened.** The review arrived at 23:16 UTC on 2026-10-07, 44 minutes before Q1's start, and showed that the observer under test mislabelled most pools and checked sells against the wrong liquidity.
+   - **The amendment** was committed and pushed at 23:17 UTC, before any window data existed. The window now runs 2026-10-09 to 2026-10-22 UTC, entirely on the fixed observer (record v3), with the same rules. If the fixed observer isn't deployed by then, the start moves mechanically.
+   - **Q1 counts only v3 records.**
+2. **The official Pool layout** (F1).
+   - **What pump.fun published:** IDL 8cda1fa and npm SDK 2.1.0 add `protocol_fees` (byte 271) and `creator_fees` (279), the fees v2 trades keep in the quote vault until swept; `POOL_SIZE` is 287.
+   - **The tail explained:** the "undocumented bytes" the last two rounds tracked were these counters. All five committed mainnet snapshots decode cleanly, the two former "tails" holding creator fees, nothing non-zero past 287.
+   - **Prices** still use vault + signed virtual reserves.
+   - **Sells** may draw only on real reserves: the vault less the two buckets. The old check used the whole vault, so the observer could accept a sell the program refuses.
+   - **What's in place now:**
+     - the decoder reads the counters, accepts older accounts only at field boundaries, requires 0/1 bools, and flags non-zero bytes past 287 as undocumented;
+     - the buckets are bounded by the vault and threaded through forward sells, inverse sells (by SDK version, so the 1.20.0 goldens stay exact) and the modelled round trip;
+     - SDK 2.1.0's own fee-bucket spec cases are ported as goldens (the sources hash-checked against npm's integrity and GitHub; not executed here), plus sweep invariance.
+   - **Record v3** carries the counters, real reserves, padding length and hash, the raw pool account (public), SDK/IDL and instruction.
+3. **Strict round-trip pairing** (F5): a qualified round trip needs a declared positive hold, the entry's in-hand time (never the bare response time) and an exact due time. Anything missing is unknown.
+4. **Ambiguous after-exit ends** (F6): a mark whose same-slot order is unknown is no complete end, however fresh. Its raw value is kept as a diagnostic.
+5. **One cost bound** (F2): each position's stated cost is used for its measured floor, its reservation, its write-off and the hard budget alike. v6 reserved and wrote off at 1.2% while measured trades paid up to 4%, so its "hard" budget could be exceeded by 0.005 SOL. Returns must be finite and no worse than −(1 + cost).
+6. **Power v7:** v6's grid, seeds and draws, with only the cost fix.
+   - **Pass rates** move 0 to 3 points; no null changes.
+   - **The reviewer's independent rerun** of one cell (half the replay's winner rate, flat, A3, +2.8 points) is matched exactly: pass 37.7% / 23.7% / 48.0% for gross / hard / net+cap, median totals 12.47 / 7.78 / 18.27 SOL.
+   - **The hard budget's** median worst day is never below −0.48 SOL.
+   - **Two corrections to entry #76, from the reviewer:**
+     - the largest paired drift difference across the full v6 grid was 2.0 points, not 1.3 (166 of 168 intervals contain 0);
+     - "0 false passes" held at +2.8 points of cost only (2.0% at A1 with the hard budget at +0).
+7. **The ledger, revision 4** (F3/F4), still not wired into the bot:
+   - **Proofs:**
+     - observations have typed outcomes, and an absence needs a full-history search;
+     - a terminal state needs a finalized observation with the matching outcome, so a processed failure settles nothing;
+     - a settled attempt and its proof are frozen, with a database-written transition history.
+   - **Identity:** an event's identity includes its effect locators (as a set) and its correction target.
+   - **Startup** rechecks every observation digest and terminal proof.
+   - **Signed bytes** are checked against their signature and blockhash.
+   - **Identity columns** are `NOT NULL` again, and older schemas are quarantined.
+   - **The paper-shadow design** is written, not built (`docs/LEDGER_DESIGN.md`).
+8. **The owner's choices stand, the reviewer's cautions recorded:**
+   - **The risk policy:** the reviewer advised against choosing it from its best simulation. The owner had chosen net+cap for returns, and it remains the best-returning policy in v7, with the worst days and drawdowns.
+   - **The paid recorder stream:** the reviewer calls it a latency experiment to measure, not alpha.
+
+---
+
 ## 2026-10-07 — Entry #77: The owner's three decisions - T9-E1's loss rule, the recorder on the paid stream, Q1 frozen
 
 1. **T9-E1's daily loss rule is `net+cap`** (`t9_portfolio.REGISTERED_RISK`).
