@@ -262,14 +262,37 @@ def decode_pool(data: bytes) -> dict:
             "undocumented_tail": any(data[271:])}
 
 
+# Token-2022 mint extensions that don't change what a transfer moves or costs: the metadata pointer (18) and the
+# metadata itself (19). On mainnet (2026-10-07) every Token-2022 pump coin sampled carried exactly these two, so
+# refusing any extension would refuse over half of all pools. Anything else (transfer fees 1, transfer hooks 14,
+# permanent delegate 12, non-transferable 9, confidential transfers, ...) is refused.
+BENIGN_MINT_EXTENSIONS = {18: "metadata pointer", 19: "token metadata"}
+
+
 def decode_mint(data: bytes, owner: str) -> dict:
-    """A bare SPL mint (legacy Token or Token-2022 WITHOUT extensions): its supply and decimals. Any extension
-    (a longer Token-2022 account) is refused: transfer fees or hooks would change what a quote means."""
+    """An SPL mint (legacy Token, or Token-2022 with only metadata extensions): its supply and decimals. Any other
+    extension is refused: transfer fees or hooks would change what a quote means."""
     if owner not in (TOKEN_PROGRAM, TOKEN_2022_PROGRAM):
         raise QuoteError("mint not owned by a token program")
-    if len(data) != 82:
-        raise QuoteError("unsupported mint: extensions present or not a mint" if len(data) > 82 else "not a mint")
+    if len(data) < 82:
+        raise QuoteError("not a mint")
     supply, = struct.unpack_from("<Q", data, 36)
     if data[45] != 1:
         raise QuoteError("mint not initialized")
-    return {"supply": supply, "decimals": data[44], "owner": owner}
+    exts: list[int] = []
+    if len(data) > 82:
+        if owner != TOKEN_2022_PROGRAM or len(data) < 166 or data[165] != 1:     # (account type 1 = mint)
+            raise QuoteError("not a mint")
+        o = 166
+        while o + 4 <= len(data):
+            t, n = struct.unpack_from("<HH", data, o)
+            if t == 0:
+                break
+            exts.append(t)
+            o += 4 + n
+        if o > len(data):
+            raise QuoteError("malformed mint extensions")
+        bad = [t for t in exts if t not in BENIGN_MINT_EXTENSIONS]
+        if bad:
+            raise QuoteError(f"unsupported mint extensions: {bad}")
+    return {"supply": supply, "decimals": data[44], "owner": owner, "extensions": exts}

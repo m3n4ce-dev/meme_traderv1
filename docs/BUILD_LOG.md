@@ -4,6 +4,53 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #74: The live PumpSwap price watcher, real trading costs, and experiments that always practice
+
+**Source:** the owner's go-ahead: "build the live price"; "they should be always practicing and finding an edge or researching".
+
+1. **The live price watcher** (`meme_trader/sniper/quotes.py`). It measures only: nothing is signed or sent.
+   - **One read per quote:** a single `getMultipleAccounts` at `confirmed` from the feed's provider fetches the pool, both vaults, the base mint, the AMM's global config and the fee program's fee config. Everything priced comes from one context slot.
+   - **Validated:**
+     - every account is present and owned by the right program;
+     - the pool still points at the accounts first discovered;
+     - the vaults' mints and authority (the pool) check out, and the vaults aren't frozen;
+     - the pool is quoted in SOL;
+     - the mint carries only metadata extensions;
+     - trading isn't disabled;
+     - the response came within 5 s, and the state is at most 2 slots behind the feed.
+   - **Priced** by `pumpswap.py`, the SDK-exact math, with fees from the fee config's real schedule.
+   - **Every refusal has a reason code:** `missing_account`, `wrong_owner`, `unsupported_layout`, `pool_changed`, `vault_mismatch`, `vault_frozen`, `non_sol_quote`, `mint_extensions`, `trading_disabled`, `stale_state`, `slow_response`, `insufficient_liquidity`, `timeout`, `rpc_error`.
+   - **The job book** (`data/quotes.db`, SQLite) follows every revival forward-test follow, signal **and** control:
+     - an entry quote for 0.25 SOL at its decision plus delay;
+     - then exit quotes at each hold's due time, sized by the tokens the entry bought, retried every 30 s for 15 min, as registered. With no valid quote by then, the exit is unmeasured with its last reason;
+     - a job found past its deadline after a restart is `missed`, never quoted late.
+   - **Results:** coverage by reason, first try and eventually, for both arms, and quote-priced net P&L beside the print-priced one. They're in Analytics (`exit_lab.quotes`) and the review package.
+   - **Exploratory:** this is not the declared qualification window.
+2. **Mainnet facts** found while building it:
+   - **Vaults:** in 40 of 40 sampled vaults, the authority is the pool.
+   - **Token-2022 metadata:** 11 of 20 sampled coins are Token-2022 mints carrying exactly the metadata pointer and metadata extensions (18, 19). Refusing every extension, as first planned, would have refused over half of all pools. Those two are allowed; any other is refused.
+   - **Non-SOL quotes:** 7 of 20 pools in the recorder's universe aren't quoted in SOL, and are refused with a reason.
+   - **The real config accounts** are saved as test fixtures. The fee schedule has 25 market-cap tiers, about 1.25% a side for small coins.
+3. **Real trading costs are higher than the research assumed.**
+   - **Measured:** on 40 pools like T9's (SOL-quoted pump coins, recorder liquidity ≥ $5k), a 0.25 SOL buy-then-sell quoted now costs a **median 3.2%** in fees and impact (10th–90th percentile 2.2–4.0%), plus about 0.8% in network fees. Most of these pools charge **125 bps a side**.
+   - **What the research assumed:** the T9 replay and the power simulation used 1.2% for the whole round trip, and the revival forward test 0.3% a side plus impact.
+   - **The gap:** about **2 points a trade** for T9, more for revival. Power's "+1.5% cost" rows are nearer the truth than its base rows.
+   - **What it means:** this doesn't overturn the replay's large-winner story, but it lowers every ordinary trade.
+4. **The experiments always practice.**
+   - **The sniper** (which the owner has off) and any entry blocked by the kill switch or a pause are followed in the exit lab as `sniper-blocked`, with every sniper exit. This joins `late-blocked` (#73).
+   - **Measurement only:** nothing is bought, and there's no funding-graph lookup, so no credits.
+   - **Not followed:** a moment's block ("max positions"), because the coin may still be bought.
+   - **Replays** behave as before.
+
+**Tests:**
+- `tests/test_quotes.py` (15): the real configs, SDK-exact quotes on a simulated chain, every refusal reason, and the job book's retry clock, deadlines, restarts and both-arm requests;
+- `tests/test_practice.py` (3);
+- `tests/test_pumpswap.py` (+1, mint extensions).
+
+**Suite:** 672 passed (669 and 3 skipped without numpy).
+
+---
+
 ## 2026-10-07 — Entry #73: The ninth review: one cash ledger for exit experiments, proof apart from inference, an exit clock that waits for the quote, and SDK-exact PumpSwap quotes
 
 **Source:** a ninth external review (GPT 6.1 Sol, revision 8e05c96), with official PumpSwap SDK fixtures.
