@@ -1,6 +1,69 @@
-# One transactional ledger: schema and migration (DESIGN, for review before any code)
+# One transactional ledger: schema and migration (DESIGN, revision 2, for review before implementation)
 
 **Status: a proposal, nothing built.** It answers the eighth review's answer 7 and the ninth review's 12-point acceptance list, and is meant to be reviewed before implementation. Numbers in brackets, like [A3], refer to that list.
+
+## Revision 2 (the tenth review): DDL, protocol and worked postings
+
+The reviewer approved the direction and asked for an executable design before implementation. It's in `research/ledger/`, still **not used by the bot**:
+- `schema.sql`: the DDL;
+- `reference.py`: a reference single writer;
+- `posting_vectors.json`: worked events;
+- `tests/test_ledger_design.py`: the tests that prove the rules below on real SQLite.
+
+Answers to the ten points, in order:
+
+1. **Signed postings.**
+   - Amounts are canonical signed integer TEXT: `0`, `123`, `-123`, with no `+`, no leading zeros, and no `-0`. A `CHECK` enforces the form.
+   - Ranges are the writer's job: a leg that is an on-chain amount is at most u64; a book may hold wider aggregates, up to 2^127.
+   - Inventory is never negative in a projection. A negative would be a writer error, and the writer fails closed.
+2. **Exact summation.**
+   - No balance is ever computed in SQL. The single writer sums each asset's legs as exact Python integers and seals only if every asset nets to 0.
+   - The seal stores those sums and the postings' sha256, and projections sum the same way.
+   - The test reproduces your counterexample: SQLite's `SUM` gives a REAL; the writer gives exactly 1.
+3. **Event completion.**
+   - One transaction per event: insert it `open`, insert its postings, check the exact sums, seal, commit. Any failure rolls back everything.
+   - Triggers:
+     - postings may be inserted only into an `open` event;
+     - an event's only allowed update is open → sealed, once, with its sums;
+     - postings and events can never be updated or deleted.
+   - Readers see sealed events only. An open event found at startup is corruption: the writer refuses to start.
+4. **Contradictory receipts.** Observations are keyed by an immutable digest of everything they say: signature, event index, commitment, source, slot, error and content hash.
+   - An identical observation dedupes.
+   - A contradictory one from the same source is **appended** beside the first and ranked by the fork rules, never refused by a uniqueness key.
+5. **Attempts versus orders.**
+   - One order has any number of attempts, and a partial unique index allows at most one unresolved attempt (`signed`, `submitted`, `unknown`) per order.
+   - A new signature is possible only after the old attempt is `landed_failed` or proved `expired_absent`. A rebroadcast resends the stored transaction (`tx_sha256`).
+   - A partial fill updates `filled`; the residual is `target − filled`.
+6. **Commit order.** `events.seq` is the database's monotone commit sequence (AUTOINCREMENT). `event_id` is a unique id, and the observed, chain and recorded times are kept separately. Projections replay in `seq` order.
+7. **The migration barrier.** It's an **all-writer cutover**, not entries only:
+   - stop the engine, so entries, exits, fee booking, reconciliation and the outbox all stop at once (a deploy restart already takes seconds);
+   - snapshot and hash every source file;
+   - import (outstanding signatures and unknowns become `unknown` attempts; the −0.00804 SOL legacy residual becomes an `unresolved` posting, as in the vectors);
+   - start the new code with the database as the only authority.
+
+   There are no parallel writers. The "shadow" comparison replays the imported opening against the source files, at an exact boundary.
+8. **Journal failure.**
+   - No automated entry without a durable commit.
+   - A protective exit proceeds only if its own durable order commit succeeds. If storage can't commit at all: alert and halt, with **no unjournaled sell as a fallback**.
+   - Bot-UI manual orders need durable commits too. The owner acting outside the bot enters through `wallet_sync` reconciliation, with unknown reservations protected.
+9. **Recovery scope.**
+   - **RPO:** for a process crash, the last committed transaction (WAL, `synchronous=FULL`, ext4 on the P8's SSD with honest fsync). For loss of the disk, the last 6-hourly backup.
+   - **RTO:** minutes. After a restore, the wallet's chain history since the backup (`getSignaturesForAddress`) and the outbox are reconciled before any entry.
+   - **Restored attempts:** a restored unresolved attempt is `unknown`, never resent as a new intent.
+10. **Posting examples.** `posting_vectors.json` covers:
+    - adoption and the legacy residual;
+    - deposit and withdrawal;
+    - reserve and release;
+    - rent paid and reclaimed (a balance, not an expense);
+    - a buy (swap fees inside the pool leg; the network fee once per signature);
+    - a failed sell and a failed buy with no position (fee only);
+    - a partial and a full sell;
+    - a reset into a new account;
+    - a correction, as a linked reversal (`corrects`).
+
+    Every event nets to 0 per asset, and the test checks the end balances. A posting can't cross accounts (a trigger), and paper, live and synthetic accounts are separate rows with a `mode`.
+
+**Still not implemented:** wiring this into the engine, fault injection against the real order paths, and a real post-adoption interval. Those come after this design is reviewed.
 
 ## Why
 
