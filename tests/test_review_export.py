@@ -75,7 +75,8 @@ def data(tmp_path):
 
 def export(data, root, tmp_path, **kw):
     out = tmp_path / "pkg"
-    conf = {"wallet": {"pubkey": OWNER}, "wallets": ["a"], "sniper": {"desk": {"base_url": "http://x"}, "late": {"a": 1}}}
+    conf = {"wallet": {"pubkey": OWNER}, "wallets": ["a"], "sniper": {"desk": {"base_url": "http://x"}, "late": {"a": 1},
+                                                                      "hq": {"extra_services": ["private-unit"]}}}
     return rx.run(data, out, scan_feeds=True, root=root, owner_wallet=OWNER, config=conf, **kw), out
 
 
@@ -114,6 +115,7 @@ def test_wallets_are_pseudonyms_and_coins_stay_public(data, tmp_path):
     assert trade["leader"].startswith("w_") and trade["leader"] in note["text"]     # the same pseudonym everywhere
     conf = json.loads((out / "config_effective.json").read_text())
     assert "wallet" not in conf and "wallets" not in conf and "base_url" not in conf["sniper"]["desk"]
+    assert "private-unit" not in json.dumps(conf)                      # this machine's service names stay home
 
 
 def test_a_secret_anywhere_fails_the_export_and_keeps_nothing(data, tmp_path):
