@@ -84,13 +84,16 @@ def test_no_send_when_the_outbox_cant_be_written(tmp_path, monkeypatch):
 
 
 # a crash after the send: the restart holds the order until the chain answers; a booked one isn't booked twice
+OWNER = {"network": "solana-mainnet", "wallet": "W", "schema": 2}
+
+
 def test_a_restart_holds_every_signed_order_the_book_never_booked(tmp_path):
-    ob = Outbox(tmp_path / "orders.db")
+    ob = Outbox(tmp_path / "orders.db", OWNER)
     ob.prepare("LOST", "BH", M, "buy", {"side": "buy", "mint": M, "sol": 0.02, "score": 70, "notes": [], "source": "late"})
     ob.prepare("DONE", "BH", M, "sell", {"side": "sell", "mint": M, "tokens": 5.0, "reason": "stop"})
     (tmp_path / "sniper_state_live.json").write_text(json.dumps({
         "book": {"sol": 1.0, "start_sol": 1.0, "day": "", "day_pnl": 0.0, "halted": "", "closed": [], "reserved": {}},
-        "positions": {}, "unresolved": {}, "booked_sigs": ["DONE"]}))
+        "positions": {}, "unresolved": {}, "booked_sigs": ["DONE"], "owner": OWNER}))
     e = live_engine(NS(pubkey="W"))
     e.state_path = tmp_path / "sniper_state_live.json"
 
@@ -128,12 +131,14 @@ def test_every_sell_retry_is_recorded_then_booked(tmp_path, monkeypatch):
     asyncio.run(e._sell(st, pos, 10.0, "stop"))
     assert outbox_rows(tmp_path) == {"S1": "booked", "S2": "booked"}
     saved = json.loads(e.state_path.read_text())
-    assert {"S1", "S2"} <= set(saved["booked_sigs"]) and M not in e.positions
+    receipts = dict(map(tuple, saved["booked_sigs"]))                     # sig -> acknowledged by the outbox
+    assert {"S1", "S2"} <= set(receipts) and M not in e.positions
+    assert e.booked_sigs.unacked() == []
 
 
 def test_a_recovered_order_is_booked_once_when_the_chain_answers(tmp_path):
     from meme_trader.sniper.execution import SniperFill
-    Outbox(tmp_path / "orders.db").prepare("LOST", "BH", M, "buy", {"side": "buy", "mint": M, "sol": 0.02, "score": 70,
+    Outbox(tmp_path / "orders.db", OWNER).prepare("LOST", "BH", M, "buy", {"side": "buy", "mint": M, "sol": 0.02, "score": 70,
                                                                     "notes": [], "source": "late", "leader": ""})
 
     async def nothing():
