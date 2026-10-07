@@ -78,6 +78,7 @@ class Revival:
             self.done = [json.loads(x) for x in self.out.read_text().splitlines() if x.strip()]
         except (OSError, ValueError):
             self.done = []
+        self.done_keys = {(r.get("id"), r.get("exit")) for r in self.done if r.get("id")}
         try:
             st = json.loads(self.state_path.read_text())
             self.path = Path(st["path"]) if st.get("path") else None
@@ -94,7 +95,7 @@ class Revival:
     def save(self, force: bool = False) -> None:
         if not (self._dirty or force) or (not force and time.time() - self._saved_at < 10):
             return
-        st = {"path": str(self.path) if self.path else "", "offset": self.offset,
+        st = {"path": str(self.path) if self.path else "", "offset": self.offset - len(self.rest),
               "fired": {k: v for k, v in self.fired.items() if self.newest_t - v < COOLDOWN_S},
               "open": self.open, "saved": time.time()}
         tmp = self.state_path.with_suffix(".tmp")
@@ -128,14 +129,28 @@ class Revival:
             self.offset, self.warm_from = size, max(0, size - WARMUP_BYTES)
         if self.warm_from is not None:                 # history before the resume point: pools only
             self._warm(max_bytes)
-        if want != self.path:                          # a new UTC day: finish yesterday's file, then switch
-            n += self._read(max_bytes, now)
+        if want != self.path:                          # a new UTC day: finish yesterday's file first
+            for _ in range(8):
+                got = self._read(max_bytes, now)
+                n += got
+                if self._at_end():
+                    break
+            if not self._at_end():                     # more backlog than a tick reads: keep at it next tick
+                self._expire(now)
+                self.save()
+                return n
             self.path, self.offset, self.rest = want, 0, b""
             self._dirty = True
         n += self._read(max_bytes, now)
         self._expire(now)
         self.save()
         return n
+
+    def _at_end(self) -> bool:
+        try:
+            return self.offset >= self.path.stat().st_size
+        except OSError:
+            return True                                # gone (compressed): nothing more to read from it
 
     def _warm(self, max_bytes: int) -> None:
         """History before the resume point, a chunk a tick (pools only: no signals, no follows)."""
@@ -263,7 +278,7 @@ class Revival:
         sym, mint = self.meta.get(pool, (None, None))
         for d in DELAYS:
             self.open.setdefault(pool, []).append({
-                "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
+                "id": f"{pool}|{rule}|{t:.0f}|{d}|{'c' if control else 's'}", "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
                 "signal_t": t, "decided_at": seen, "lag_s": round(seen - t, 1), "ret5": ret5 and round(ret5, 3),
                 "surge": surge and round(surge, 1), "cost": round(cost, 4), "cost_how": how, "exits": {}})
 
@@ -309,11 +324,18 @@ class Revival:
                     if a <= due <= b:
                         due = b
                 x["why"], x["sell_at"] = "time", due + f["delay"]
+                if t >= x["sell_at"]:                  # the timer was set when it filled: this trade is the first after
+                    x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
+                    self._close(f, name, x, t)
         if len(f["exits"]) == len(EXITS) and all("pnl" in x or x.get("censored") for x in f["exits"].values()):
             f["finished"] = True
 
     def _close(self, f: dict, name: str, x: dict, t: float) -> None:
-        row = {"closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
+        if (f.get("id"), name) in self.done_keys:       # already written (a restart replayed it): once only
+            return
+        if f.get("id"):
+            self.done_keys.add((f["id"], name))
+        row = {"id": f.get("id"), "closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
                "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"], "rule": f["rule"], "delay": f["delay"],
                "control": f.get("control", False), "exit": name, "why": x.get("why", ""), "pnl_pct": x.get("pnl"),
                "censored": bool(x.get("censored")), "mark_pct": x.get("mark"), "cost": f.get("cost"),

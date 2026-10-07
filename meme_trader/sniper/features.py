@@ -13,6 +13,11 @@ from __future__ import annotations
 
 import math
 
+# The features' definitions, versioned: a model trained on one version is never used with another.
+#   2 (2026-10-07): concentration shares (dev, bundle, snipers, insiders, top 10, cluster) are of the TRADABLE 1B
+#     on the curve (tracker.TRADABLE), for Mayhem coins too (2B minted, ~1B with the agent); balances in chain order
+FEATURE_VERSION = 2
+
 FEATURES = [
     "age_min", "curve_pct", "real_sol", "log_mcap_sol", "log_buyers", "log_holders",
     "buyers_20s", "buyers_60s", "sellers_60s", "net_flow_20s", "net_flow_60s", "vol_60s",

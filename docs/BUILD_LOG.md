@@ -4,6 +4,55 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #63: The third review's seven edge cases, versioned features, and what speed is worth to graduation plays
+
+**Source:** a third external review (revision 337ff7d, main with #86 and #87). It confirmed the earlier fixes and found seven edge cases. Each is rewritten as this project's own test (`tests/test_review_astra3.py`); the reviewer's file wasn't run here. All pass.
+
+1. **An unreadable Mayhem result stays unknown.** A read that found no account, or an account that isn't a recognizable pump.fun curve, used to mark the coin "checked", and so safe. Now only a validated answer counts:
+   - **What counts:** the account must be owned by the pump program, carry the BondingCurve discriminator (`17b7f83760d8ac60`, checked on live accounts), and hold a flag byte of 0 or 1.
+   - **Old layouts:** a pre-upgrade account (49 or 81 bytes) is not Mayhem, because Mayhem didn't exist then.
+   - **Anything else:** unknown. It's retried twice (after 20 s, then 40 s) and counted in HQ, and no automated buy goes through.
+2. **A trade's identity is its event, not its content.**
+   - **What failed:** two identical buys in one transaction were taken for one duplicate.
+   - **The fix:** `Trade.event_index`, each TradeEvent's place among its transaction's events, comes from the log parser and is recorded. Duplicates are matched on signature plus that index.
+   - **Older recordings** don't have it, so nothing in them is treated as a duplicate; uniqueness isn't invented.
+3. **A restart keeps the signed balance ledger.** A restored coin's dev balance is now their buy minus what they've already sold, in both the ledger and the holdings, so their next sale subtracts from it. The coin is marked `partial`, because other wallets' balances from before the restart aren't known.
+4. **Revival: no lost rows, no lost backlog, no duplicate results.**
+   - **Checkpoints** stop at the last complete line, so a half-written row is re-read whole after a restart.
+   - **At UTC midnight** yesterday's file is read to its end, over several ticks if needed, before switching.
+   - **Each follow has an id,** so a result replayed after a crash is written once.
+5. **Timed exits fill on the first trade at or after their time.** Before, that trade only armed the exit and the next trade filled it. Stops still need their trade to have been read first.
+6. **Recordings are fingerprinted by their whole content.** It's a full sha256, cached by path, size and mtime, so a sealed `.gz` is hashed once. The first and last MB had missed edits in the middle. The live `.jsonl` is marked unsealed.
+7. **Code identity is the commit plus the exact patch.** Two different uncommitted trees on one commit are different code.
+   - **What's compared:** the frozen identity against today's, plus packages (now kept as a full list) and model files.
+   - **The verdict when they differ:** a final verdict on changed code is INVALID; one whose environment changed says so; one without recorded provenance reads "(provenance unverified)" rather than a plain PASS.
+
+**Features versioned** (from the review's note on the supply denominators). `features.FEATURE_VERSION = 2` means:
+- concentration shares are of the tradable 1B, for Mayhem coins too;
+- balances are in chain order.
+
+Models carry the version they were trained on, and a model from another version isn't loaded. Both models are retrained on version 2.
+
+**Graduation plays: what speed is worth** (the compare from #61's tests: 4 days of recordings, rules only, no AI vote, losses not capped). It stopped at the 10-07 UTC rollover, when the day's `.jsonl` was compressed mid-run; Oct 3–5 finished:
+
+| Variant | Oct 3 | Oct 4 | Oct 5 | Total (SOL) |
+|---|---|---|---|---|
+| Today's settings (fills land 2.5 s late) | −0.02 | +1.86 | −1.68 | +0.16 |
+| Fills 1.5 s | +0.70 | +2.27 | −1.68 | +1.29 |
+| Fills 1.0 s | +1.24 | +1.81 | −1.87 | +1.18 |
+| **Fills 0.5 s** | **+2.27** | **+2.96** | −1.87 | **+3.37** |
+| Price cap 3% / 5% / 8% | −0.32 / −0.18 / +0.06 | +1.03 / +1.25 / +1.34 | −1.47 / −1.76 / −1.62 | −0.76 / −0.69 / −0.21 |
+| `late.min_near_high` 0.95 | +0.04 | +1.72 | −1.26 | +0.50 |
+| Dev-sell size 2% / never | same as today's settings on Oct 3–4 | | (not reached) | inconclusive |
+
+- **Speed is worth about +1 SOL a day** to graduation plays on 2 of 3 days. Oct 5 lost the same at any speed.
+- **Price caps cut the winners.**
+- **These days overlap graduation-v1's holdout,** so they're development data, not a verdict.
+- **What it would take:** 0.5–1 s fills need a streaming feed (Yellowstone gRPC), fast landing (RPC Fast Beam / Jito), and a server near the RPC.
+- **The replay tool** should resolve a day's file at read time, so a rollover can't break it.
+
+---
+
 ## 2026-10-06 — Entry #62: The second review: proof all the way down, Mayhem checked on-chain, an honest forward test
 
 **Source:** a second external review (revision 38bfd0b, main with #84 and #85) with nine failing invariants. Each was rewritten as this project's own test (`tests/test_review_astra2.py`, plus `tests/test_revival.py`); the reviewer's file wasn't run here. All nine pass now.
@@ -35,7 +84,7 @@ A running record of decisions, research, parameters and status. Newest entries a
 - **Labelled exploratory:** 18 correlated variants. A confirmatory test will freeze one rule, delay, exit and order size, with a start date, and won't be edited once running.
 
 **Research records:**
-- **Freezes** save a manifest: commit, the hash of any uncommitted patch (saved under `research/patches/`), installed packages, the model files, and each input recording's size and an end hash.
+- **Freezes** save a manifest: commit, the hash of any uncommitted patch (saved under `data/research/patches/`), installed packages, the model files, and each input recording's size and an end hash.
 - **A final verdict** on code that changed since the freeze reads "INVALID (code changed since the freeze)", with the result shown only as exploratory. When the freeze didn't record its code (graduation-v1), it says so.
 - **The edge check** groups days in UTC everywhere, and gives no "promising" or "real" verdict with fewer than 5 UTC days of trades.
 

@@ -492,6 +492,7 @@ class SolanaTradeFeed(Feed):
             return []                                   # failed transactions moved nothing
         out = []
         stack: list[str] = []
+        n_event = -1                                     # TradeEvents seen in this transaction, in log order
         for line in value.get("logs") or ():
             if line.startswith("Program ") and not line.startswith(("Program log:", "Program data:",
                                                                       "Program return:")):
@@ -517,6 +518,7 @@ class SolanaTradeFeed(Feed):
                 continue
             if raw[:8] != TRADE_EVENT or len(raw) < 129:
                 continue
+            n_event += 1
             if trade_quote_mint(raw):                   # not a SOL coin: this bot prices everything in SOL
                 SolanaTradeFeed.non_sol_skipped += 1
                 continue
@@ -531,7 +533,7 @@ class SolanaTradeFeed(Feed):
                              trader=str(Pubkey.from_bytes(raw[57:89])), side="buy" if raw[56] else "sell",
                              sol=sol / 1e9, tokens=tokens / 1e6, v_sol=v_sol / 1e9, v_tokens=v_tokens / 1e6,
                              signature=value.get("signature", ""), slot=int(slot), chain_ts=float(chain_ts),
-                             fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps)))
+                             fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps), event_index=n_event))
         return out
 
     def _load_lags(self) -> None:

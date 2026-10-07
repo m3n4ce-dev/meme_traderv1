@@ -60,7 +60,8 @@ class TokenState:
     net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
     sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
     early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
-    seen: dict = field(default_factory=dict)         # recent trade identities (signature, side, size, reserves)
+    seen: dict = field(default_factory=dict)         # recent trade identities (signature, event index)
+    partial: bool = False                            # restored after a gap: other wallets' balances aren't known
 
     @property
     def created_ts(self) -> float:
@@ -126,10 +127,12 @@ class TokenState:
             self.curve = Curve(self.slot_start[1], self.slot_start[0])
 
     def _duplicate(self, t: Trade) -> bool:
-        """The same trade delivered twice (a reconnect can replay it): counted once."""
-        if not t.signature:
+        """The same trade EVENT delivered twice (a reconnect can replay it): counted once. Its identity is the
+        transaction's signature and the event's place in it, not its content: one transaction can hold two identical
+        buys. Without an event index (older recordings) nothing is dropped - uniqueness isn't invented."""
+        if not t.signature or t.event_index < 0:
             return False
-        k = (t.signature, t.side, round(t.tokens), round(t.v_tokens))
+        k = (t.signature, t.event_index)
         if k in self.seen:
             return True
         self.seen[k] = None

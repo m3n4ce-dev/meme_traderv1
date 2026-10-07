@@ -45,6 +45,8 @@ class Trade:
     chain_ts: float = 0.0
     fee_bps: int = -1           # protocol fee, basis points
     creator_fee_bps: int = -1
+    event_index: int = -1       # this TradeEvent's place among its transaction's TradeEvents (-1: not recorded):
+                                # with the signature, the trade's identity (two identical buys in one tx are two)
 
 
 @dataclass
