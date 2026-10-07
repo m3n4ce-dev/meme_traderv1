@@ -103,14 +103,29 @@ class Health:
 
 
 @dataclass
+class Reconcile:
+    """Which version of a trade event the chain kept, when the feed delivered two that differ (a fork: the first copy
+    came from a block that didn't survive): the slot the transaction landed in, from an RPC lookup. Recorded with its
+    arrival time, so a replay repairs the coin's state exactly as the live bot did (a sixth review, 2026-10-07)."""
+    ts: float
+    mint: str
+    signature: str
+    event_index: int
+    slot: int = 0                # the landed slot; 0 = not established (not found, or matches no delivered copy)
+    status: str = ""             # the RPC's confirmation status, or why it couldn't be established
+    source: str = ""             # how it was established (method, provider host)
+    kind: str = "reconcile"
+
+
+@dataclass
 class Tick:
     ts: float
     kind: str = "tick"
 
 
-Event = Launch | Trade | Migration | Social | Funding | Metadata | Health | Tick
+Event = Launch | Trade | Migration | Social | Funding | Metadata | Health | Reconcile | Tick
 _KINDS = {"launch": Launch, "trade": Trade, "migration": Migration, "social": Social, "funding": Funding,
-          "metadata": Metadata, "health": Health, "tick": Tick}
+          "metadata": Metadata, "health": Health, "reconcile": Reconcile, "tick": Tick}
 
 
 def dumps(e: Event) -> str:

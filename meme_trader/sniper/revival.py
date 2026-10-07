@@ -34,6 +34,8 @@ import time
 from collections import deque
 from pathlib import Path
 
+from .replay_exec import is_censored, timer_due     # one execution and censoring rule set with the replays
+
 
 class Store:
     """The forward test's results and checkpoint, in one SQLite file (a fourth review, 2026-10-07): each result is
@@ -86,7 +88,6 @@ CHECK_S = 30                                       # a pool is checked at most t
 COOLDOWN_S = 7200                                  # one signal per pool and rule in this long
 ACTIVE_S = 300                                     # a control pool traded within this long
 WARMUP_BYTES = 20_000_000                          # history (no signals) read before the resume point
-DEAD_S = 1800                                      # due, and no trade this long after: censored
 
 
 class Revival:
@@ -389,10 +390,7 @@ class Revival:
                     self._close(f, name, x, t)
                 continue
             if t >= f["fill_t"] + hold:                  # the timer came due first: its sale goes, whatever this price
-                due = f["fill_t"] + hold
-                for a, b in self.gaps:                 # due while this wasn't running: it sells when it's back
-                    if a <= due <= b:
-                        due = b
+                due = timer_due(f["fill_t"], hold, self.gaps)   # due while this wasn't running: sells when it's back
                 x["why"], x["sell_at"] = "time", due + f["delay"]
                 if t >= x["sell_at"]:                  # the timer was set when it filled: this trade is the first after
                     x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
@@ -433,7 +431,7 @@ class Revival:
                     x = f["exits"].setdefault(name, {})
                     if "pnl" in x or x.get("censored"):
                         continue
-                    if self.newest_t - max(last, due + hold) >= DEAD_S and self.newest_t >= due + hold:
+                    if is_censored(self.newest_t, last, due + hold):
                         x["censored"], x["why"] = True, "no trades: no executable sale"
                         if "p0" in f and q:
                             x["mark"] = round((q[-1][1] / f["p0"] - 1) * 100, 2)

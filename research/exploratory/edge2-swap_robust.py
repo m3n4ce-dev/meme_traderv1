@@ -1,6 +1,9 @@
 """Established pump.fun coins on PumpSwap (2+ days old, $5k+ liquidity; the wallet study's recording): do simple rules
 make money where fees are ~0.3% a side and minutes, not seconds, decide? Each rule is judged day by day (Oct 4, 5, 6).
-Entries and exits fill at the first trade at least DELAY s after the signal; costs: fee + impact per side."""
+Entries and exits fill at the first trade at least DELAY s after the signal; costs: fee + impact per side.
+
+SUPERSEDED (2026-10-07, a sixth review): this run's T9 numbers came from a version that invented exits when the
+recording ended (fixed below in `run`); they're invalid for executable-return inference. See t9_replay_v2.py."""
 from _paths import DATA, OUT, ROOT  # noqa: F401,E402  (repo root, data/, outputs: see _paths.py)
 import bisect, gzip, itertools, json, statistics as st, sys
 from collections import defaultdict
@@ -52,20 +55,17 @@ def fill(p, ts, t):
     return (p[i][0], p[i][1]) if i < len(p) else None
 
 def run(p, ts, t0, tp, sl, T, arm, trail):
-    e = fill(p, ts, t0 + DELAY)
-    if not e:
+    """Corrected 2026-10-07 (a sixth review): the original filled a missing delayed exit at the trigger print and
+    sold a position whose holding period outran this day's series at its last print. Now every fill is a recorded
+    trade at or after its time, by the shared rules in meme_trader/sniper/replay_exec.py; an exit that isn't observed
+    in this series returns None (unmeasured), never a price. Superseded by t9_replay_v2.py (one series across days,
+    recording coverage, statuses, bounds). The original is preserved in the research package (research_as_run/)."""
+    from meme_trader.sniper.replay_exec import CLOSED, Coverage, simulate
+    if not ts:
         return None
-    te, p0 = e
-    peak = p0
-    for t, px, _, _ in p[bisect.bisect_left(ts, te):]:
-        g = px / p0 - 1
-        peak = max(peak, px)
-        hit = t - te >= T or (tp is not None and g >= tp) or (sl is not None and g <= -sl) or \
-              (trail is not None and peak / p0 - 1 >= arm and px <= peak * (1 - trail))
-        if hit:
-            x = fill(p, ts, t + DELAY)
-            return (x[1] if x else px) / p0 - 1 - COST
-    return p[-1][1] / p0 - 1 - COST
+    o = simulate(ts, [x[1] for x in p], t0, DELAY, T, COST, Coverage(ts[0], ts[-1]), stop=sl, take=tp,
+                 trail=(arm, trail) if trail is not None else None)
+    return o.ret if o.status == CLOSED else None
 
 SIG = {d: {pool: signals(p) for pool, p in pools.items()} for d, pools in series.items()}
 TS = {d: {pool: [x[0] for x in p] for pool, p in pools.items()} for d, pools in series.items()}
