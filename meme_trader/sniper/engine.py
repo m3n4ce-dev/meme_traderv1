@@ -163,8 +163,9 @@ class Engine:
         self.ex = executor
         self.outbox = None                                 # live: signed orders on disk before sending (outbox.py)
         if mode.startswith("live") and (persist is None or persist) and hasattr(executor, "outbox"):   # (persist's default)
-            from .outbox import Outbox
-            self.outbox = executor.outbox = Outbox(DATA / "orders.db")
+            from .outbox import Outbox, owner_of
+            # bound to this wallet and network: another wallet's store refuses to open (StoreOwnerError)
+            self.outbox = executor.outbox = Outbox(DATA / "orders.db", owner_of(executor))
         self.mode = mode
         self.desk = desk
         self.fee = self.p.execution.curve_fee_pct + self.p.execution.platform_fee_pct
@@ -216,7 +217,11 @@ class Engine:
                                                  default=str).encode()).hexdigest()[:10]
         self.order_tasks: set[asyncio.Task] = set()        # live orders run beside the feed, never in front of it
         self.unresolved: dict[str, dict] = {}              # signature -> sent order whose outcome isn't known yet
-        self.booked_sigs: deque = deque(maxlen=5000)       # signatures whose outcome is booked (saved with the book)
+        from .outbox import Receipts
+        self.booked_sigs = Receipts()                      # booking receipts, pinned until the outbox confirms (outbox.py)
+        self.running_orders: Counter = Counter()           # mint -> live orders being executed right now
+        self._recovered_ctx: dict[str, dict] = {}          # mint -> safety context from a recovered order's intent
+        self._ack_alerted = False
         self._last_resolve = 0.0
         self._resolving = False
         self._last_cash_check = 0.0
@@ -1325,10 +1330,24 @@ class Engine:
             self.say("error", f"internal error in an order task: {task.exception()!r}")
             traceback.print_exception(task.exception())
 
+    def _intent_ctx(self, s: TokenState) -> dict:
+        """What a recovered order needs to keep the coin's protections (dev-sell exits, the creator's balance)."""
+        from dataclasses import asdict
+        return {"symbol": s.symbol, "launch": asdict(s.launch) if s.launch else None, "dev_sold": s.dev_sold,
+                "intent_at": self.now}
+
+    def _running(self, mint: str, d: int) -> None:
+        self.running_orders[mint] += d
+        if self.running_orders[mint] <= 0:
+            del self.running_orders[mint]
+
     async def _run_buy(self, s: TokenState, score, sol, notes, source, leader, then, meta=None) -> None:
         from .outbox import ORDER_INTENT
+        meta = dict(meta or {})
         tok = ORDER_INTENT.set({"side": "buy", "mint": s.mint, "sol": sol, "score": score, "notes": list(notes),
-                                "source": source, "leader": leader, "add": bool((meta or {}).get("add"))})
+                                "source": source, "leader": leader, "add": bool(meta.get("add")), "meta": meta,
+                                "model": self._model_id(), **self._intent_ctx(s)})
+        self._running(s.mint, +1)
         try:
             fill = await self.ex.buy(s.mint, s.curve, sol,
                                      self.p.callouts.priority_fee_sol if source == "callout" else None)
@@ -1336,20 +1355,21 @@ class Engine:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
         finally:
             ORDER_INTENT.reset(tok)
+            self._running(s.mint, -1)
         done = [x for x in (fill.attempts or []) if x != (fill.signature if fill.unknown else None)]
         self.booked_sigs.extend(done)                     # booked with the save the outcome below makes
         if fill.unknown:                                  # sent, but did it land? keep the cash and the mint held
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
-                                                    "add": bool((meta or {}).get("add")),
+                                                    "add": bool(meta.get("add")), "meta": meta,
                                                     "notes": list(notes), "source": source, "leader": leader},
                                    fill.blockhash, fill.landed)
             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
                               "its cash stays reserved until the chain says", s.mint)
             self._outbox_booked(done)
             return
-        self.book.reserved.pop(s.mint, None)
-        self.pending.discard(s.mint)
+        self._rereserve(s.mint)
+        self._release(s.mint)
         self._apply_buy(s, fill, score, notes, source, leader, meta)
         self._outbox_booked(done)
         if fill.ok and then is not None:
@@ -1393,8 +1413,8 @@ class Engine:
                 fill = await self.ex.buy(o["mint"], s.curve, o["sol"], prio)
             except Exception as e:
                 fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
-        self.book.reserved.pop(o["mint"], None)
-        self.pending.discard(o["mint"])
+        self._rereserve(o["mint"])
+        self._release(o["mint"])
         if s is None:
             self.book.sol -= fill.fees_lost
             self.book.day_pnl -= fill.fees_lost
@@ -1411,7 +1431,7 @@ class Engine:
         next step of execution.sell_slippage_steps / sell_priority_fee_steps, like the live executor."""
         s, pos = self.tokens.get(o["mint"]), self.positions.get(o["mint"])
         if s is None or pos is not o["pos"]:
-            self.pending.discard(o["mint"])
+            self._release(o["mint"])
             return
         x = self.p.execution
         steps = list(o.get("steps") or x.sell_slippage_steps)
@@ -1426,7 +1446,7 @@ class Engine:
             if k + 1 < len(steps):
                 self._defer({**o, "attempt": k + 1, "quote": s.curve.price})
                 return
-            self.pending.discard(o["mint"])
+            self._release(o["mint"])
             self.say("error", f"sell {s.symbol}: all {len(steps)} attempts failed - the price fell faster than "
                               f"the slippage steps", s.mint)
             return
@@ -1434,7 +1454,7 @@ class Engine:
             fill = await self.ex.sell(o["mint"], s.curve, o["tokens"], prios[k])
         except Exception as e:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
-        self.pending.discard(o["mint"])
+        self._release(o["mint"])
         self._apply_sell(s, pos, fill, o["reason"], {"quote": o["first_quote"], "decided": o["decided"],
                                                      "slot": o.get("slot")})
 
@@ -1474,7 +1494,8 @@ class Engine:
             self._merge_add(s, self.positions[s.mint], fill)
             return
         self.positions[s.mint] = SniperPosition(
-            mint=s.mint, symbol=s.symbol, opened_at=self.now, entry_price=fill.price, tokens=fill.tokens,
+            mint=s.mint, symbol=s.symbol, opened_at=min(self.now, (meta or {}).get("opened_at") or self.now),
+            entry_price=fill.price, tokens=fill.tokens,
             initial_tokens=fill.tokens, cost_sol=fill.sol, initial_cost_sol=fill.sol, score=score,
             peak_price=fill.price, exits=[], source=source, leader=leader, desk=getattr(s, "desk", ""),
             p=s.p, trough_price=fill.price, rent_sol=fill.rent,
@@ -1565,7 +1586,9 @@ class Engine:
         from .outbox import ORDER_INTENT
         steps = self._sell_steps(reason)
         kw = {"steps": steps} if steps != list(self.p.execution.sell_slippage_steps) else {}
-        tok = ORDER_INTENT.set({"side": "sell", "mint": s.mint, "tokens": tokens, "reason": reason})
+        tok = ORDER_INTENT.set({"side": "sell", "mint": s.mint, "tokens": tokens, "reason": reason, "meta": dict(meta or {}),
+                                "position_opened": pos.opened_at, "position_source": pos.source, **self._intent_ctx(s)})
+        self._running(s.mint, +1)
         try:
             fill = await self.ex.sell(s.mint, s.curve, tokens,
                                       self.p.callouts.priority_fee_sol if pos.source == "callout" else None, **kw)
@@ -1573,6 +1596,7 @@ class Engine:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
         finally:
             ORDER_INTENT.reset(tok)
+            self._running(s.mint, -1)
         done = [x for x in (fill.attempts or []) if x != (fill.signature if fill.unknown else None)]
         self.booked_sigs.extend(done)
         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
@@ -1583,20 +1607,69 @@ class Engine:
                               "sell until the chain says", s.mint)
             self._outbox_booked(done)
             return
-        self.pending.discard(s.mint)
+        self._release(s.mint)
         self._apply_sell(s, pos, fill, reason, meta)
         self._outbox_booked(done)
 
+    def _release(self, mint: str) -> None:
+        """A coin's order lock (`pending`) is held while any of its orders is being executed, in flight (paper) or
+        unsettled (a signature the chain hasn't answered for): one order finishing can't unlock another's (a fifth
+        review, 2026-10-07: two recovered sell retries, one failed and one still unknown). Every completion calls this."""
+        if self.running_orders.get(mint) or any(o["mint"] == mint for o in self.unresolved.values()) \
+                or any(o["mint"] == mint for _, _, o in self.deferred):
+            return
+        self.pending.discard(mint)
+
+    def _rereserve(self, mint: str) -> None:
+        """A coin's reserved cash = what its unsettled buys could still spend; nothing once none is left."""
+        left = [o for o in self.unresolved.values() if o["mint"] == mint and o["side"] == "buy"]
+        if left:
+            self.book.reserved[mint] = sum(float(o.get("sol", 0.0)) + self._order_overhead(o.get("source", ""))
+                                           for o in left)
+        else:
+            self.book.reserved.pop(mint, None)
+
     def _outbox_booked(self, sigs) -> None:
-        """Their outcome is in the saved state: done in the outbox too (a crash before this is harmless: the saved
-        state's booked_sigs settles them at the next start)."""
-        if self.outbox is not None and sigs:
-            self.save_state()
-            try:
-                self.outbox.mark(sigs, "booked")
-            except Exception as e:
-                self.say("error", f"outbox: couldn't mark {len(sigs)} order(s) booked ({type(e).__name__}); "
-                                  "the saved state still knows them")
+        """Steps 2-3 of the booking protocol (outbox.py): their outcome and unacknowledged receipts are saved with the
+        book, then the outbox marks them booked, then the receipts are acknowledged. A failed mark keeps them pinned
+        and retried (`_retry_acks`), so they can never be booked a second time."""
+        sigs = [x for x in sigs or [] if x]
+        if not sigs:
+            return
+        if self.outbox is None:                           # nothing to confirm against (paper, tests)
+            self.booked_sigs.ack(sigs)
+            return
+        self.save_state()
+        try:
+            self.outbox.mark(sigs, "booked")
+        except Exception as e:
+            self.say("error", f"outbox: couldn't mark {len(sigs)} order(s) booked ({type(e).__name__}); their receipts "
+                              "stay pinned in the saved state and it's retried")
+            self._ack_check()
+            return
+        self.booked_sigs.ack(sigs)
+
+    def _retry_acks(self) -> None:
+        """Receipts the outbox hasn't confirmed yet (a failed mark): the state that holds them is saved, then marked."""
+        un = self.booked_sigs.unacked() if self.outbox is not None else []
+        if not un:
+            return
+        self.save_state()
+        try:
+            self.outbox.mark(un, "booked")
+        except Exception:
+            self._ack_check()
+            return
+        self.booked_sigs.ack(un)
+        self._ack_alerted = False
+
+    def _ack_check(self) -> None:
+        from .outbox import ACK_ALERT
+        n = len(self.booked_sigs.unacked())
+        if n >= ACK_ALERT and not self._ack_alerted:
+            self._ack_alerted = True
+            self.say("error", f"outbox: {n} booked orders still unconfirmed in orders.db - check the disk; they stay "
+                              "pinned (never booked twice) until it works")
 
     def _apply_sell(self, s: TokenState, pos: SniperPosition, fill: SniperFill, reason: str, meta=None) -> None:
         self._book_fees_lost(fill, s)
@@ -1654,8 +1727,8 @@ class Engine:
         del self.unresolved[sig]
         self.booked_sigs.append(sig)
         if o["side"] == "buy":
-            self.book.reserved.pop(o["mint"], None)
-        self.pending.discard(o["mint"])
+            self._rereserve(o["mint"])
+        self._release(o["mint"])
         self.say("info", f"{o['side']} {sig[:8]}… settled by the owner as not landed", o["mint"])
         self.save_state()
         self._outbox_booked([sig])
@@ -1708,18 +1781,19 @@ class Engine:
             settled.append(sig)
             s = self.tokens.get(mint) or self.tokens.setdefault(mint, TokenState(mint, None, self.now))
             if o["side"] == "buy":
-                self.book.reserved.pop(mint, None)
-                self.pending.discard(mint)
+                self._rereserve(mint)                     # its own cash only: another unsettled buy keeps its own
+                self._release(mint)
                 if fill.unknown:
                     self.say("info", f"buy {s.symbol} ({sig[:8]}…) never landed - cash released", mint)
                     self.save_state()
                     continue
+                # opened when it was sent, at the latest: age-based exits count from then, never from now
                 self._apply_buy(s, fill, o["score"], o["notes"] + ["landed late"], o["source"], o["leader"],
-                                {"add": o.get("add", False)})
+                                {**(o.get("meta") or {}), "add": o.get("add", False), "opened_at": o["sent_at"]})
                 if fill.ok:
                     await self._watch(mint)
             else:
-                self.pending.discard(mint)
+                self._release(mint)                       # still locked if another of its signatures is unsettled
                 pos = self.positions.get(mint)
                 if fill.unknown:
                     self.say("info", f"sell {s.symbol} ({sig[:8]}…) never landed - position kept, exits resume", mint)
@@ -1806,6 +1880,7 @@ class Engine:
                 del self.hand_after[m]                   # the buy never happened
         if self.persist and self.now - self._last_state_save >= 10:
             self.save_state()
+            self._retry_acks()
         if self.feed.realtime and self.p.sizing.enabled and self.now - self._last_price_refresh >= 300:
             self._last_price_refresh = self.now
             asyncio.create_task(self.sol_price.refresh())
@@ -2013,7 +2088,8 @@ class Engine:
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
-                 "booked_sigs": list(self.booked_sigs),
+                 "booked_sigs": self.booked_sigs.to_json(),
+                 "owner": self.outbox.owner if self.outbox is not None else None,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:], "pulse": [list(r) for r in self.pulse]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2023,6 +2099,14 @@ class Engine:
             f.flush()
             os.fsync(f.fileno())                  # on the disk, not just in the page cache, before it replaces the old
         tmp.replace(self.state_path)          # atomic: a crash mid-write never corrupts the state
+        try:                                  # and the rename itself on the disk (the directory entry)
+            fd = os.open(self.state_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
 
     def _reconcile_outbox(self) -> None:
         """Signed orders the saved state never booked (the process died between signing and booking): each becomes
@@ -2030,37 +2114,78 @@ class Engine:
         Ones the state did book are just marked done."""
         if self.outbox is None:
             return
-        booked = set(self.booked_sigs)
-        done = []
+        buys = set()
         for r in self.outbox.unbooked():
-            if r["sig"] in booked:
-                done.append(r["sig"])
-                continue
-            if r["sig"] in self.unresolved:
-                continue
+            if r["sig"] in self.booked_sigs or r["sig"] in self.unresolved:
+                continue                                  # booked already (its receipt is pinned), or already held
             it = r["intent"]
             o = {"mint": r["mint"], "side": r["side"], "sent_at": r["created"], "blockhash": r["blockhash"],
-                 "landed": False, "from_outbox": True}
+                 "landed": False, "from_outbox": True, "meta": it.get("meta") or {}}
             if r["side"] == "buy":
-                sol = float(it.get("sol") or it.get("amount") or 0.0)
-                o.update(sol=sol, score=it.get("score", 0), notes=list(it.get("notes") or []),
-                         source=it.get("source", "sniper"), leader=it.get("leader", ""), add=bool(it.get("add")))
-                self.book.reserved.setdefault(r["mint"], sol + self._order_overhead(o["source"]))
+                o.update(sol=float(it.get("sol") or it.get("amount") or 0.0), score=it.get("score", 0),
+                         notes=list(it.get("notes") or []), source=it.get("source", "sniper"),
+                         leader=it.get("leader", ""), add=bool(it.get("add")))
+                buys.add(r["mint"])
             else:
                 o.update(tokens=float(it.get("tokens") or it.get("amount") or 0.0), reason=it.get("reason", "sell"))
+            if it.get("launch") and r["mint"] not in self._recovered_ctx:
+                self._recovered_ctx[r["mint"]] = {"launch": it["launch"], "dev_sold": it.get("dev_sold", 0.0)}
             self.unresolved[r["sig"]] = o
+            self.pending.add(r["mint"])                   # locked until the chain says (and its other orders settle)
             self.say("error", f"restart: a signed {r['side']} ({r['sig'][:8]}…) was never booked - held until the chain "
                               "says what happened", r["mint"])
-        if done:
-            self.outbox.mark(done, "booked")
+        for m in buys:                                    # each unsettled buy's own cash, summed per coin
+            self._rereserve(m)
+        un = self.booked_sigs.unacked()                   # receipts whose mark didn't commit before: now
+        if un:
+            try:
+                self.outbox.mark(un, "booked")
+                self.booked_sigs.ack(un)
+            except Exception:
+                self._ack_check()
+
+    def _restore_token(self, m: str, saved_tokens: dict, now: float) -> TokenState:
+        """A coin we hold or have orders on, after a restart: its creator and their balance (dev-sell exits keep
+        working) from the saved state, else from a recovered order's own intent."""
+        ctx = saved_tokens.get(m) or self._recovered_ctx.get(m) or {}
+        launch = Launch(**ctx["launch"]) if ctx.get("launch") else None
+        s = self.tokens[m] = TokenState(m, launch, now)    # price unknown until its next trade
+        s.dev_sold = ctx.get("dev_sold", 0.0)
+        if launch is not None and launch.dev_buy_tokens > 0:   # the one balance known across the gap
+            s.net[launch.creator] = launch.dev_buy_tokens - s.dev_sold
+            if s.net[launch.creator] > 0:
+                s.holders[launch.creator] = s.net[launch.creator]
+        s.partial = True                             # other wallets' balances from before the restart are unknown
+        s.decided = "entered"
+        return s
+
+    def _check_owner(self, d: dict) -> None:
+        """A live book belongs to the wallet (and network) that wrote it: another wallet's engine refuses to adopt it,
+        and an unbound one (from before books were bound) needs the owner's claim first (outbox.py)."""
+        if self.outbox is None:
+            return
+        from .outbox import StoreOwnerError, same_owner
+        have, want = d.get("owner"), self.outbox.owner
+        if have is None:
+            raise StoreOwnerError(f"{self.state_path.name} records no wallet: check it's this wallet's, then run "
+                                  f"`python -m meme_trader.sniper.outbox claim {want['wallet']}`")
+        if not same_owner(have, want):
+            raise StoreOwnerError(f"{self.state_path.name} belongs to wallet {str(have.get('wallet'))[:6]}… on "
+                                  f"{have.get('network')}, not {want['wallet'][:6]}… on {want['network']}: refusing to "
+                                  "adopt its book")
 
     async def restore_state(self) -> None:
         if not self.state_path.exists():
             self._reconcile_outbox()                      # no saved book, but maybe signed orders
+            now = self.feed.now()
             for o in self.unresolved.values():
                 self.pending.add(o["mint"])
+                if o["mint"] not in self.tokens:
+                    self._restore_token(o["mint"], {}, now)
+                    await self._watch(o["mint"])
             return
         d = json.loads(self.state_path.read_text())
+        self._check_owner(d)
         b = d["book"]
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
         self.book.day_pnl, self.book.halted, self.book.closed = b["day_pnl"], b["halted"], b["closed"]
@@ -2081,23 +2206,14 @@ class Engine:
         cut = time.time() - 90 * 60                          # the Market Pulse chart keeps its last hour across a restart
         self.pulse.extend(r for r in d.get("pulse") or [] if isinstance(r, list) and len(r) == 6 and r[0] >= cut)
         self.unresolved = dict(d.get("unresolved") or {})
-        self.booked_sigs.extend(d.get("booked_sigs") or [])
+        from .outbox import Receipts
+        self.booked_sigs = Receipts.load(d.get("booked_sigs"))
         self._reconcile_outbox()
         saved_tokens = d.get("tokens") or {}
         now = self.feed.now()
 
         def restore_token(m: str) -> TokenState:
-            ctx = saved_tokens.get(m) or {}
-            launch = Launch(**ctx["launch"]) if ctx.get("launch") else None
-            s = self.tokens[m] = TokenState(m, launch, now)    # price unknown until its next trade
-            s.dev_sold = ctx.get("dev_sold", 0.0)
-            if launch is not None and launch.dev_buy_tokens > 0:   # the one balance known across the gap
-                s.net[launch.creator] = launch.dev_buy_tokens - s.dev_sold
-                if s.net[launch.creator] > 0:
-                    s.holders[launch.creator] = s.net[launch.creator]
-            s.partial = True                             # other wallets' balances from before the restart are unknown
-            s.decided = "entered"
-            return s
+            return self._restore_token(m, saved_tokens, now)
         for m, pd in d["positions"].items():
             pd["exits"] = [tuple(x) for x in pd.get("exits") or []]
             self.positions[m] = SniperPosition(**pd)
