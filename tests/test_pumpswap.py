@@ -1,4 +1,5 @@
-"""meme_trader/sniper/pumpswap.py against the official PumpSwap SDK 1.20.0's own outputs (tests/fixtures/pumpswap)."""
+"""meme_trader/sniper/pumpswap.py against the official PumpSwap SDK: 1.20.0's own outputs (historical arithmetic, run as
+`sdk="1.20.0"`), and SDK 2.1.0's fee-bucket cases ported from its spec files (tests/fixtures/pumpswap)."""
 import base64
 import json
 import struct
@@ -11,7 +12,8 @@ from meme_trader.sniper import pumpswap as ps
 FIX = Path(__file__).parent / "fixtures" / "pumpswap"
 G = json.loads((FIX / "pumpswap-sdk-1.20.0-golden.json").read_text())
 API = {"buyBaseInput": ps.raw_buy_base_input, "buyQuoteInput": ps.raw_buy_quote_input,     # (SDK parity: raw)
-       "sellBaseInput": ps.raw_sell_base_input, "sellQuoteInput": ps.raw_sell_quote_input}
+       "sellBaseInput": ps.raw_sell_base_input,
+       "sellQuoteInput": lambda *a: ps.raw_sell_quote_input(*a, sdk="1.20.0")}
 
 
 def configs(case):
@@ -50,7 +52,7 @@ def test_quotes_match_the_sdk_exactly(case):
     got = API[case["api"]](*call)
     assert {k: str(v) for k, v in got.items()} == case["expected"]["output"]
     if "forwardSellCheck" in case:                                               # the inverse sell's forward check
-        f, want = ps.forward_sell_check(*call), case["forwardSellCheck"]
+        f, want = ps.forward_sell_check(*call, sdk="1.20.0"), case["forwardSellCheck"]
         assert {k: str(v) for k, v in f["output"].items()} == want["output"]
         assert f["meetsTarget"] == want["meetsTarget"] and str(f["shortfallAtoms"]) == want["shortfallAtoms"]
 
@@ -81,6 +83,8 @@ def test_real_mainnet_pools_decode_padded_with_their_signed_virtual_reserves(a):
     assert a["owner"] == ps.PUMP_AMM_PROGRAM and p["bytes"] == a["expected"]["bytes"] > ps.POOL_LEN
     assert p["virtual_quote_reserves"] == int(a["expected"]["virtual_quote_reserves"])
     assert p["undocumented_tail"] == a["expected"]["undocumented_tail"] and p["base_mint"] == a["expected"]["base_mint"]
+    assert (p["protocol_fees"], p["creator_fees"]) == (a["expected"]["protocol_fees"], a["expected"]["creator_fees"])
+    assert not p["undocumented_tail"] and p["serialized_end"] == ps.POOL_SIZE     # (12th review: the 287-byte layout)
 
 
 def test_older_pools_end_at_a_field_boundary_and_truncated_ones_are_refused():
@@ -90,8 +94,18 @@ def test_older_pools_end_at_a_field_boundary_and_truncated_ones_are_refused():
     for bad in (data[:250], data[:242], b"\0" * 8 + data[8:]):     # mid-field, too short, wrong discriminator
         with pytest.raises(ps.QuoteError):
             ps.decode_pool(bad)
-    tail = ps.decode_pool(data + b"\0" * 20 + b"\x07")
+    tail = ps.decode_pool(data + b"\0" * 20 + b"\x07")                # a non-zero byte past 287: undocumented
     assert tail["undocumented_tail"] and not ps.decode_pool(data + b"\0" * 31)["undocumented_tail"]
+    full = data + b"\0" + struct.pack("<QQ", 60_000, 40_000)        # 270 + is_holder_reward + the two fee counters
+    p = ps.decode_pool(full)
+    assert (p["protocol_fees"], p["creator_fees"], p["bytes"], p["padding_bytes"]) == (60_000, 40_000, 287, 0)
+    assert ps.decode_pool(full[:279])["creator_fees"] == 0 and ps.decode_pool(full[:271])["protocol_fees"] == 0
+    for n in (272, 275, 278, 280, 286):                               # a fee counter cut short: truncated, refused
+        with pytest.raises(ps.QuoteError, match="field boundary"):
+            ps.decode_pool(full[:n])
+    for o in (243, 244, 269, 270):                                    # every bool must be 0 or 1
+        with pytest.raises(ps.QuoteError, match="bool"):
+            ps.decode_pool(full[:o] + b"\x02" + full[o + 1:])
 
 
 @pytest.mark.parametrize("v", G["mintDecodeVectors"], ids=["legacy", "token2022"])
@@ -128,3 +142,41 @@ def test_inputs_the_sdk_leaves_to_its_caller_are_refused():
                 (10, 100, 10 ** 12, 10 ** 9, fees), (10, 1, 10 ** 12, 10 ** 9, fees, 1 << 127)):
         with pytest.raises(ps.QuoteError):
             ps.sell_base_input(*bad)
+
+
+SDK21 = json.loads((FIX / "pumpswap-sdk-2.1.0-spec-cases.json").read_text())
+
+
+@pytest.mark.parametrize("c", SDK21["cases"], ids=[c["id"] for c in SDK21["cases"]])
+def test_sdk_2_1_fee_buckets_are_not_sell_liquidity(c):
+    """SDK 2.1.0's own spec cases (ported): a sell's gross output less its LP fee must fit the vault LESS the fee
+    buckets; prices still use the whole vault + virtual reserves."""
+    fees = {k: SDK21["fees_bps"][k] for k in ("lp", "protocol", "creator")}
+    if c["api"] == "sellBaseInput":
+        call = lambda: ps.raw_sell_base_input(c["base"], 0, c["baseReserve"], c["quoteReserve"], fees, c["virtual"],
+                                              ps.DEFAULT_KEY, c["feeBuckets"])
+    else:
+        call = lambda: ps.raw_sell_quote_input(c["quote"], 0, c["baseReserve"], c["quoteReserve"], fees, c["virtual"],
+                                               ps.DEFAULT_KEY, c["feeBuckets"])
+    if "throw" in c["expected"]:
+        with pytest.raises(ps.QuoteError, match="Insufficient real quote reserves"):
+            call()
+        return
+    out = call()
+    if "internalQuoteAmountOut" in c["expected"]:
+        assert str(out["internalQuoteAmountOut"]) == c["expected"]["internalQuoteAmountOut"]
+
+
+def test_a_sweep_moves_fees_out_of_the_vault_without_moving_the_price():
+    """Before a sweep: vault V, buckets B, virtual boost - B. After it: vault V - B, buckets 0, virtual boost. The
+    effective reserves - and so every quote - are the same; only what sells can draw on is unchanged too."""
+    fees = {"lp": 20, "protocol": 5, "creator": 95}
+    V, B, boost, base = 80_000_000_000, 1_695_560, 17_584_505_716, 900_000_000_000_000
+    before = dict(base_reserve=base, quote_reserve=V, fees=fees, virtual=boost - B, coin_creator="x")
+    after = dict(base_reserve=base, quote_reserve=V - B, fees=fees, virtual=boost, coin_creator="x")
+    for amount in (250_000_000, 5_000_000_000):
+        assert ps.buy_quote_input(amount, 0, **before) == ps.buy_quote_input(amount, 0, **after)
+    for tokens in (10 ** 12, 10 ** 14):
+        assert ps.sell_base_input(tokens, 0, **before, fee_buckets=B) == ps.sell_base_input(tokens, 0, **after)
+    with pytest.raises(ps.QuoteError, match="fee buckets"):
+        ps.sell_base_input(10 ** 12, 0, **before, fee_buckets=V + 1)          # more buckets than the vault holds

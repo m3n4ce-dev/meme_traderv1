@@ -226,9 +226,12 @@ def test_unqualified_state_and_outputs_are_reason_coded_and_permanent_refusals_a
             POOL: (ps.PUMP_AMM_PROGRAM, pool_bytes(virtual=1 << 80))}
     assert quoter(chain(**over)).quote(POOL, "sell", 10 ** 9)["reason"] == "invalid_state"       # E beyond u64
     assert quoter(chain()).quote(POOL, "buy", 1)["reason"] == "unexecutable_output"              # -20 atoms raw
-    tail = quoter(chain(**{POOL: (ps.PUMP_AMM_PROGRAM, pool_bytes()[:279] + b"\x07" + pool_bytes()[280:])}))
-    rec = tail.quote(POOL, "sell", 10 ** 9)
+    tail = quoter(chain(**{POOL: (ps.PUMP_AMM_PROGRAM, pool_bytes()[:295] + b"\x07" + pool_bytes()[296:])}))
+    rec = tail.quote(POOL, "sell", 10 ** 9)                          # a non-zero byte past the 287-byte layout
     assert rec["reason"] == "ok" and rec["qualified"] is False and len(rec["tail_sha256"]) == 64
+    fees = quoter(chain(**{POOL: (ps.PUMP_AMM_PROGRAM, pool_bytes()[:279] + b"\x07" + pool_bytes()[280:])}))
+    rec = fees.quote(POOL, "sell", 10 ** 9)                          # byte 279 is creator_fees now: documented
+    assert rec["qualified"] and rec["creator_fees"] == "7" and rec["real_quote"] == str(60_000_000_000 - 7)
     clock = Clock(1000)
     b = book(tmp_path, chain(**{POOL: (ps.PUMP_AMM_PROGRAM, pool_bytes(quote_mint=ps.USDC))}), clock)
     b.request("U|entry", "entry", POOL, "buy", 10 ** 8, 1000, 1060, {"follow": "U"})
