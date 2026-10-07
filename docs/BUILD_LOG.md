@@ -4,6 +4,62 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #75: The tenth review: wallet order per slot, evidence accepted before gates, raw and checked quotes, a strict after-exit horizon, power v5, an executable ledger design
+
+**Source:** a tenth external review (GPT 6.1 Sol, revision a1544b7).
+- **The reviewer's 14 new properties:** 2 passed before; **all 14 pass now.** Its 40 earlier contracts still pass.
+  - **Ninth-round exit timing:** the reviewer accepted the correction, so the obsolete contract is retired and two current-path properties (including midnight) replace it.
+- **Our own tests:**
+  - `tests/test_review_sol10.py` (30), every acceptance case it listed;
+  - `tests/test_ledger_design.py` (16).
+- **Suite:** 721 passed (716 and 5 skipped without numpy).
+
+1. **Wallet order** (R10-1/2, `copytrade.py`).
+   - **Judged per slot.** Ambiguity is judged over the **whole slot**: two or more transactions there, with a sell anywhere among them, means the order is unproven. Adjacent events alone missed it: a transaction that sold and then bought hid its sell behind its own buy.
+   - **Never upgraded.** A fold keeps the ambiguity in its snapshot and keeps the checkpoint slot's events as context, and both are persisted. Folding, eviction and restoring never upgrade unknown to known.
+2. **Fork evidence: accept, then gate** (R10-3, `engine.py`).
+   - **The order of operations:** a Reconcile's content is validated first (JSON, shape, types). It's then ranked against the accepted evidence, in the coin's conflict or in the registry. Only then are the buy block, the retry state and the lifecycle record derived, and from what was **accepted**, not from the newest delivery.
+   - **Bad payloads prove nothing:** a malformed or mismatched one leaves the gates as they were.
+   - **Weaker answers** neither clear a block nor add one. A lower proof is kept beside a stronger status, and never promoted.
+3. **Quotes: raw and checked** (R10-4, `pumpswap.py`).
+   - **Raw:** `raw_*` is the SDK's math exactly, including its awkward outputs. A 1-lamport buy "receives" −20 atoms in the SDK too.
+   - **Checked:** the unprefixed functions qualify everything:
+     - integer atoms, with a bool refused;
+     - fee rates that are integers and total under 10,000 bps;
+     - effective reserves in (0, u64], the protocol's documented bound;
+     - positive, bounded outputs;
+     - inverse sells that pass the forward check.
+
+     The price watcher uses only these.
+   - **Undocumented pool bytes:** the decoder records its known-prefix layout and the hash of any undocumented tail. Quotes on such pools are labelled prefix-only, not "qualified".
+   - **Permanent refusals** (a non-SOL pool, a mint's extensions, a layout) aren't retried.
+4. **The after-exit horizon** (R10-5, `exitlab.py`).
+   - **In-window only:** peaks and lows use only observations up to the 30-minute horizon.
+   - **The end mark** is the last price at or before it, if at most 60 s old and known. Otherwise the end is unmeasured, with the reason.
+   - **After the horizon,** the first price seen is reported apart, with its delay.
+5. **Power v5** (R10-6/7).
+   - **The drift fix:** v4 moved a late fill's price by exp(σZ), which has a positive expected drift of +2.2% over 15 minutes, so even its no-edge process gained by being late. The base case is now a mean-preserving 1 + σZ, with Z clipped symmetrically so the mean stays exactly 1 and the price positive, and Z = 0 meaning no move.
+   - **The reviewer's suggested centering** (exp(σZ − σ²/2)) is also mean-preserving, but its Z = 0 path drifts down, which contradicts the reviewer's own new exit-timing contract. 1 + σZ satisfies both.
+   - **Sensitivities:** v4's process and its mirror run on a subset fixed before the run.
+   - **The late-fill share** now counts the exits the account executed.
+   - **Each cell reports both arms:** signals, entries, skips by reason, measured and impaired exits.
+   - **Results:** POWER_V5
+6. **The fork lifecycle export.**
+   - **Records:** each one has a stable id and a process epoch.
+   - **Matching:** the export matches creation to terminal by id and classifies every unmatched conflict: pending at the cutoff, created before the log, or a restart.
+   - **The live log's first hour:** 835 conflicts, 817 matched, median 15 s from creation to terminal.
+   - **The 1,249 of 1,249 claim** is now a derivation saved as evidence (`evidence_fork_answers_2026-10-07.json`), with its method.
+7. **The ledger design, revision 2** (`research/ledger`, `docs/LEDGER_DESIGN.md`). It answers the review's ten points with:
+   - executable DDL (signed canonical integer text, append-only triggers, the seal protocol, one open attempt per order, contradiction-preserving observations, a monotone commit sequence);
+   - a reference writer that sums exact integers (SQLite's `SUM` turns into a REAL past int64);
+   - worked postings for every event kind;
+   - tests on real SQLite.
+
+   **Not wired into the bot.**
+8. **T15 and T20** carry the reviewer's feasibility floors: 42 qualified candidates in 14 frozen days, on 10 or more of them, outcomes hidden. Below that, a version is "infeasible", not "unprofitable".
+
+---
+
 ## 2026-10-07 — Entry #74: The live PumpSwap price watcher, real trading costs, and experiments that always practice
 
 **Source:** the owner's go-ahead: "build the live price"; "they should be always practicing and finding an edge or researching".
