@@ -14,7 +14,7 @@ string for a run on uncommitted code. Now:
   outage), plus rare long maintenance outages), SHARED by the signal and control arms, plus each quote attempt's own
   transient failures and pools that can't be quoted at all (more often the ones collapsing: informative missingness,
   never revealed to the strategy). A quote is needed at entry (else the signal is skipped, in that arm) and at the
-  exit or one of its retries (every 60 s for RETRY_S) - else the position is impaired;
+  exit or one of its retries (every 30 s for RETRY_S, as registered) - else the position is impaired;
 - the registered INVALID rule is applied: observed hours < 80% of the window, or > 20% of attempted trades
   execution-unmeasured;
 - the one-day bootstrap is the registered verdict; a moving-block (3-day) bootstrap is reported beside it;
@@ -60,7 +60,7 @@ ORDINARY = {"base": (-0.0758, SD), "pessimistic": (-0.1368, SD),
 AVAILABILITY = {"good": (48.0, 10.0, 0.0, 0.0, 0.05, 0.01),
                 "medium": (12.0, 30.0, 1 / 30, 4.0, 0.10, 0.03),
                 "poor": (6.0, 60.0, 1 / 15, 8.0, 0.20, 0.08)}
-ATTEMPT_S = 60                       # exit retries, from the exit time until RETRY_S after it
+ATTEMPT_S = 30                       # exit retries, from the exit time until RETRY_S after it (as registered)
 
 
 def one_test(rng, days, win_per_day, ordinary, extra, u, hurdle, boots, cluster=0.0):
