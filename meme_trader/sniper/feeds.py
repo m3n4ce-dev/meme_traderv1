@@ -477,13 +477,18 @@ class SolanaTradeFeed(Feed):
     def degraded(self) -> bool:
         return bool(self.degraded_reason)
 
+    unclosed_logs = 0                                    # notifications whose program stack never closed
+
     @staticmethod
-    def parse_logs(value: dict, now: float, slot: int = 0) -> list[Trade]:
+    def parse_logs(value: dict, now: float, slot: int = 0, complete: bool = False) -> list[Trade]:
         """Trades from one logsSubscribe notification value ({signature, err, logs}); slot from its context.
 
         `mentions` matches whole transactions, so any program in one can log bytes that look like a
         TradeEvent. An event only counts while pump.fun itself is the executing program, tracked through
-        the runtime's invoke/success/failed lines; a stack that doesn't add up rejects the whole tx."""
+        the runtime's invoke/success/failed lines; a stack that doesn't add up rejects the whole tx.
+        complete=True (verifying a fetched transaction, a ninth review): the stack must also be closed at the end -
+        logs that stop mid-invocation, with or without a "Log truncated" line, prove nothing. The live feed keeps
+        what it decoded and counts such notifications (`unclosed_logs`)."""
         import base64
         import struct
 
@@ -535,6 +540,10 @@ class SolanaTradeFeed(Feed):
                              sol=sol / 1e9, tokens=tokens / 1e6, v_sol=v_sol / 1e9, v_tokens=v_tokens / 1e6,
                              signature=value.get("signature", ""), slot=int(slot), chain_ts=float(chain_ts),
                              fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps), event_index=n_event))
+        if stack:                                       # the logs ended inside an invocation
+            if complete:
+                return []
+            SolanaTradeFeed.unclosed_logs += 1
         return out
 
     def _load_lags(self) -> None:

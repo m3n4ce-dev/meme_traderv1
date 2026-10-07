@@ -328,7 +328,10 @@ def test_exit_lab_runs_other_exits_on_the_same_entries(tmp_path):
     assert any(r["variant"] == "bank half at +30%" for r in lab.done)
     v = lab.view("late")
     assert v["entries"] == 1 and v["variants"][0]["variant"] == "take profit at 2x"
-    assert len((tmp_path / "exit_lab.jsonl").read_text().splitlines()) == 11
+    rows = [json.loads(x) for x in (tmp_path / "exit_lab.jsonl").read_text().splitlines()]
+    assert len([r for r in rows if "record" not in r]) == 11
+    assert all(r["accounting"] == 2 for r in rows if "record" not in r)
+    assert {r["variant"] for r in rows if r.get("record") == "after_exit"}      # early exits: followed afterwards
     assert len(ExitLab(tmp_path / "exit_lab.jsonl", e.fee).done) == 11     # reloads its history
 
 
