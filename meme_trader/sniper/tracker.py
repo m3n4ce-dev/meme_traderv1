@@ -299,9 +299,13 @@ class TokenState:
         for tr, b, s in self.ledger:
             if tr is not None:
                 fresh._apply(tr, b, s)
+        seq = self.mark_seq
         for name in TRADE_FIELDS:
             setattr(self, name, getattr(fresh, name))
         self.mayhem = self.mayhem or fresh.mayhem
+        self.mark_seq = seq + 1                          # the repaired price is a new observation: ids never repeat
+        if self.mark:
+            self.mark = {**self.mark, "seq": self.mark_seq}
 
     def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "", err: str = "",
                          content: tuple | None = None, method: str = "") -> str:
