@@ -4,6 +4,105 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #76: The eleventh review: credentials kept out of every record, quotes on a strict clock and qualified honestly, price marks in chain order, the ledger's acceptance work, paired risk and drift sensitivities
+
+**Source:** an eleventh external review (GPT 6.1 Sol, revision 829bd7c).
+- **The reviewer's 16 new properties:** all failed before, and **all 16 pass now.** Its 54 earlier contracts still pass; the agreed obsolete ninth-round clock contract stays retired.
+- **Our own tests:**
+  - `tests/test_review_sol11.py` (36);
+  - 14 new ledger tests in `tests/test_ledger_design.py`.
+- **Suite:** 781 passed.
+
+1. **Credentials** (R11-5, `meme_trader/redact.py`).
+   - **The defect:** an HTTP error's message is its whole request URL, key included, and the price watcher saved `str(ex)`.
+   - **The fix:** errors are now kept as class, HTTP status, host and a bounded reason. Every log record (every logger and handler), journal row, dashboard message, recorder error and quote record is redacted:
+     - URL query strings, user:password and key-like path segments;
+     - `key=`/`token=` pairs and bearer tokens;
+     - every known secret value, from `.env` and from the URLs the code registers.
+   - **The exporter's final scan** now also checks the key pieces inside URLs. The code rewrites `wss://` to `https://`, so the whole-value match could miss them.
+   - **A local scan found no real key** anywhere: data (37,667 files), logs, the system journal, and both review packages.
+2. **Price marks in chain order** (R11-1, `tracker.py`).
+   - **One ordering clock and provenance** cover every price source (the curve's reserves, a graduated pool's market cap, DexScreener): source, slot, signature, event index, chain time, receipt time, and an observation id.
+   - **Older events:** an older slot never rolls the price back, and its other facts still count.
+   - **Within a slot:** one transaction's events go in their own order. Transactions whose order is unknown and that disagree keep the mark, flagged ambiguous, until a later slot settles it.
+   - **The pool takes over from the curve,** and a late curve event never undoes that.
+   - **DexScreener's unordered price** never overrides a chain price fresher than 90 s.
+   - **Where it mattered live:** today's 1.3 GB feed recording carries **no** graduated-pool trade events, so the path the reviewer found wasn't reachable live. The DexScreener refresh (every 10 s for held graduated coins, with no order at all) had the same overwrite risk, and was live.
+3. **After-exit freshness from the source** (R11-2, `exitlab.py`).
+   - **New observations only:** an observation is a newly accepted price, timed by its receipt, so re-reading a carried price is neither fresher nor new.
+   - **Ages:** receipt age (the rule), chain age and poll time are kept apart.
+   - **No provenance** means an unknown price.
+4. **The quote clock and its lock** (R11-3/4, `quotes.py`).
+   - **The deadline:** a quote counts only if it's in hand by its job's deadline (inclusive). A later one is kept as an attempt and never accepted or re-timed: a late entry is skipped, a late exit unmeasured (`late_response`).
+   - **The lock** is released on every path, a failed `BEGIN` included, and attempts are never overwritten.
+5. **Raw versus qualified** (R11-6). Records are versioned (v2), with:
+   - **Qualification reasons:** undocumented pool bytes; no freshness reference.
+   - **A vault/mint token-program check** (a permanent refusal).
+   - **What was priced:** account hashes, mint supply and decimals, and the job clock.
+   - **A modelled immediate round trip.**
+
+   Reporting:
+   - **Coverage** counts raw and qualified first-try and eventual successes apart. A record without qualification is **unknown**, not qualified.
+   - **P&L** is split by population. A qualified round trip needs both ends qualified and matched. Medians are true medians.
+   - **Every job is exported,** including those that ended with no attempt.
+6. **The pipeline's clock.**
+   - The wallet recorder's rows now carry their **receive time**.
+   - Revival follows and their quote jobs carry the signal's chain time, receipt and decision.
+   - The reviewer's join showed decision-to-response is about 6 s at a 5 s delay, but signal-to-response about 29 s. The revival test reads trades a median 15.7 s after their chain time (12–28 s over 103 signals).
+   - The receive time splits that between the chain feed and the recorder's 5 s flush plus the test's read.
+7. **The ledger, revision 3** (`research/ledger`, `docs/LEDGER_DESIGN.md`). The reviewer approved the architecture for continued isolated work, not engine migration. Its blockers:
+   - **The opening:** it's the observed cash. The legacy residual is carried against the opening book and moves no cash (revision 2 debited it twice). Tested against a separate source snapshot.
+   - **Stable keys:** every append carries one. A replay returns the original (tested: a crash after commit, before the acknowledgement), and other content under the same key is a conflict.
+   - **Effects:** each fill and each signature's network fee is booked once.
+   - **Holdings** can't go negative.
+   - **Seals:** they freeze every other column, and startup recomputes every one, failing closed on a forged seal or on history edited around the triggers.
+   - **Observations** are append-only.
+   - **Attempts:**
+     - they store the exact signed bytes;
+     - they move only along legal transitions, with proof (expiry: a finalized absence above the last valid height);
+     - there's one live sell per position;
+     - crash, lock and fault injection are tested.
+
+   Revision 1's conflicting statements are marked superseded. **Still not wired into the bot.**
+8. **Power v6** (`research/power_t9_e1.py`): every variant runs on common random numbers.
+   - **Variants:** the late-price drift, and three predeclared risk policies in `t9_portfolio.py`:
+     - "gross", the registration's entry-halt trigger;
+     - "hard", a strict worst-case daily budget;
+     - "net+cap", a net-loss stop with a 1.0 SOL gross cap.
+
+     Costs run at +0, +1.5 and +2.8 points; +2.8 makes the round trip ~4%, the builder's measured estimate.
+   - **The run:** 84 cells of 300 runs, 1,000 for the nulls; revision `a788e71`, no uncommitted changes.
+
+   **Results:**
+   - **The drift doesn't matter, now measured on paired draws.** Positive or negative drift changes pass rates by at most 1.3 points (paired 95% intervals mostly include 0). Version 5's ~8-point gaps came from different seeds, not the process. The reviewer's correction stands: the clipped and lognormal spreads differ by 1.09% (0.208 vs 0.210 at 15 minutes), not "under 0.1%".
+   - **No edge stays rare:** at most 2.0% false passes (A1, hard budget, +0 cost); 0 of 1,000 at +2.8 points of cost.
+   - **Costs matter.** At +2.8 points:
+     - a quarter of the replay's winner rate, flat, at A2: 0.54 → 0.14;
+     - half, flat, at A3: 0.73 → 0.40;
+     - the replay's rate, pessimistic, at A3: 0.85 → 0.66.
+   - **The risk policy matters as much as availability:**
+
+| Half the replay's winner rate, flat, A3, 90 days | gross (registered) | hard budget | net + 1.0 SOL cap |
+|---|---|---|---|
+| Pass, +0 cost | 0.73 | 0.58 (paired −0.15 [−0.21, −0.08]) | 0.87 (paired +0.14 [+0.10, +0.19]) |
+| Pass, +2.8 points | 0.40 | 0.27 (−0.13 [−0.19, −0.07]) | 0.50 (+0.10 [+0.05, +0.15]) |
+| Trades in 90 days (median) | 1,135 | 846 | 1,776 |
+| Days the stop fired / median hour | 84 / 9:00 | 90 / 1:00 | 69 / 13:00 |
+| Worst day (median) | −0.78 SOL | −0.47 SOL | −0.88 SOL |
+| Null (A2, +0): pass / total / peak drawdown | 0.001 / −3.3 / 5.6 SOL | 0.009 / −2.7 / 4.8 SOL | 0.002 / −5.7 / 8.0 SOL |
+
+   - **Read with care:**
+     - **The registered stop is no limit:** its typical worst day (−0.78 SOL) is well past its own 0.5 SOL, as the reviewer showed.
+     - **The hard budget** really bounds the day (one position at a time), but loses up to 18 points of power.
+     - **The net stop with a cap** gains up to 20 points at about the same false-pass rate (≤ 1.1%). But with no edge it trades more and loses more: −5.7 against −3.3 SOL, drawdown 8.0 against 5.6.
+   - **Not decided:** the policy is the owner's risk choice, not this table's. Neither the window nor the policy has been chosen.
+
+9. **Q1, a proposed qualification window for the price watcher** (`research/registrations/Q1-quote-qualification.proposed.md`): the reviewer's criteria, for the owner to freeze.
+   - **The criteria:** 14 consecutive UTC days; 200 matured jobs per cell, 30 pools and 100 pool-days; qualified-coverage lower bounds of 95% (eventual) and 90% (first try), binomial and clustered.
+   - **A blocker already visible:** **50 of the first 64 v2 entry quotes were prefix-only.** Their pools carry undocumented bytes, and the tail tracks virtual-reserve state: none with zero virtual reserves had one, all with negative reserves did. Until the layout is documented, qualified coverage can't reach 95% on these pools.
+
+---
+
 ## 2026-10-07 — Entry #75: The tenth review: wallet order per slot, evidence accepted before gates, raw and checked quotes, a strict after-exit horizon, power v5, an executable ledger design
 
 **Source:** a tenth external review (GPT 6.1 Sol, revision a1544b7).
