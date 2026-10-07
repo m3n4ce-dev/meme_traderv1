@@ -476,31 +476,54 @@ class Export:
         self._note("quote_attempts.jsonl", rows=len(rows))
 
     def fork_conflicts(self) -> None:
-        """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict's creation, with why it is
-        or isn't looked up, and its terminal state, by code revision - so no conflict is unaccounted for."""
+        """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict by a stable id, matched
+        creation to terminal record, with every unmatched one classified from the records themselves (a tenth review:
+        a count of terminal records isn't a count of conflicts resolved)."""
         p = self.data / "fork_conflicts.jsonl"
         if not p.exists():
             self.unavailable.append(("fork_conflicts_summary.json", "no conflict log yet (it starts with the round-9 code)"))
             return
         self.inputs.append(p)
         rows, bad = read_jsonl(p)
-        made = {(r["signature"], r["event_index"]): r for r in rows if r.get("kind") == "created"}
-        done = {(r["signature"], r["event_index"]): r for r in rows if r.get("kind") == "resolved"}
-        by = defaultdict(Counter)
-        for k, r in made.items():
-            code = r.get("code", "")
-            if not r.get("tracked"):
-                by[code]["no lookup: coin not tracked"] += 1
-            elif k in done:
-                d = done[k]
-                by[code][f"resolved: {d.get('state') or d.get('status')} ({d.get('method', '')})"] += 1
+        made, done = {}, {}
+        for r in rows:
+            cid = r.get("id") or f"{r.get('signature')}|{r.get('event_index')}"
+            (made if r.get("kind") == "created" else done if r.get("kind") == "resolved" else {}).setdefault(cid, r)
+        first_ts = min((r.get("ts", 0) for r in rows), default=0)
+        cutoff = max((r.get("ts", 0) for r in rows), default=0)
+        epochs = sorted({r.get("epoch", "") for r in rows if r.get("epoch")})
+        cls, durations, out_rows = Counter(), [], []
+        for cid in sorted(set(made) | set(done)):
+            c, d = made.get(cid), done.get(cid)
+            if c and d:
+                why = "matched"
+                durations.append(d["ts"] - c["ts"])
+            elif c and not c.get("tracked", True):
+                why = "created, no lookup: coin not tracked"
+            elif c:
+                later = [e for e in epochs if e > (c.get("epoch") or "")]
+                why = ("created, still pending at the export cutoff" if cutoff - c["ts"] < 600 else
+                       "created, no terminal record: a later process run took over (restart)" if later else
+                       "created, no terminal record")
             else:
-                by[code]["tracked, no terminal state yet (pending, or the process stopped)"] += 1
-        out = {"created": len(made), "resolved": len(done), "bad_lines": bad,
-               "by_code_revision": {c: dict(v) for c, v in by.items()},
-               "resolved_without_creation_record": len(set(done) - set(made))}
+                why = ("terminal only: created before the conflict log started" if d["ts"] - first_ts < 900 or
+                       not d.get("epoch") else "terminal only: its creation was logged under no record")
+            cls[why] += 1
+            out_rows.append({"id": cid, "class": why, "created": (c or {}).get("ts"), "resolved": (d or {}).get("ts"),
+                             "epoch_created": (c or {}).get("epoch"), "epoch_resolved": (d or {}).get("epoch"),
+                             "state": (d or {}).get("state") or (d or {}).get("status"), "proof": (d or {}).get("proof")
+                             or (d or {}).get("method"), "code": (d or c or {}).get("code")})
+        durations.sort()
+        q = (lambda f: round(durations[min(len(durations) - 1, int(f * len(durations)))], 1)) if durations else (lambda f: None)
+        out = {"records": len(rows), "bad_lines": bad, "conflicts": len(out_rows), "created_records": len(made),
+               "terminal_records": len(done), "classes": dict(cls), "epochs": epochs,
+               "created_to_terminal_s": {"n": len(durations), "median": q(0.5), "p90": q(0.9), "max": q(1.0)},
+               "log_span_utc": [first_ts, cutoff]}
         (self.out / "fork_conflicts_summary.json").write_text(json.dumps(out, indent=1))
-        self._note("fork_conflicts_summary.json", rows=len(made))
+        with open(self.out / "fork_conflicts.jsonl", "w") as f:
+            for r in out_rows:
+                f.write(json.dumps(r) + "\n")
+        self._note("fork_conflicts.jsonl", rows=len(out_rows))
 
     def t9_rerun(self) -> None:
         """The corrected T9 replay (t9_replay_v2.py): its whole summary, and every trade of the +40% rule family with
