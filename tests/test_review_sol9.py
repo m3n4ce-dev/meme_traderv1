@@ -355,3 +355,23 @@ def test_transient_failures_come_in_streaks_and_unquotable_pools_dont_see_return
     m.AVAILABILITY["A3 informative"] = (1e9, 1, 0, 0, 0.0, 0.2)
     _, first = m._arm_quotes(np.random.default_rng(3), [], [], np.zeros(4000), r, "A3 informative")
     assert (first[r < 0] == 0).mean() > 2 * (first[r > 0] == 0).mean()   # the labelled stress
+
+
+# --------------------------------------------------------------------------- the exit lab while entries are blocked
+def test_blocked_graduation_entries_are_followed_with_every_exit_variant_and_change_nothing_else(make, monkeypatch):
+    from meme_trader.sniper.exitlab import TP10
+    e = make(feed=Live())
+    e.book.halted = "drawdown 50%"
+    s = coin()
+    s.decided, s.price_known = "watching", True
+    e.tokens[M] = s
+    monkeypatch.setattr("meme_trader.sniper.engine.evaluate_late_entry", lambda *a: (True, "late play"))
+    asyncio.run(e._maybe_late())
+    names = {sh["variant"] for sh in e.lab.open[M]}
+    assert set(TP10) <= names and "as now" in names and all(sh["kind"] == "late-blocked" for sh in e.lab.open[M])
+    assert not s.late_tried and M not in e.positions and not e.book.reserved          # nothing bought or changed
+    assert all(sh["entry"]["price_kind"] == "raw_mark" for sh in e.lab.open[M])
+    n = len(e.lab.open[M])
+    e._last_late_scan = 0
+    asyncio.run(e._maybe_late())
+    assert len(e.lab.open[M]) == n                                                      # once per coin

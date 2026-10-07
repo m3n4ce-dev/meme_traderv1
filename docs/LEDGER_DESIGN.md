@@ -1,0 +1,124 @@
+# One transactional ledger: schema and migration (DESIGN, for review before any code)
+
+**Status: a proposal, nothing built.** It answers the eighth review's answer 7 and the ninth review's 12-point acceptance list, and is meant to be reviewed before implementation. Numbers in brackets, like [A3], refer to that list.
+
+## Why
+
+Today the account lives in four places:
+- the JSON book (`sniper_state_paper.json`, rewritten atomically);
+- the outbox (`data/orders.db`, SQLite);
+- the typed account journal (`account-<mode>.jsonl`, appended after the in-memory change, with I/O errors only counted);
+- the trade logs.
+
+They're kept consistent by careful ordering, not by a transaction. The journal can miss an event, and nothing ties a fill's cash to its order row and its journal line atomically.
+
+## The rule
+
+**One SQLite database is the authority for the account.** The in-memory book is a projection rebuilt from it at start, and every economic change commits there before it's acted on or displayed. There's no second authority: no JSON book and no JSONL journal written alongside it. Exports are read from the database.
+
+## Storage
+
+- **One writer:** the engine process. Short write transactions, `BEGIN IMMEDIATE`, with `busy_timeout` bounded at 2 s. A failed write is an error, never a silent skip [A11].
+- **Settings:** `journal_mode=WAL`, `synchronous=FULL`, `foreign_keys=ON`. Schema migrations are versioned in a `migrations` table, each with its sha256 [A10].
+- **Durability assumptions, written down:**
+  - `fsync` on commit and on the database's directory after creation, on the P8's ext4 SSD.
+  - A unit test can prove process-kill recovery, not power-loss guarantees. Power loss is covered by the backup policy below, not by a claim [A10].
+- **Backups:** an online `VACUUM INTO` copy every 6 h and before every migration, kept 7 days, each with its sha256. A restore is verified by rebuilding the projection and comparing it to the live one [A10].
+
+## Amounts [A1]
+
+- **SOL:** integer **lamports** in `INTEGER` (fits int64).
+- **Tokens:** integer **atoms**, stored as decimal `TEXT` validated by a `CHECK` (digits only, ≤ 39 characters). A token supply can exceed int64, so floats are never used.
+- **Every token amount names its mint,** and every mint row has its program (legacy or Token-2022) and decimals.
+- **Floats only in presentation views,** never in a stored balance.
+
+## Tables (logical)
+
+| table | what | uniqueness / constraints |
+|---|---|---|
+| `accounts` | scope: mode (`paper` / `live` / `synthetic`), chain/genesis, owner wallet, strategy or test account, the opening event | `UNIQUE(account_id)`; `CHECK(mode IN (...))`. A synthetic account's rows can't reference a live account (enforced by the foreign key plus mode checks in the posting trigger) |
+| `events` | append-only economic journal: every cash or inventory change, and every lifecycle fact | `event_id` (ULID) primary key. Also: account, mode, `schema_version`, `code_revision`, `recorded_at` (wall), `engine_ts`, `chain_ts`, `causation_id` / `correlation_id`, `payload` (JSON), `payload_sha256`, `corrects` (the event id it reverses or replaces) [A2, A7]. No UPDATE or DELETE: a trigger raises |
+| `postings` | the balanced integer effects of each event, per asset and account (cash, inventory, reserved, fees, rent, external flows) | `FOREIGN KEY(event_id)`; per event, `sum(amount)` per asset across the account's books and the external-flow book is 0 (checked in the same transaction) |
+| `orders` | durable logical intent: buy/sell, mint, size, reason, policy and strategy versions, state | `state IN (intent, signed, submitted, unknown, confirmed, final, failed, expired)` [A4]; one open sell per position (partial unique index) |
+| `attempts` | each signed transaction: exact signature, blockhash and expiry, serialized transaction hash, submission state | `UNIQUE(signature)`. A retry reuses the attempt, never signs a second economic order for the same intent [A4, A5] |
+| `receipts` | what the chain said about an attempt: commitment, slot, error, source, observed time | `UNIQUE(signature, commitment, source)`. The strongest evidence wins, by the fork rules |
+| `fills` | a proven execution: attempt, event locator, tokens, lamports, fees broken down | `UNIQUE(signature, event_index)`. A network fee is `UNIQUE(signature)` once per transaction, never once per event |
+| `inventory`, `lots` | projections: holdings, cost basis and unknown-basis lots, quarantined tokens | rebuilt from `postings`; a cache only [A3] |
+| `quotes` | the quote observer's records (T9-E1's quote contract) | `UNIQUE(quote_id)` |
+| `outbox` | durable effects with stable keys: notifications, dashboard pushes | `UNIQUE(effect_key)`. Delivery at least once; application idempotent |
+| `checkpoints` | projection checkpoints: last `event_id`, its sha256, the ordering boundary, history completeness (`complete` / `folded` / `evicted` / `unknown`), source commitments | one per projection and version [A8] |
+| `migrations` | the schema version and migration sha256 | applied once |
+
+## The network boundary [A4, A5]
+
+Never hold a write transaction while awaiting RPC:
+1. **Reserve.** In one transaction: the order `intent`, the cash reservation posting, the `reserve` event.
+2. **Sign.** In one transaction: the exact signed transaction, signature, blockhash and expiry stored in `attempts`, state `signed`. Then send, outside any transaction.
+3. **Submit.** In one transaction: state `submitted`, or `unknown` if the send's result is lost. A restart resumes the same signature and **never creates a fresh conflicting order**. Unknown stays reserved until reconciled; it is never released on a timeout.
+4. **Settle.** In one transaction: the receipt, then `fills` plus `postings`. That means the fee once per signature, proceeds, the rent change and the reservation release, plus the order state, the projection update and the outbox entries.
+5. **Display only from committed state.**
+
+## Economics [A6]
+
+Separate event kinds, each with its own postings:
+- entry cost and sell proceeds;
+- attached and unattached failed fees;
+- priority and base network fees;
+- transfers, deposits and withdrawals;
+- rent paid and reclaimed (a balance, not an expense);
+- adoption and reset openings;
+- wallet sync.
+
+Swap fees already inside a fill's lamports are **not** charged again.
+
+## Fork corrections [A7]
+
+- **Observed market events are immutable.** A correction is a new event linked by `corrects`.
+- **Our own fills and fees are facts of our own transactions.** A leader's observation changing never erases them.
+
+## Journal failure policy [A11]
+
+- **If a commit fails** (disk full, read-only, locked past the timeout): automated **entries stop** (fail closed), with an alert.
+- **Protective exits continue** through the durable order lifecycle, provided their own commit succeeds. If even that fails, the engine halts.
+- **The owner's manual trading isn't blocked by the bot's policy,** but it's recorded like any other order.
+
+## Crash and fault injection [A9]
+
+The test harness kills the process at every boundary:
+- before and after the reserve, sign, submit and settle commits;
+- between a send and its result;
+- inside the settle transaction;
+- after the commit but before the outbox delivery.
+
+It also injects:
+- duplicate and out-of-order receipts;
+- a corrected market event;
+- a midnight close;
+- disk-full and read-only errors;
+- a locked database, a concurrent second writer, truncated legacy input, and unavailable RPC.
+
+**After each one,** the account rebuilt from the database must equal the uninterrupted run's balances, inventory, reservations and rows. There must be no double fill, fee or order, and unknown outcomes stay reserved.
+
+## Export invariants [A12]
+
+- **Closed rows reconcile exactly.** Each closed row's P&L and the account's economic P&L agree at atom precision, net of external flows, with every open or quarantined token and rent balance accounted for.
+- **The exporter fails** if an invariant doesn't hold.
+
+## Migration from the JSON book
+
+1. **Quiesce entries.** Exits and reconciliation stay supervised.
+2. **Back up.** Take hashed, immutable copies of the book, outbox, receipts, trade logs, account journal and config.
+3. **Import into a new epoch:**
+   - original ids and account boundaries;
+   - unknown outcomes, reservations, and the opening provenance;
+   - the **legacy residual (−0.00804 SOL)**, kept as an unresolved reconciliation item. No trades or fees are fabricated to make it balance.
+4. **Prove it against the sources:**
+   - cash, held inventory, reservations, closed results and per-transaction fees;
+   - for a live scope, on-chain balances first.
+5. **Shadow-rebuild the projections** and compare them to the running book for 24 h, read-only.
+6. **Switch atomically:** select the active epoch. The old inputs become read-only. A checkpointed rollback can never resend an already-signed attempt.
+
+## Not decided here (for the owner)
+
+- **When to schedule it.** It touches every order path. The bot's halted paper account makes now a quiet time.
+- **Whether the outbox database becomes this database or is migrated into it.**

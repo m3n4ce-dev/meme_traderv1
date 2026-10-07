@@ -458,6 +458,33 @@ class Export:
             (self.out / "research_as_run.json").write_text(json.dumps(listing, indent=1))
             self._note("research_as_run/", files=len(listing))
 
+    def fork_conflicts(self) -> None:
+        """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict's creation, with why it is
+        or isn't looked up, and its terminal state, by code revision - so no conflict is unaccounted for."""
+        p = self.data / "fork_conflicts.jsonl"
+        if not p.exists():
+            self.unavailable.append(("fork_conflicts_summary.json", "no conflict log yet (it starts with the round-9 code)"))
+            return
+        self.inputs.append(p)
+        rows, bad = read_jsonl(p)
+        made = {(r["signature"], r["event_index"]): r for r in rows if r.get("kind") == "created"}
+        done = {(r["signature"], r["event_index"]): r for r in rows if r.get("kind") == "resolved"}
+        by = defaultdict(Counter)
+        for k, r in made.items():
+            code = r.get("code", "")
+            if not r.get("tracked"):
+                by[code]["no lookup: coin not tracked"] += 1
+            elif k in done:
+                d = done[k]
+                by[code][f"resolved: {d.get('state') or d.get('status')} ({d.get('method', '')})"] += 1
+            else:
+                by[code]["tracked, no terminal state yet (pending, or the process stopped)"] += 1
+        out = {"created": len(made), "resolved": len(done), "bad_lines": bad,
+               "by_code_revision": {c: dict(v) for c, v in by.items()},
+               "resolved_without_creation_record": len(set(done) - set(made))}
+        (self.out / "fork_conflicts_summary.json").write_text(json.dumps(out, indent=1))
+        self._note("fork_conflicts_summary.json", rows=len(made))
+
     def t9_rerun(self) -> None:
         """The corrected T9 replay (t9_replay_v2.py): its whole summary, and every trade of the +40% rule family with
         status, entry/exit times and prices, episode and coverage reason."""
@@ -697,7 +724,8 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     if reg.exists():
         shutil.copytree(reg, out / "registrations")
     for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json", "power_t9_e1_v2.out",
-                 "power_t9_e1_v2.json", "power_t9_e1_v3.out", "power_t9_e1_v3.json", "power_t9_e1_v3.json.sha256"):
+                 "power_t9_e1_v2.json", "power_t9_e1_v3.out", "power_t9_e1_v3.json", "power_t9_e1_v3.json.sha256",
+                 "power_t9_e1_v4.out", "power_t9_e1_v4.json", "power_t9_e1_v4.json.sha256"):
         if (data / "research" / name).exists():
             (out / "registrations").mkdir(exist_ok=True)
             shutil.copy2(data / "research" / name, out / "registrations" / name)
@@ -708,6 +736,7 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
             shutil.copy2(p, out / "evidence" / p.name)
     ex.as_run()
     ex.t9_rerun()
+    ex.fork_conflicts()
     for p in sorted((data / "research").glob("BUILDER_REPLY*.md")):   # the builder's reply to the review
         shutil.copy2(p, out / p.name)
     if config is not None:

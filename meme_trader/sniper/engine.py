@@ -235,6 +235,7 @@ class Engine:
         self.fork_evidence: dict[tuple, dict] = {}         # (signature, event index) -> the strongest chain answer
         self.fork_unproved: dict[tuple, dict] = {}         # conflicts answered by status only: {mint, since, given_up}
         self._code_rev: str | None = None                  # (for the fork conflict log; read once)
+        self._late_followed: dict[str, float] = {}         # coins followed in the exit lab while entries were blocked
         self._events: OrderedDict = OrderedDict()          # recent trade identities -> content hash (disposition)
         self._fork_busy, self._last_fork_check = False, 0.0
         self._ack_alerted = False
@@ -2679,6 +2680,9 @@ class Engine:
         blocked = self.entries_blocked() if L.enabled else "graduation plays are off"
         practice = bool(blocked) and self._practicing(blocked)
         if blocked and not practice:
+            if L.enabled and self.feed.realtime:
+                self._last_late_scan = self.now
+                self._follow_blocked_late(blocked)
             return
         self._last_late_scan = self.now
         en = self.p.entry
@@ -2715,6 +2719,33 @@ class Engine:
                               notes=[why], source="late")
             if self.entries_blocked():
                 break
+
+    def _follow_blocked_late(self, blocked: str) -> None:
+        """Entries are blocked (the kill switch, a pause, low SOL): the coins the graduation play would have bought are
+        followed in the exit lab anyway ("late-blocked", from the raw price, every exit variant - TP10 included), so
+        the exit experiments keep collecting while the account can't trade. Measurement only: nothing is bought, and
+        nothing about later entries changes (a separate record of what was followed, not `late_tried`)."""
+        L, en = self.p.late, self.p.entry
+        for s in list(self.tokens.values()):
+            if s.mint in self._late_followed or not s.decided or s.late_tried or s.mint in self.positions \
+                    or s.mint in self.pending or not s.price_known or s.migrated:
+                continue
+            ok, why = evaluate_late_entry(s, self.now, L, {
+                "max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
+                "creator_launches": len(self.creators.get(s.creator, ())),
+                "max_creator_launches_24h": en.max_creator_launches_24h,
+                "max_cluster_pct": en.funding.max_cluster_pct, "skip_mayhem": self._skip_mayhem()})
+            if not ok:
+                continue
+            if self._skip_mayhem() and (s.mayhem or not s.mayhem_checked):
+                self._check_mayhem(s)                    # (queued once; followed when it's known not Mayhem)
+                continue
+            self._late_followed[s.mint] = self.now
+            self.lab.start(s.mint, s.symbol, "late-blocked", s.curve.price, self.now, self.p, price_kind="raw_mark",
+                           stake_sol=float(self.p.capital.buy_sol), extra={"blocked": blocked[:60], "entry": why[:60]})
+        if len(self._late_followed) > 5000:
+            cut = sorted(self._late_followed.values())[-2500]
+            self._late_followed = {m: t for m, t in self._late_followed.items() if t >= cut}
 
     def _model_picks(self) -> None:
         """The stronger model looks at each new coin at the ages it was trained on (predict.checkpoints_s); a coin at
