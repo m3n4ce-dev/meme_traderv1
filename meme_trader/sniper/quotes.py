@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import statistics
 import struct
 import threading
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from ..redact import describe, register, safe_error
 from . import pumpswap as ps
 
 AMM, FEE_PROGRAM = ps.PUMP_AMM_PROGRAM, "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
@@ -38,9 +40,14 @@ MAX_SLOT_LAG = 2                     # ... and its state is at most this many sl
 RETRY_EVERY_S, RETRY_S = 30, 900     # an exit with no valid quote: retried this often, for this long (registered)
 # refusals a retry can't change (a pool's quote asset, its mint's extensions, its layout, its accounts' owners):
 # final at once, not retried every 30 s for 15 minutes
-PERMANENT = {"non_sol_quote", "mint_extensions", "unsupported_layout", "wrong_owner", "vault_mismatch"}
+PERMANENT = {"non_sol_quote", "mint_extensions", "unsupported_layout", "wrong_owner", "vault_mismatch",
+             "vault_program_mismatch"}
 ENTRY_GRACE_S = 60                   # an entry quote is tried for this long after its decision, then skipped
 TX_COST_SOL = 0.001005               # one transaction's priority + base fee (the paper bot's), for net P&L
+# an attempt record's schema: 2 = qualification reasons, account hashes, the job clock (an eleventh review). A record
+# without a version (1) predates the qualification rules: its qualification is UNKNOWN, never assumed
+RECORD_VERSION = 2
+FRESHNESS_REF = "the feed's newest slot at confirmed"
 
 
 def _pda(seeds: list[bytes], program: str) -> str:
@@ -139,8 +146,8 @@ class Quoter:
     """Quotes `pool` for a buy of `amount` lamports or a sell of `amount` base atoms. `url()` gives the RPC URL (never
     recorded: only its host), `ref_slot()` the feed's newest slot at the same commitment (0 = unknown)."""
 
-    def __init__(self, url, ref_slot=lambda: 0, fetch=rpc_accounts, clock=time.time):
-        self.url, self.ref_slot, self.fetch, self.clock = url, ref_slot, fetch, clock
+    def __init__(self, url, ref_slot=lambda: 0, fetch=rpc_accounts, clock=time.time, code: str | None = None):
+        self.url, self.ref_slot, self.fetch, self.clock, self.code = url, ref_slot, fetch, clock, code
         self.static: dict[str, dict] = {}                # pool -> the accounts it pointed at when discovered
         self.global_config, self.fee_config = global_config_address(), fee_config_address()
 
@@ -161,10 +168,14 @@ class Quoter:
 
     def quote(self, pool: str, side: str, amount: int) -> dict:
         from urllib.parse import urlparse
-        rec = {"pool": pool, "side": side, "amount": str(amount), "requested_at": round(self.clock(), 3),
-               "commitment": COMMITMENT}
+        if self.code is None:
+            from .research import code_revision
+            self.code = code_revision()
+        rec = {"v": RECORD_VERSION, "code": self.code, "pool": pool, "side": side, "amount": str(amount),
+               "requested_at": round(self.clock(), 3), "commitment": COMMITMENT}
         try:
             url = self.url()
+            register(url)                                # its key is redacted wherever an error text carries it
             rec["host"] = urlparse(url).hostname or ""
             st = self.static.get(pool) or self._discover(pool)
             if st["quote_mint"] != ps.WSOL:
@@ -176,10 +187,14 @@ class Quoter:
             rec["responded_at"] = round(self.clock(), 3)
             rec["response_s"] = round(rec["responded_at"] - t0, 3)
             rec["context_slot"], rec["ref_slot"] = slot, int(self.ref_slot() or 0)
+            rec["ref"] = FRESHNESS_REF
             names = ("pool", "base_vault", "quote_vault", "base_mint", "global_config", "fee_config")
             missing = [n for n, a in zip(names, accs) if a is None]
             if missing:
                 raise Reject("missing_account", ",".join(missing))
+            import hashlib                               # what was priced, reproducibly: each account's hash
+            rec["accounts"] = {n: {"address": k, "owner": a[0], "bytes": len(a[1]),
+                                   "sha256": hashlib.sha256(a[1]).hexdigest()} for n, k, a in zip(names, keys, accs)}
             (po, pd), (bo, bd), (qo, qd), (mo, md), (go, gd), (fo, fd) = accs
             if po != AMM or go != AMM or fo != FEE_PROGRAM:
                 raise Reject("wrong_owner", "pool or config")
@@ -198,6 +213,9 @@ class Quoter:
                 mint = ps.decode_mint(md, mo)
             except ps.QuoteError as ex:
                 raise Reject("mint_extensions" if "extension" in str(ex) else "unsupported_layout", str(ex)) from None
+            if bo != mo or qo != ps.TOKEN_PROGRAM:       # a token account belongs to its mint's program (WSOL: Token)
+                raise Reject("vault_program_mismatch", "a vault's token program isn't its mint's")
+            rec.update(mint_supply=str(mint["supply"]), mint_decimals=mint["decimals"], mint_program=mo)
             g, fc = decode_global_config(gd), decode_fee_config(fd)
             if g["disable_flags"] & (0b1000 if side == "buy" else 0b10000):
                 raise Reject("trading_disabled", side)
@@ -219,9 +237,14 @@ class Quoter:
                     {"state": "invalid_state", "output": "unexecutable_output"}.get(ex.code, "quote_error")
                 raise Reject(code, str(ex)) from None
             rec["output"] = str(out["base"] if side == "buy" else out["uiQuote"])
-            # qualified: the whole account is documented. A pool with undocumented bytes past the known prefix is
-            # quoted from that prefix and labelled - its layout risk stays explicit (a tenth review)
-            rec.update(qualified=not p["undocumented_tail"], layout=p["layout"], tail_sha256=p["tail_sha256"])
+            if side == "buy":
+                rec["round_trip"] = _round_trip(int(amount), out, base["amount"], quote["amount"], fees, p)
+            # qualified: the whole account is documented (a pool with undocumented bytes past the known prefix is
+            # quoted from that prefix and labelled - its layout risk stays explicit, a tenth review), AND its
+            # freshness was checked against a reference (no reference is no evidence of freshness, an eleventh)
+            unq = (["undocumented_pool_bytes"] if p["undocumented_tail"] else []) + \
+                ([] if rec["ref_slot"] else ["no_freshness_reference"])
+            rec.update(qualified=not unq, unqualified=unq, layout=p["layout"], tail_sha256=p["tail_sha256"])
             if rec["response_s"] > MAX_RESPONSE_S:
                 raise Reject("slow_response", f"{rec['response_s']} s")
             if rec["ref_slot"] and slot < rec["ref_slot"] - MAX_SLOT_LAG:
@@ -230,12 +253,68 @@ class Quoter:
         except Reject as ex:
             rec["reason"], rec["detail"] = ex.reason, ex.detail[:200]
         except Exception as ex:                          # the RPC itself: timeouts, HTTP errors, malformed answers
-            rec["reason"] = "timeout" if "imeout" in type(ex).__name__ else "rpc_error"
-            rec["detail"] = f"{type(ex).__name__}: {str(ex)[:160]}"
+            # never the exception's own text: an HTTP error's message is its whole request URL, key included
+            rec["error"] = safe_error(ex)
+            rec["reason"] = "timeout" if "imeout" in rec["error"]["error"] else "rpc_error"
+            rec["detail"] = describe(ex)
+        rec["finished_at"] = round(self.clock(), 3)      # when this quote (or its refusal) was in hand
         return rec
 
 
+def _round_trip(lamports: int, bought: dict, base_reserve: int, quote_vault: int, fees: dict, p: dict) -> dict:
+    """The tokens just bought, sold back at once into the pool as our own buy would leave it (our SOL less the
+    protocol and creator fees enters the quote vault - the LP fee stays in the pool - and the tokens leave the base
+    vault; the same fee tier; no other trader, no network fee): the round-trip cost of this size at this state.
+    MODELLED from the quote's own state, not a second read."""
+    eff = bought["internalQuoteWithoutFees"]
+    try:
+        back = ps.sell_base_input(bought["base"], 0, base_reserve - bought["base"],
+                                  quote_vault + eff + ps.fee(eff, fees["lp"]), fees, p["virtual_quote_reserves"],
+                                  p["coin_creator"])["uiQuote"]
+    except ps.QuoteError as ex:
+        return {"lamports_back": None, "why": ex.code}
+    return {"lamports_back": str(back), "pct": round(100 * (back / lamports - 1), 3),
+            "model": "post-buy state, same fee tier, no network fee"}
+
+
 # --------------------------------------------------------------------------- the schedule and its record
+TALLIES = ("first_try_raw_ok", "first_try_qualified_ok", "eventual_raw_ok", "eventual_qualified_ok")
+OK_LABEL = {"qualified": "ok (qualified)", "prefix-only": "ok, prefix-only (undocumented pool bytes)",
+            "unqualified": "ok, unqualified (see the attempt's reasons)",
+            "unknown": "ok, qualification unknown (a record from before the rules)"}
+
+
+def qualification(r: dict) -> str:
+    """A successful quote record's population: qualified; prefix-only (undocumented pool bytes only); unqualified
+    (another reason, e.g. no freshness reference); or unknown (a record from before qualification was recorded -
+    missing is unknown, not true)."""
+    if r.get("v", 1) < 2 or "qualified" not in r:
+        return "unknown"
+    if r["qualified"] is True:
+        return "qualified"
+    return "prefix-only" if r.get("unqualified") == ["undocumented_pool_bytes"] else "unqualified"
+
+
+def _pair(m: dict, amount, due, qual: str, entries: dict) -> str:
+    """A round trip's population: qualified only if its entry is found, both ends are qualified, and they match -
+    the exit sells what the entry bought, the stake is the entry's, the exit fell due its hold after the entry was
+    in hand. Otherwise the worse end's label (unknown < unqualified < prefix-only), or unknown with no entry."""
+    e = entries.get(m.get("follow"))
+    if e is None:
+        return "unknown"
+    er, eamount, equal = e
+    hold = (m.get("holds") or {}).get(m.get("exit"))
+    entry_at = (er.get("job") or {}).get("usable_at") or er.get("responded_at")
+    matched = str(amount) == str(er.get("output")) and str(m.get("entry_lamports")) == str(eamount) and \
+        (hold is None or entry_at is None or abs(float(due) - (float(entry_at) + float(hold))) < 0.01)
+    if not matched:
+        return "unknown"
+    for label in ("unknown", "unqualified", "prefix-only"):
+        if label in (qual, equal):
+            return label
+    return "qualified"
+
+
 class QuoteBook:
     """Quote jobs and every attempt, in SQLite (data/quotes.db). A job: a key, a pool, buy/sell, an amount, when it's
     due and until when it may be retried. An entry job that succeeds creates its exit jobs (one per hold), each due
@@ -276,13 +355,18 @@ class QuoteBook:
 
     def due(self, now: float, limit: int = 20) -> list[tuple]:
         with self.lock:
-            return self.db.execute("SELECT id, kind, pool, side, amount, deadline, tries, meta FROM jobs WHERE "
+            return self.db.execute("SELECT id, kind, pool, side, amount, due, deadline, tries, meta FROM jobs WHERE "
                                    "state = 'pending' AND due <= ? ORDER BY due LIMIT ?", (now, limit)).fetchall()
 
     def run(self, now: float | None = None, limit: int = 20) -> int:
-        """Run the due jobs (blocking: call it off the event loop). Returns how many were attempted."""
+        """Run the due jobs (blocking: call it off the event loop). Returns how many were attempted.
+
+        The clock (an eleventh review): a job is attempted only before its deadline, and its quote counts only if it
+        was IN HAND by the deadline - `usable_at` (when the read was validated and priced) <= deadline, inclusive.
+        A quote that arrives later is kept as an attempt but never accepted, and never re-timed into the window: a
+        late entry is skipped, a late exit unmeasured (`late_response`). Every attempt is persisted, ok or not."""
         jobs = self.due(self.clock() if now is None else now, limit)
-        for key, kind, pool, side, amount, deadline, tries, meta in jobs:
+        for key, kind, pool, side, amount, due, deadline, tries, meta in jobs:
             meta = json.loads(meta or "{}")
             t = self.clock()
             if t > deadline:                             # missed (the process was down, or a backlog): never quoted late
@@ -291,76 +375,122 @@ class QuoteBook:
                                  {"reason": "missed", "detail": "past its deadline when run"})
                 continue
             rec = self.quoter.quote(pool, side, int(amount))     # (the RPC call: outside the lock)
-            self.lock.acquire()
-            self.db.execute("BEGIN IMMEDIATE")
-            try:
-                self.db.execute("INSERT OR REPLACE INTO attempts (job, n, rec) VALUES (?, ?, ?)",
-                                (key, tries + 1, json.dumps(rec)))
-                if rec["reason"] == "ok":
-                    self.db.execute("UPDATE jobs SET state = 'ok', tries = ?, result = ? WHERE id = ?",
-                                    (tries + 1, json.dumps(rec), key))
-                    if kind == "entry":
-                        for name, hold in (meta.get("holds") or {}).items():
-                            at = rec["responded_at"] + hold
-                            self.db.execute("INSERT OR IGNORE INTO jobs (id, kind, pool, side, amount, due, deadline, "
-                                            "state, meta, created) VALUES (?, 'exit', ?, 'sell', ?, ?, ?, 'pending', ?, ?)",
-                                            (f"{meta['follow']}|{name}", pool, rec["output"], at, at + RETRY_S,
-                                             json.dumps({**meta, "exit": name, "entry_lamports": str(amount)}), t))
-                else:
-                    nxt = t + (RETRY_EVERY_S if kind == "exit" else 10)
-                    if nxt <= deadline and rec["reason"] not in PERMANENT:
-                        self.db.execute("UPDATE jobs SET due = ?, tries = ? WHERE id = ?", (nxt, tries + 1, key))
-                    else:
+            usable = float(rec.get("finished_at") or self.clock())
+            rec["job"] = {"due": due, "deadline": deadline, "started_at": round(t, 3), "usable_at": round(usable, 3),
+                          "overrun_s": round(max(0.0, usable - deadline), 3)}
+            on_time = usable <= deadline
+            final = "unmeasured" if kind == "exit" else "skipped"
+            with self.lock:                              # released on every path, a failed BEGIN's included
+                began = False
+                try:
+                    self.db.execute("BEGIN IMMEDIATE")
+                    began = True
+                    self.db.execute("INSERT INTO attempts (job, n, rec) VALUES (?, ?, ?)",     # (never overwritten)
+                                    (key, tries + 1, json.dumps(rec)))
+                    if rec["reason"] == "ok" and on_time:
+                        self.db.execute("UPDATE jobs SET state = 'ok', tries = ?, result = ? WHERE id = ?",
+                                        (tries + 1, json.dumps(rec), key))
+                        if kind == "entry":
+                            for name, hold in (meta.get("holds") or {}).items():
+                                at = usable + hold
+                                self.db.execute("INSERT OR IGNORE INTO jobs (id, kind, pool, side, amount, due, "
+                                                "deadline, state, meta, created) VALUES (?, 'exit', ?, 'sell', ?, ?, ?, "
+                                                "'pending', ?, ?)",
+                                                (f"{meta['follow']}|{name}", pool, rec["output"], at, at + RETRY_S,
+                                                 json.dumps({**meta, "exit": name, "entry_lamports": str(amount)}), t))
+                    elif rec["reason"] == "ok":              # a valid quote, but in hand after the window closed
+                        late = {"reason": "late_response", "detail": f"in hand {rec['job']['overrun_s']} s after the "
+                                f"deadline", "raw_reason": "ok", "raw_output": rec.get("output"), "job": rec["job"],
+                                "v": RECORD_VERSION}
                         self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
-                                        ("unmeasured" if kind == "exit" else "skipped", tries + 1, json.dumps(rec), key))
-                self.db.execute("COMMIT")
-            except BaseException:
-                self.db.execute("ROLLBACK")
-                raise
-            finally:
-                self.lock.release()
+                                        (final, tries + 1, json.dumps(late), key))
+                    else:
+                        nxt = usable + (RETRY_EVERY_S if kind == "exit" else 10)
+                        if nxt <= deadline and rec["reason"] not in PERMANENT:
+                            self.db.execute("UPDATE jobs SET due = ?, tries = ? WHERE id = ?", (nxt, tries + 1, key))
+                        else:
+                            self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
+                                            (final, tries + 1, json.dumps(rec), key))
+                    self.db.execute("COMMIT")
+                except BaseException:
+                    if began:
+                        try:
+                            self.db.execute("ROLLBACK")
+                        except sqlite3.Error:            # (the original failure is the one that matters)
+                            pass
+                    raise
         return len(jobs)
 
     def _finish(self, key: str, state: str, rec: dict) -> None:
         self.db.execute("UPDATE jobs SET state = ?, result = ? WHERE id = ?", (state, json.dumps(rec), key))
 
     def view(self, max_age_s: float = 30) -> dict:
-        """Coverage by job kind and arm (first try, eventually, by reason), and quote-priced net P&L per variant."""
+        """Coverage by job kind and arm, and quote-priced net P&L - with raw and qualified results kept apart.
+
+        Coverage counts each finished job's outcome: `ok (qualified)`, `ok, prefix-only` (undocumented pool bytes),
+        `ok, unqualified: <reasons>`, `ok, qualification unknown` (a record from before the qualification rules -
+        unknown, never assumed), or `<state>: <reason>`; and first-try / eventual successes, raw and qualified.
+        P&L pairs each exit with its follow's entry: a QUALIFIED round trip needs both ends qualified and matched (the
+        exit sells what the entry bought, for the entry's stake, on the entry's clock). Every other row is labelled
+        with its population (prefix-only, unqualified, unknown) and never pooled with the qualified one."""
         if self._view is not None and self.clock() - self._view_at < max_age_s:
             return self._view
         with self.lock:
-            rows = self.db.execute("SELECT id, kind, state, tries, result, meta FROM jobs WHERE state != 'pending'"
-                                   ).fetchall()
+            rows = self.db.execute("SELECT id, kind, state, tries, amount, due, result, meta FROM jobs "
+                                   "WHERE state != 'pending'").fetchall()
             pending = self.db.execute("SELECT COUNT(*) FROM jobs WHERE state = 'pending'").fetchone()[0]
         cov: dict = defaultdict(Counter)
-        first_ok: Counter = Counter()
-        pnl: dict = defaultdict(list)
-        entries = {}
-        for key, kind, state, tries, result, meta in rows:
+        tally: dict = defaultdict(Counter)
+        entries, exits = {}, []
+        for key, kind, state, tries, amount, due, result, meta in rows:
             m, r = json.loads(meta or "{}"), json.loads(result or "{}")
             arm = "control" if m.get("control") else "signal"
-            label = f"{state}: {r.get('reason', '?')}" if state != "ok" else \
-                "ok" if r.get("qualified", True) else "ok, prefix-only (undocumented pool bytes)"
-            cov[(kind, arm)][label] += 1
-            first_ok[(kind, arm)] += state == "ok" and tries == 1
+            qual = qualification(r) if state == "ok" else None
+            cov[(kind, arm)][OK_LABEL[qual] if qual else f"{state}: {r.get('reason', '?')}"] += 1
+            t = tally[(kind, arm)]
+            if state == "ok":
+                t["eventual_raw_ok"] += 1
+                t["eventual_qualified_ok"] += qual == "qualified"
+                t["first_try_raw_ok"] += tries == 1
+                t["first_try_qualified_ok"] += tries == 1 and qual == "qualified"
             if kind == "entry" and state == "ok":
-                entries[m.get("follow")] = r
+                entries[m.get("follow")] = (r, amount, qual)
             if kind == "exit" and state == "ok":
-                cost = int(m.get("entry_lamports", 0)) / 1e9
-                got = int(r.get("output", 0)) / 1e9
-                if cost > 0:
-                    net = (got - TX_COST_SOL) / (cost + TX_COST_SOL) - 1      # each transaction's network fee
-                    pnl[(m.get("rule", ""), m.get("delay"), m.get("exit"), arm)].append(net * 100)
-        out_cov = {f"{k[0]} / {k[1]}": {"done": sum(v.values()), "first_try_ok": first_ok[k], **dict(v)}
+                exits.append((m, r, amount, due, qual, arm))
+        pnl: dict = defaultdict(list)
+        for m, r, amount, due, qual, arm in exits:
+            cost = int(m.get("entry_lamports", 0)) / 1e9
+            if cost <= 0:
+                continue
+            got = int(r.get("output", 0)) / 1e9
+            net = (got - TX_COST_SOL) / (cost + TX_COST_SOL) - 1      # each transaction's network fee
+            pnl[(m.get("rule", ""), m.get("delay"), m.get("exit"), arm, _pair(m, amount, due, qual, entries))
+                ].append(net * 100)
+        out_cov = {f"{k[0]} / {k[1]}": {"done": sum(v.values()), **{n: tally[k][n] for n in TALLIES}, **dict(v)}
                    for k, v in sorted(cov.items())}
-        out_pnl = [{"rule": k[0], "delay_s": k[1], "exit": k[2], "arm": k[3], "n": len(xs),
-                    "mean_pct": round(sum(xs) / len(xs), 2), "median_pct": round(sorted(xs)[len(xs) // 2], 2)}
+        out_pnl = [{"rule": k[0], "delay_s": k[1], "exit": k[2], "arm": k[3], "qualification": k[4],
+                    "qualified": k[4] == "qualified", "n": len(xs), "mean_pct": round(statistics.fmean(xs), 2),
+                    "median_pct": round(statistics.median(xs), 2)}
                    for k, xs in sorted(pnl.items(), key=lambda kv: tuple(str(x) for x in kv[0]))]
-        self._view = {"coverage": out_cov, "quote_pnl": out_pnl, "pending": pending,
-                      "note": "quotes are not fills; exploratory (the revival forward test's follows), not a declared "
-                              "qualification window"}
+        self._view = {"coverage": out_cov, "quote_pnl": out_pnl, "pending": pending, "record_version": RECORD_VERSION,
+                      "note": "quotes are not fills; raw-math success and qualified success are counted apart; "
+                              "exploratory (the revival forward test's follows), not a declared qualification window"}
         self._view_at = self.clock()
         return self._view
+
+    def jobs(self) -> list[dict]:
+        """Every job and its outcome - including those that finished with no attempt (missed) - for the package."""
+        with self.lock:
+            rows = self.db.execute("SELECT id, kind, pool, side, amount, due, deadline, state, tries, result, meta, "
+                                   "created FROM jobs ORDER BY created, id").fetchall()
+        out = []
+        for key, kind, pool, side, amount, due, deadline, state, tries, result, meta, created in rows:
+            r, m = json.loads(result or "{}"), json.loads(meta or "{}")
+            out.append({"job": key, "kind": kind, "pool": pool, "side": side, "amount": amount, "due": due,
+                        "deadline": deadline, "created": created, "state": state, "tries": tries,
+                        "reason": r.get("reason"), "qualification": qualification(r) if state == "ok" else None,
+                        **{x: y for x, y in m.items() if x != "holds"}})
+        return out
 
     def attempts(self) -> list[dict]:
         """Every attempt, for the review package (pool addresses and amounts are public chain data)."""

@@ -530,6 +530,8 @@ def _calls(args) -> None:
 
 
 def main() -> None:
+    from ..redact import install
+    install()                                            # every log record redacted (keyed URLs in error texts)
     ap = argparse.ArgumentParser(prog="meme_trader.sniper")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")

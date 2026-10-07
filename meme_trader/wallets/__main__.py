@@ -63,6 +63,8 @@ def main(argv=None) -> None:
     a = ap.parse_args(argv)
     if a.cmd == "record":
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+        from ..redact import install
+        install()
         cfg = config.load().wallets
         asyncio.run(Recorder(cfg).run())
         return

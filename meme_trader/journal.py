@@ -6,6 +6,7 @@ import json
 import logging
 import time
 
+from . import redact
 from .config import ROOT
 
 DATA = ROOT / "data"
@@ -20,8 +21,8 @@ def _default(o):
 
 def record(agent: str, event: str, **fields) -> None:
     DATA.mkdir(exist_ok=True)
-    entry = {"ts": time.time(), "agent": agent, "event": event, **fields}
+    entry = redact.clean({"ts": time.time(), "agent": agent, "event": event, **fields})   # (no credential in a file)
     path = DATA / f"journal-{time.strftime('%Y-%m-%d', time.gmtime())}.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(entry, default=_default) + "\n")
-    log.info("%-8s %-14s %s", agent, event, {k: v for k, v in fields.items() if k != "raw"})
+    log.info("%-8s %-14s %s", agent, event, {k: v for k, v in entry.items() if k not in ("raw", "ts", "agent", "event")})

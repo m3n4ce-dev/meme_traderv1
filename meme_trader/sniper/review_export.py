@@ -30,6 +30,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..config import ROOT
+from ..redact import secret_pieces
 
 B58 = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])")
 WALLET_FIELDS = {"leader", "creator", "trader", "wallet", "funder", "owner", "user", "dev", "buyer", "seller", "caller"}
@@ -474,6 +475,11 @@ class Export:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
         self._note("quote_attempts.jsonl", rows=len(rows))
+        jobs = qb.jobs()                                 # every job's outcome, those with no attempt included
+        with open(self.out / "quote_jobs.jsonl", "w") as f:
+            for r in jobs:
+                f.write(json.dumps(r) + "\n")
+        self._note("quote_jobs.jsonl", rows=len(jobs))
 
     def fork_conflicts(self) -> None:
         """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict by a stable id, matched
@@ -709,6 +715,7 @@ def secret_values(root: Path) -> list[str]:
                 v = line.split("=", 1)[1].strip().strip("'\"")
                 if len(v) >= 12:
                     out.append(v)
+                out += sorted(secret_pieces(v))                # a URL's key pieces too: code rewrites URLs (wss -> https)
     return out
 
 

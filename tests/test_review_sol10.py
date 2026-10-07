@@ -217,14 +217,19 @@ def test_negative_virtual_reserves_and_inverse_sells_through_the_checked_layer()
 
 
 # --------------------------------------------------------------------------- R10-5: the after-exit horizon
-def mark(price, known=True):
-    return SimpleNamespace(price_known=known, curve=SimpleNamespace(price=price))
+def mark(price, known=True, at=None):
+    """A coin whose accepted price is `price`; `at` = when it was received (default: the tick that reads it - a new
+    observation each tick). An eleventh review: freshness is the price's source time, not the tick's."""
+    return SimpleNamespace(price_known=known, curve=SimpleNamespace(price=price), _at=at)
 
 
 def after(ticks, tmp_path):
     lab = ExitLab(tmp_path / "lab.jsonl", 1.75)
     lab.start(M, "T", "late", 1.0, 0, P.sniper, only=("all out at +10% net",), stake_sol=0.25)
-    for t, m in [(5, mark(1.2))] + ticks:
+    for i, (t, m) in enumerate([(5, mark(1.2))] + ticks):
+        if m is not None:
+            at = t if m._at is None else m._at
+            m.mark = {"at": at, "seq": at, "chain_ts": at - 1} if m.price_known else {}
         lab.tick({M: m} if m is not None else {}, t, P.sniper)
     return next(json.loads(x) for x in (tmp_path / "lab.jsonl").read_text().splitlines() if "after_exit" in x)
 
@@ -280,3 +285,21 @@ def test_the_late_share_is_of_executed_exits_and_both_arms_are_counted():
     assert out["late_fill_share"] == pytest.approx(a["late_exits"] / a["executed_exits"])
     assert set(out["arms"]) == {"signal", "control"} and a["attempted"] == a["measured"] + a["impaired"]
     assert a["signals"] == a["no_entry_quote"] + a["attempted"] + sum(a["skipped"].values())
+
+
+def test_an_eleventh_review_a_carried_price_reread_is_not_fresh_and_not_a_new_observation(tmp_path):
+    """The price received at 5 and re-read at 1799 and 1800: its age at the horizon is 1795 s, not 0 - the end is
+    unmeasured (stale), and it's one observation, not three. A new price received at 1790 is fresh."""
+    old = mark(1.3, at=5)
+    stale = after([(1799, old), (1800, old)], tmp_path / "a")
+    assert stale["end_after_pct"] is None and "stale" in stale["missing_reason"] and stale["end_price_age_s"] == 1795
+    assert stale["observations"] == 1 and stale["freshness_rule"].startswith("receipt age")
+    fresh = after([(1799, mark(1.3, at=1790)), (1800, mark(1.3, at=1790))], tmp_path / "b")
+    assert fresh["followed_to_end"] and fresh["end_price_age_s"] == 10 and fresh["end_price_chain_age_s"] == 11
+    no_provenance = SimpleNamespace(price_known=True, curve=SimpleNamespace(price=1.4))      # no mark at all
+    lab = ExitLab(tmp_path / "c.jsonl", 1.75)
+    lab.start(M, "T", "late", 1.0, 0, P.sniper, only=("all out at +10% net",), stake_sol=0.25)
+    for t in (5, 1799, 1800):
+        lab.tick({M: no_provenance}, t, P.sniper)
+    r = next(json.loads(x) for x in (tmp_path / "c.jsonl").read_text().splitlines() if "after_exit" in x)
+    assert not r["followed_to_end"] and r["end_after_pct"] is None and r["observations"] == 0 and r["unknown_observations"] == 2

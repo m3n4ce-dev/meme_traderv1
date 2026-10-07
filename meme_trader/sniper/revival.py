@@ -247,7 +247,7 @@ class Revival:
         for line in chunk[start:end].split(b"\n"):
             r = self._row(line)
             if r:
-                self._remember(*r)
+                self._remember(*r[:6])
 
     def _read(self, max_bytes: int, seen: float) -> int:
         try:
@@ -283,7 +283,7 @@ class Revival:
             t, px, sol = float(r["t"]), float(r["px"]), float(r["sol"])
         except (ValueError, KeyError, TypeError):
             return None
-        return (r["pool"], t, px, sol, r.get("sym"), r.get("mint")) if px > 0 and sol > 0 else None
+        return (r["pool"], t, px, sol, r.get("sym"), r.get("mint"), r.get("rx")) if px > 0 and sol > 0 else None
 
     def _load_liq(self, now: float) -> None:
         if now - self.liq_at < 600:
@@ -317,7 +317,8 @@ class Revival:
             q.popleft()
         return q
 
-    def on_trade(self, pool: str, t: float, px: float, sol: float, sym=None, mint=None, seen: float | None = None) -> None:
+    def on_trade(self, pool: str, t: float, px: float, sol: float, sym=None, mint=None, rx=None,
+                 seen: float | None = None) -> None:
         seen = t if seen is None else max(seen, t)
         self.lags.append(seen - t)
         q = self._remember(pool, t, px, sol, sym, mint)
@@ -339,20 +340,21 @@ class Revival:
             key = f"{pool}|{name}"
             if ret5 >= need and surge >= vol and t - self.fired.get(key, -1e18) >= COOLDOWN_S:
                 self.fired[key] = t
-                self._open(pool, name, t, seen, ret5, surge, control=False)
+                self._open(pool, name, t, seen, ret5, surge, control=False, rx=rx)
                 twin = self._control_pool(pool, t)
                 if twin:
-                    self._open(twin, name, t, seen, None, None, control=True)
+                    self._open(twin, name, t, seen, None, None, control=True, rx=rx)
                 self._dirty = True
 
-    def _open(self, pool: str, rule: str, t: float, seen: float, ret5, surge, control: bool) -> None:
+    def _open(self, pool: str, rule: str, t: float, seen: float, ret5, surge, control: bool, rx=None) -> None:
         cost, how = self._cost(pool, t)
         sym, mint = self.meta.get(pool, (None, None))
         for d in DELAYS:
             fid = f"{pool}|{rule}|{t:.0f}|{d}|{'c' if control else 's'}"
             self.open.setdefault(pool, []).append({
                 "id": fid, "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
-                "signal_t": t, "decided_at": seen, "lag_s": round(seen - t, 1), "ret5": ret5 and round(ret5, 3),
+                "signal_t": t, "signal_rx": rx, "decided_at": seen, "lag_s": round(seen - t, 1),
+                "ret5": ret5 and round(ret5, 3),
                 "surge": surge and round(surge, 1), "cost": round(cost, 4), "cost_how": how, "exits": {}})
             if self.quotes is not None:                # the same follow, priced by live quotes (time exits only)
                 from .quotes import ENTRY_GRACE_S
@@ -360,6 +362,7 @@ class Revival:
                 self.quotes.request(f"{fid}|entry", "entry", pool, "buy", int(ORDER_SOL * 1e9), due,
                                     due + ENTRY_GRACE_S,
                                     {"follow": fid, "rule": rule, "delay": d, "control": control, "mint": mint,
+                                     "signal_t": t, "signal_rx": rx, "decided_at": seen,     # the pipeline's clock
                                      "holds": {name: hold for name, (stop, hold) in EXITS.items() if stop is None}})
 
     def _control_pool(self, pool: str, t: float) -> str:
@@ -413,7 +416,8 @@ class Revival:
         if (f.get("id"), name) in self.done_keys:       # already committed (a restart replayed it): once only
             return
         row = {"id": f.get("id") or f"{f['pool']}|{f['rule']}|{f['signal_t']:.0f}|{f['delay']}|{'c' if f.get('control') else 's'}",
-               "closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
+               "closed": t, "signal_t": f["signal_t"], "signal_rx": f.get("signal_rx"), "decided_at": f.get("decided_at"),
+               "lag_s": f.get("lag_s"),
                "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"], "rule": f["rule"], "delay": f["delay"],
                "control": f.get("control", False), "exit": name, "why": x.get("why", ""), "pnl_pct": x.get("pnl"),
                "censored": bool(x.get("censored")), "mark_pct": x.get("mark"), "cost": f.get("cost"),
