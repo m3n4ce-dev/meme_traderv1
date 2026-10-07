@@ -1,4 +1,8 @@
-"""How many days a prospective T9-E1 test needs (a fifth review, 2026-10-07: "simulate uncertainty/power under several
+"""SUPERSEDED by power_t9_e1.py (a sixth review, 2026-10-07): this models one gate on independent trades, not the
+registered procedure, and its winner sizes are NET returns (`winner_net`: 3.0 = +300%, proceeds 4x the cost) - the
+first proposal misread 6.0 as "+500%".
+
+How many days a prospective T9-E1 test needs (a fifth review, 2026-10-07: "simulate uncertainty/power under several
 plausible rare-winner frequencies and magnitudes" before registering).
 
     python research/power_t9.py [--sims 400] [--boots 500] [--json out.json]      (needs numpy)
@@ -25,7 +29,7 @@ SIGMA = math.sqrt(2 * math.log(BASE_MEAN / BASE_MEDIAN))
 MU = math.log(BASE_MEDIAN)
 
 
-def simulate(rng, days: int, per_day: float, p: float, mult: float, extra_cost: float, sims: int, boots: int):
+def simulate(rng, days: int, per_day: float, p: float, win_net: float, extra_cost: float, sims: int, boots: int):
     n = rng.poisson(per_day, size=(sims, days))
     daily = np.zeros((sims, days))
     top_share = np.zeros(sims)
@@ -33,7 +37,7 @@ def simulate(rng, days: int, per_day: float, p: float, mult: float, extra_cost: 
         k = int(n[s].sum())
         r = np.exp(rng.normal(MU, SIGMA, k)) - 1 - extra_cost
         win = rng.random(k) < p
-        r[win] = mult - extra_cost
+        r[win] = win_net - extra_cost                  # a NET return: +win_net x the cost
         pnl = r * SIZE
         day = np.repeat(np.arange(days), n[s])
         daily[s] = np.bincount(day, weights=pnl, minlength=days)
@@ -58,21 +62,21 @@ def main(argv=None) -> int:
     base_mean = BASE_MEAN - 1
     rows = []
     for per_day in (10, 25):
-        for mult in (3.0, 6.0, 9.0):
-            null_p = -base_mean / (mult - base_mean)    # expected return exactly zero
+        for win_net in (3.0, 6.0, 9.0):
+            null_p = -base_mean / (win_net - base_mean)    # expected return exactly zero
             for p in (null_p, 0.005, 0.01, 0.02):
                 for extra in (0.0, 0.015):
-                    ev = (1 - p) * (base_mean - extra) + p * (mult - extra)
+                    ev = (1 - p) * (base_mean - extra) + p * (win_net - extra)
                     for days in (28, 60, 120):
-                        r = simulate(rng, days, per_day, p, mult, extra, a.sims, a.boots)
-                        rows.append({"trades_per_day": per_day, "winner_x": mult, "winner_p": round(p, 4),
+                        r = simulate(rng, days, per_day, p, win_net, extra, a.sims, a.boots)
+                        rows.append({"trades_per_day": per_day, "winner_net": win_net, "winner_p": round(p, 4),
                                      "null": p == null_p, "extra_cost": extra, "ev_per_trade_pct": round(ev * 100, 2),
                                      "days": days, **r})
-    print(f"{'trades/d':>8} {'win':>5} {'p':>7} {'cost+':>6} {'EV/trade':>9} {'days':>5} {'pass':>6} {'P(tot>0)':>9} "
+    print(f"{'trades/d':>8} {'win net':>7} {'p':>7} {'cost+':>6} {'EV/trade':>9} {'days':>5} {'pass':>6} {'P(tot>0)':>9} "
           f"{'median SOL':>10} {'p10 SOL':>8} {'top share':>9}")
     for r in rows:
         tag = " (null)" if r["null"] else ""
-        print(f"{r['trades_per_day']:>8} {r['winner_x']:>4.0f}x {r['winner_p']:>7.4f} {r['extra_cost']:>6.3f} "
+        print(f"{r['trades_per_day']:>8} {100 * r['winner_net']:>+6.0f}% {r['winner_p']:>7.4f} {r['extra_cost']:>6.3f} "
               f"{r['ev_per_trade_pct']:>8.2f}% {r['days']:>5} {r['pass']:>6.2f} {r['p_total_positive']:>9.2f} "
               f"{r['median_total_sol']:>10} {r['p10_total_sol']:>8} {str(r['median_top_trade_share']):>9}{tag}")
     if a.json:

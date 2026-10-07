@@ -1893,24 +1893,46 @@ class Engine:
         if r:
             self.stats["fork_" + r] += 1
 
+    def _fork_rpc(self) -> tuple[str, str]:
+        """Where to ask about fork copies: the feed's own provider over HTTP (it delivered them, and RPC Fast is a flat
+        rate), else SOLANA_RPC_URL. (url, host): only the host is ever recorded - URLs can carry keys."""
+        import os
+        from urllib.parse import urlparse
+        ws = str((self.p.get("feed") or {}).get("ws_url") or os.environ.get("SOLANA_WS_URL") or "")
+        if ws.startswith("wss://"):
+            url = "https://" + ws[len("wss://"):]
+        elif ws.startswith("ws://"):
+            url = "http://" + ws[len("ws://"):]
+        else:
+            from ..wallet import RPC_URL as url
+        return url, urlparse(url).hostname or ""
+
+    @staticmethod
+    def _status_lookup(url: str, sigs: list) -> list:
+        import httpx
+        r = httpx.post(url, timeout=10, json={"jsonrpc": "2.0", "id": 1, "method": "getSignatureStatuses",
+                                              "params": [sigs, {"searchTransactionHistory": True}]})
+        r.raise_for_status()
+        d = r.json()
+        if "error" in d:
+            raise RuntimeError(f"getSignatureStatuses: {d['error']}")
+        return d["result"]["value"]
+
     async def _reconcile_forks(self) -> None:
         """Ask the chain which slot each conflicting event's transaction landed in (getSignatureStatuses, up to 256
         a call). The answer becomes a recorded Reconcile event, applied like any other. Not found in FORK_GIVE_UP_S:
         recorded as unresolvable - the coin stays flagged, never reported clean."""
         self._fork_busy = True
         try:
-            from urllib.parse import urlparse
-
-            from ..wallet import RPC_URL, rpc
+            url, host = self._fork_rpc()
             items = list(self.fork_pending.items())[:256]
             try:
-                res = await asyncio.to_thread(rpc, "getSignatureStatuses",
-                                              [[k[0] for k, _ in items], {"searchTransactionHistory": True}])
-                vals = res["value"]
+                vals = await asyncio.to_thread(self._status_lookup, url, [k[0] for k, _ in items])
             except Exception:
                 self.stats["fork_lookup_errors"] += 1
                 return
-            src = f"getSignatureStatuses@{urlparse(RPC_URL).hostname or ''}"
+            self.stats["fork_lookups"] += 1
+            src = f"getSignatureStatuses@{host}"
             now = self.feed.now()
             for (k, info), st in zip(items, vals):
                 if st and st.get("slot") and st.get("confirmationStatus") in ("confirmed", "finalized"):
@@ -2573,7 +2595,12 @@ class Engine:
         return {"x_reads_today": self._x_day[1] if self._x_day[0] == day else 0,
                 "x_per_day": int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)),
                 "x_links_cached": len(self._x_cache), "graduated": self.gradlog.view() if self.gradlog else None,
-                "mayhem_reads": {**self.mayhem_reads, "queued": len(self._mayhem_q)}}
+                "mayhem_reads": {**self.mayhem_reads, "queued": len(self._mayhem_q)},
+                "forks": {"conflicts": self.stats["fork_conflicts"], "kept": self.stats["fork_kept"],
+                          "replaced": self.stats["fork_replaced"], "unresolvable": self.stats["fork_unresolvable"],
+                          "pending": len(self.fork_pending), "lookup_errors": self.stats["fork_lookup_errors"],
+                          "entries_held": self.stats["skipped_fork_conflict_unresolved"] +
+                          self.stats["skipped_fork_conflict"]}}
 
     def narrative_context(self, s) -> dict:
         """What the narrative persona reads on top of the snapshot: the coin's own story (its description and the

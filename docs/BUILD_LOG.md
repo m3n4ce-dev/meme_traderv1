@@ -4,6 +4,39 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #69: The fork repair asks the feed's own provider; T9-E1 draft 2 with the whole procedure simulated
+
+- **The fork repair asks the feed's provider, live.** In its first minutes it settled 27 conflicts out of about 5,000 trade deliveries, all `confirmed`.
+  - **The problem:** the lookups had gone to `SOLANA_RPC_URL` (the owner's Helius plan).
+  - **The fix:** they now go over HTTPS to the feed's own provider (RPC Fast's flat-rate plan, the one that delivered the copies, in about 0.5 s), and fall back to `SOLANA_RPC_URL` only without a feed URL. Only the host is recorded.
+  - **HQ (Data collection) now shows the fork counts:** conflicts, which copy the chain kept, any unproven, any waiting, and how many bot entries were held back.
+- **T9-E1, draft 2** (`research/registrations/T9-E1.proposed.md`, still awaiting the owner): the sixth review's §6 corrections.
+  - **The signal is frozen exactly as the corrected replay computes it:** 60 minutes ÷ 12, with its boundaries stated.
+  - **Execution:**
+    - primary at a fresh on-chain quote;
+    - a registered conservative treatment (unmeasured exits at zero recovery minus fees);
+    - a coverage gate (≥ 80% of attempts measured).
+  - **A fixed window:** the restartable clock is gone. Running below 80% observed hours, or with more than 20% of attempts unmeasured, makes the run INVALID; it's kept, and a new registration starts on a later untouched window.
+  - **The economic gate is in SOL:** the test's own incremental cost is $0 (it runs on what's already paid for), so H is the owner's materiality threshold (proposed 1.0 SOL).
+  - **Proposed window: 90 days,** up from 60.
+- **`research/power_t9_e1.py` simulates the whole registered procedure** (seeded), calibrated from the corrected replay. It covers:
+  - overdispersed revival episodes;
+  - the 9 SOL account, 4 positions, one per coin, the daily stop;
+  - a matched control;
+  - unmeasured exits;
+  - all five gates.
+
+  **Results:**
+  - **No edge:** passes 0–3% of the time.
+  - **The replay's winner rate, or half of it:** passes ≥ 0.97 at 60 days.
+  - **A quarter of the rate:** 0.68 at 60 days, 0.79 at 90, 0.90 at 120.
+  - **Half the rate with worse ordinary trades:** 0.33 → 0.62 at 90.
+  - **Under stress:** the window barely matters, because unmeasured exits dominate. Measurement coverage matters as much as the edge.
+- **`power_t9.py`'s winner sizes are labelled as net returns** (`winner_net`; 6.0 = +600%). The first proposal misread one as +500%. That script is superseded by the full-design one.
+- **The research export now bundles** the corrected T9 rerun (`t9_replay_v2_summary.json`, every +40%-rule trade) and the full-design simulation.
+
+---
+
 ## 2026-10-07 — Entry #68: The sixth review: honest exports, net P&L, replays that don't invent exits, fork repair
 
 **Source:** a sixth external review (revision 75fb797). It reproduced three defect families and the wider consequence of the fork copies, with six failing contracts. Our own tests: `tests/test_review_astra6.py`, `tests/test_replay_exec.py`, `tests/test_fork_repair.py`. The reviewer's file now passes 6 of 6 (it was 0 of 6), and their earlier round-5 checks pass 8 of 8. The suite: 481 passed, 1 skipped.
