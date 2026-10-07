@@ -1,6 +1,6 @@
 # Cross-chain support: feasibility, work and costs
 
-*Assessed 2026-10-03. Tracking issue: [#5](https://github.com/m4n3ce/meme_traderv1/issues/5).*
+*Assessed 2026-10-03. Tracking issue: [#5](https://github.com/m3n4ce-dev/meme_traderv1/issues/5).*
 
 **Update 2026-10-05: paper trading on other chains is running** (owner's call: "not bound to SOL coins"). It doesn't use the launchpad plan below. It's a lighter, chain-agnostic paper bot, `sniper/xchain.py`:
 - **What it trades:** young DEX coins on BNB Chain, Base and Solana, momentum over minutes to hours.

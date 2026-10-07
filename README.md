@@ -138,7 +138,7 @@ flowchart LR
 Paper trading on the real market needs **no keys and no wallet**.
 
 ```bash
-git clone https://github.com/m4n3ce/meme_traderv1.git
+git clone https://github.com/m3n4ce-dev/meme_traderv1.git
 cd meme_traderv1
 bash scripts/setup_ubuntu.sh        # or: bash scripts/setup_mac.sh
 scripts/start.sh doctor             # checks what's set up

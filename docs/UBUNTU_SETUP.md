@@ -23,7 +23,7 @@ Press **Ctrl + Alt + T**.
 ```bash
 sudo apt update && sudo apt install -y git
 cd ~
-git clone https://github.com/m4n3ce/meme_traderv1.git
+git clone https://github.com/m3n4ce-dev/meme_traderv1.git
 cd meme_traderv1
 bash scripts/setup_ubuntu.sh
 ```
