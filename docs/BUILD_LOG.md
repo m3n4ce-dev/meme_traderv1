@@ -4,6 +4,101 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #72: The eighth review: fork evidence that only stronger evidence can change, a replayed wallet ledger, the T9 account's economic P&L
+
+**Source:** an eighth external review (revision 59ae17a; the reviewer is GPT 6.1 Sol), plus its note on a 10% take-profit and new edge ideas.
+- **The reviewer's nine new contracts:** 0/9 → **9/9** pass. Its 23 earlier checks still pass.
+- **Our own tests:** `tests/test_review_sol8.py` (22 tests).
+- **Suite:** 525 passed (524 and 1 skipped without numpy).
+
+1. **Fork evidence: the strongest answer is kept apart from the resolution** (`tracker.py`, `engine.py`).
+   - **What was wrong:**
+     - a weaker *failed* answer could retract a finalized trade;
+     - new content wiped the evidence that precedence was decided by;
+     - a finalized failure contradicting a finalized success was taken as a retraction;
+     - the same failed answer twice emitted a second correction.
+   - **Now:**
+     - each conflict keeps its `strongest` evidence: level, slot, failed or not, source, method and proved content;
+     - weaker evidence, success or failure, never changes state;
+     - new content blocks the coin and waits for an answer at least as strong, without demoting what's established;
+     - two finalized answers that disagree are an integrity **fault**: blocked for good, never "pick the later";
+     - the same evidence again changes nothing;
+     - a confirmed failure is re-checked until finalized, like a confirmed success;
+     - the strongest answer per event is saved with the state, so a restart or an evicted coin keeps its precedence.
+   - **The chain's content, not just its slot:**
+     - every conflict's transaction is fetched (`getTransaction`) and decoded by the feed's own parser;
+     - the canonical version is the delivered one with that content;
+     - content that matches no delivered version is unresolvable.
+   - **Found while building it:** most pump.fun transactions on 10-07 were **version 1**, and asking for at most version 0 was refused by every endpoint. Only the slot, error and logs are read, which don't depend on the version, so up to 1 is accepted.
+2. **The provider question, answered with the chain** (`data/research/evidence_fork_packet_2026-10-07.json`). From 01:19 to 07:40 UTC:
+   - **Repeats:** of 658,393 distinct events, 0.84% arrived twice with **different** contents, and 2.8% twice with the same.
+   - **The pattern** is always two copies from consecutive slots, the second arriving 0.2 s later (median; at most 1 s).
+   - **The chain keeps the second copy.** A deterministic sample of 200 was fetched at `finalized` from the paid provider and, independently, from the public endpoint. All 200 show the transaction in slot N+1 with exactly the second copy's contents, and both endpoints agree. That puts a mismatch rate above about 1.9% out (95% bound).
+   - **Single deliveries are right:** 200 events that arrived once all match the chain.
+   - **This supersedes #66's "7 of 9 matched".** Those 9 can't be re-identified, because they predate event indexes.
+   - **About 71% of the differing events weren't looked up.** Their coins weren't tracked, so nothing depended on them.
+   - **For the owner:** a redacted report for RPC Fast is in `data/research/PROVIDER_REPORT_rpcfast_2026-10-07.md`. At `confirmed`, these notifications look like `processed`.
+3. **Followed wallets: corrections are replayed, not added** (`copytrade.LeaderBook`).
+   - **What was wrong:** correcting a buy after a later sell changed the inventory by the difference, but not the sell's cost share, the realized profit, the closed bag or the win. A reinstated event never reached the wallet at all.
+   - **Now:**
+     - each wallet and coin keeps its events in chain order (slot, then arrival);
+     - every correction (amount, trader, retraction, reinstatement) replays that bag from its snapshot, and the wallet's totals are recomputed, never adjusted by deltas;
+     - a sell beyond what the wallet was seen buying is marked unknown, and only the observed tokens' share counts as profit;
+     - past 256 events, the oldest fold into the snapshot; a correction to a folded event marks the bag unknown;
+     - the ledger is saved with the engine's state;
+     - our own copied results are never touched.
+4. **The T9 account's primary P&L is its economic P&L** (`t9_portfolio.py`).
+   - **What was wrong:** two unmeasured positions cost 0.5 SOL of cash, reported 0 P&L, and didn't touch the daily stop.
+   - **Now, impairments:** an exit that can't be measured is impaired when its retries run out, at zero recovery plus its fees. It's booked in cash and in the primary series on that day, the day it's recognized.
+   - **Risk:** the daily budget counts it, and reserves it while the exit is being retried.
+   - **Quarantine:** the coin's tokens stay quarantined, so it can't be entered again.
+   - **Measured-only P&L** is a labelled diagnostic.
+5. **Power v3** (`research/power_t9_e1.py`).
+   - **One statistic:** the bootstrap, H and the total all use the economic series.
+   - **Availability:** a provider outage calendar is shared by both arms, with transient failures per quote attempt and pools that can't be quoted (more often collapsing ones). It's evaluated at entry and at the exit and its 30 s retries.
+   - **The INVALID rule** is applied, and a 3-day block bootstrap is reported beside the registered one.
+   - **Fingerprint:** the script's and the account model's sha256, the revision and any uncommitted diff, all taken before the run, plus the output's own sha256.
+   - **Results:**
+
+| Pass rate at 90 days (H = 1 SOL, +0 cost) | good: ~99% of exits measured | medium: ~94% | poor: ~83% |
+|---|---|---|---|
+| **No edge** (500 runs; 95% CI) | 0.002 [0, 0.011] | 0.000 [0, 0.008] | 0.000 [0, 0.008]; 15% INVALID |
+| An eighth of the replay's winner rate, flat ordinary trades | 0.13 | 0.00 | 0.00 |
+| A quarter of it, flat | 0.51 | 0.04 | 0.00 |
+| Half, flat | 0.95 | 0.41 | 0.00 |
+| Half, pessimistic ordinary trades | 0.22 | 0.01 | 0.00 |
+| The replay's rate, flat | 1.00 | 0.98 | 0.11 |
+| The replay's rate, pessimistic | 0.96 | 0.71 | 0.01 |
+| The replay's rate, winners halved, flat | 1.00 | 0.54 | 0.00 |
+| The replay's rate, flat, +1.5% cost | 1.00 | 0.95 | 0.05 |
+
+- **False passes stay rare:** at most 0.4% of null runs (60 days, good availability; Wilson bound 1.4%), and none elsewhere.
+- **Availability now decides almost everything.** Once an unmeasured exit counts as a zero-recovery loss in the primary statistic, poor availability (~83% of exits measured, just above the INVALID line) passes even the replay's rate only 11% of the time. Its median total is +2.3 SOL, against +36 SOL measured-only. The impaired positions include winners that couldn't be sold.
+- **Medium availability (~94%) halves the power:** half the replay's rate falls from 0.95 to 0.41.
+- **The bar is near-complete exit coverage**, not 80% or a 95% point estimate.
+- **Window length matters less:** a quarter of the rate, good availability, passes 0.35 / 0.51 / 0.67 at 60 / 90 / 120 days.
+- **The block bootstrap barely differs** from the registered one: at the replay's rate with medium availability, 0.96 against 0.98.
+- **Full table:** `power_t9_e1_v3.{out,json}` (468 cells), from revision `5972c33` with no uncommitted changes. Its sha256 is in `.sha256`.
+6. **The 10% take-profit, as a shadow experiment** (`exitlab.TP10`).
+   - **The reviewer's arithmetic:** on the curve's fees, +10% on the price is about +5.4% net, and +10% net needs about +14.8%.
+   - **Their generous fixed-entry check:** with a +10%-net exit wherever a position's peak reached +10%, `late` goes from +0.33 to −7.07 SOL, because it caps the rare big winners.
+   - **So it's a shadow, not a switch.** Every bot entry now also runs "all out at +10% net" and "trim 25% at +10% net". The net trigger includes both fees and both transactions' network costs at the real stake.
+7. **The account journal** has no events since its adoption. The paper account has been halted by its 50% drawdown kill switch since 10-06 11:46, and lifting that is the owner's call.
+   - **What can be shown:** the exporter's check rebuilds a synthetic account's cash exactly from its events, in an isolated directory (`evidence_journal_synthetic.json`). That covers buys, sells, a deposit, a failed-sell fee, a reset and a new account. The residual is 1e-9 SOL, which is rounding.
+   - **Still not transactional:** the JSONL writer runs after the in-memory change. A unified SQLite ledger is the reviewer's answer 7, and it's proposed, not built.
+8. **New ideas in the registry** (`research/hypotheses.csv`):
+   - **T13:** the wallet observer, C vs A. Drafted as `research/registrations/T13-C1.proposed.md`; it waits for wallets-v1's frozen list.
+   - **T14:** the TP10 shadow.
+   - **T15–T19:** the reviewer's candidates: a retest after a breakout, liquidity-supported surges, verified seller exhaustion, a toxic-wallet veto, and execution routing.
+   - **T9-E1 is now draft 4:**
+     - the economic primary;
+     - a protocol-correct quote (signed virtual quote reserves, configured fees) with a validity contract;
+     - a declared qualification plan;
+     - written matching rules for the control;
+     - the corrected power claims.
+
+---
+
 ## 2026-10-07 — Entry #71: The paid feed starts again; the account journal's first time
 
 - **The paid feed starts again.** After #96 was deployed, the feed started on the **free** public endpoint, remembered 0.1 s faster (1.3 s against 1.4 s), instead of the paid one the owner configured.
