@@ -333,6 +333,7 @@ class SolanaTradeFeed(Feed):
     RETRY_PRIMARY_S = 1800  # on a fallback endpoint, go back and try the first one this often
     LAG_MEMORY_S = 1800     # how long an endpoint's measured lag counts when choosing where to go
     STARTUP_MEMORY_S = 6 * 3600   # at startup, begin on the fastest endpoint measured this recently
+    PRIMARY_MARGIN_S = 1.0        # ...but on YOUR configured endpoint unless it was this much slower
 
     def __init__(self, ws_url="", fallback_urls: list[str] | None = None, commitment: str = "confirmed",
                  max_gap_pct: float = 5.0, stall_s: float = 60.0, max_lag_s: float = 5.0, memory_path=None,
@@ -562,6 +563,14 @@ class SolanaTradeFeed(Feed):
             self.ws_idx = fresh
         elif best is not None:
             self.ws_idx = best
+            # 2026-10-07: a free endpoint remembered a tenth of a second faster (1.3 s vs 1.4 s) took the start from
+            # the paid one the owner configured - and the free ones are the ones that drop out for hours. Yours
+            # starts unless it was clearly slower; the watchdog still moves off it if it falls behind.
+            for i in range(self.n_configured):
+                lag = self.endpoint_lag.get(i)
+                if i != self.backup_idx and lag and lag[0] <= self.endpoint_lag[best][0] + self.PRIMARY_MARGIN_S:
+                    self.ws_idx = i
+                    break
 
     def _save_lags(self, now: float) -> None:
         """Hostname -> [lag, when]: never a full URL, which can carry an API key."""

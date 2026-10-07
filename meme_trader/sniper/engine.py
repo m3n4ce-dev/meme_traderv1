@@ -442,7 +442,8 @@ class Engine:
         trade row; no cash moves)."""
         if not self.journal:
             return
-        row = {"ts": round(self.now, 3), "account": self.book.account_id, "kind": kind, "sol": round(sol, 9),
+        row = {"ts": round(self.now or time.time(), 3), "account": self.book.account_id, "kind": kind,
+               "sol": round(sol, 9),
                "cash_after": round(self.book.sol, 9), **{k: v for k, v in kw.items() if v not in (None, "")}}
         try:
             DATA.mkdir(exist_ok=True)
