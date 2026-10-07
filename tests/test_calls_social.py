@@ -314,7 +314,7 @@ def test_exit_lab_runs_other_exits_on_the_same_entries(tmp_path):
     lab = ExitLab(tmp_path / "exit_lab.jsonl", e.fee)
     t0 = e.now
     lab.start(s.mint, s.symbol, "late", s.curve.price, t0, e.p)
-    assert s.mint in lab.mints() and len(lab.open[s.mint]) == 9
+    assert s.mint in lab.mints() and len(lab.open[s.mint]) == 11
     s.curve.v_sol *= 1.5                                      # +50%: "take profit at 2x" waits, nothing stops out
     lab.tick(e.tokens, t0 + 5, e.p)
     s.curve.v_sol *= 1.5                                      # ~+125%: the 2x take profit sells
@@ -324,12 +324,12 @@ def test_exit_lab_runs_other_exits_on_the_same_entries(tmp_path):
     s.curve.v_sol *= 0.3                                      # crash: the stops close the rest
     lab.tick(e.tokens, t0 + 15, e.p)
     lab.tick(e.tokens, t0 + 2000, e.p)                        # anything left closes at the 30-minute limit
-    assert not lab.open and len(lab.done) == 9
+    assert not lab.open and len(lab.done) == 11
     assert any(r["variant"] == "bank half at +30%" for r in lab.done)
     v = lab.view("late")
     assert v["entries"] == 1 and v["variants"][0]["variant"] == "take profit at 2x"
-    assert len((tmp_path / "exit_lab.jsonl").read_text().splitlines()) == 9
-    assert len(ExitLab(tmp_path / "exit_lab.jsonl", e.fee).done) == 9     # reloads its history
+    assert len((tmp_path / "exit_lab.jsonl").read_text().splitlines()) == 11
+    assert len(ExitLab(tmp_path / "exit_lab.jsonl", e.fee).done) == 11     # reloads its history
 
 
 def test_bot_entries_feed_the_exit_lab():

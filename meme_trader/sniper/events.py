@@ -115,6 +115,7 @@ class Reconcile:
     status: str = ""             # the RPC's confirmation status, or why it couldn't be established
     source: str = ""             # how it was established (method, provider host)
     err: str = ""                # the transaction FAILED on chain (its error): its trade never happened
+    content: str = ""            # the event as decoded from the transaction itself (JSON list), "" = not fetched
     kind: str = "reconcile"
 
 

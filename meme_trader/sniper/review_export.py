@@ -24,6 +24,7 @@ import secrets
 import shutil
 import sqlite3
 import statistics
+import subprocess
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -282,10 +283,10 @@ class Export:
         self._note("account_ledger.csv", rows=sum(1 for _ in open(self.out / "account_ledger.csv")) - 1)
         self._note("account_reconciliation.json", residual_sol=rec.get("residual_sol"))
 
-    def _events_check(self, state: dict) -> dict:
-        """The account rebuilt from its typed events (data/account-paper.jsonl, since 2026-10-07): the balance at
+    def _events_check(self, state: dict, mode: str = "paper") -> dict:
+        """The account rebuilt from its typed events (data/account-<mode>.jsonl, since 2026-10-07): the balance at
         its opening event (open / adopted / reset) plus every cash event after, against the saved cash."""
-        p = self.data / "account-paper.jsonl"
+        p = self.data / f"account-{mode}.jsonl"
         acct = state.get("account_id")
         if not p.exists() or not acct:
             return {"available": False, "why": "no account journal yet (it starts with the 2026-10-07 code)"}
@@ -693,10 +694,15 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     if reg.exists():
         shutil.copytree(reg, out / "registrations")
     for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json", "power_t9_e1_v2.out",
-                 "power_t9_e1_v2.json"):
+                 "power_t9_e1_v2.json", "power_t9_e1_v3.out", "power_t9_e1_v3.json", "power_t9_e1_v3.json.sha256"):
         if (data / "research" / name).exists():
             (out / "registrations").mkdir(exist_ok=True)
             shutil.copy2(data / "research" / name, out / "registrations" / name)
+    evidence = sorted((data / "research").glob("evidence_*.json"))      # builder-side evidence (provider packet...)
+    if evidence:
+        (out / "evidence").mkdir(exist_ok=True)
+        for p in evidence:
+            shutil.copy2(p, out / "evidence" / p.name)
     ex.as_run()
     ex.t9_rerun()
     for p in sorted((data / "research").glob("BUILDER_REPLY*.md")):   # the builder's reply to the review
@@ -704,6 +710,14 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     if config is not None:
         (out / "config_effective.json").write_text(json.dumps(safe_config(config), indent=1, default=str))
     from .research import code_revision
+
+    def _tree() -> str:
+        """The commit's tree: a PR's head and its merge into main have different ids but the same tree (the same code)."""
+        try:
+            return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
     files = []
     for p in sorted(out.rglob("*")):
         if p.is_file():
@@ -722,7 +736,8 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
                        "state": state, "mtime": p.stat().st_mtime})
     import importlib.metadata as md
     man = {"generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)), "cutoff_ts": started,
-           "code_revision": code_revision(), "package_schema": 1, "inputs": inputs, "outputs": files,
+           "code_revision": code_revision(), "code_tree": _tree(), "package_schema": 1, "inputs": inputs,
+           "outputs": files,
            "counts": ex.counts, "unavailable": [{"what": a, "why": b} for a, b in ex.unavailable],
            "findings": ex.findings,
            "packages": {n: _ver(md, n) for n in ("numpy", "lightgbm", "pyyaml", "httpx")},
