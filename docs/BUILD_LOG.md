@@ -4,6 +4,35 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #65: The fifth review: one lock per coin, receipts pinned until confirmed, stores bound to their wallet
+
+**Source:** a fifth external review (revision 661e033). The earlier fixes passed its independent checks, including abrupt-process-exit tests of the outbox and the result store. Three new checks failed. Its contracts are rewritten as this project's own tests (`tests/test_review_astra5.py`, 12 tests); the reviewer's file wasn't run here. All pass, and so does the full suite (449, 1 skipped).
+
+1. **A coin stays locked while any of its orders is unsettled.**
+   - **What failed:** once the outbox recovered several sell retries, one coin could have two unsettled signatures. Resolving one (failed) unlocked the coin while the other was still unknown, so a fresh sell could go out while an older one might still land.
+   - **The invariant:** a coin is locked while any of its orders is being executed, is in flight (paper), or has a signature the chain hasn't answered for. Every completion path (normal, recovered, manual settle, paper landing) calls one `_release`, which unlocks only when nothing is left.
+   - **Cash:** a coin's reserved cash is recomputed from its unsettled buys, so one buy settling can't free another's cash. A failed retry still books its own fee, once.
+2. **A booking receipt is never pruned until the outbox confirms it.**
+   - **What failed:** if marking an outbox row "booked" failed and 5,000 later receipts pushed it out of the saved list, a restart could book the same fill again. The reviewer's reproduction charged one buy twice.
+   - **The protocol** (two stores: the book is JSON, the outbox is SQLite):
+     1. The row is committed as "signed" before the send.
+     2. The outcome is applied to the book together with an **unacknowledged** receipt, and saved: the file fsynced, renamed atomically, then the directory fsynced (new).
+     3. The outbox marks the row "booked", and only then is the receipt acknowledged.
+   - **Recovery:** a "signed" row with a receipt is already booked, so it's marked and never re-applied. One without a receipt was never booked and becomes unresolved.
+   - **Retention:** only acknowledged receipts are pruned (oldest first, past 5,000). Unacknowledged ones are pinned, retried every 10 s and at start-up, and the owner is alerted past 50.
+3. **Recovery stores belong to one wallet.**
+   - **The binding:** `orders.db` records its network, wallet and schema, and so does the live book. A different wallet's engine refuses to start (`StoreOwnerError`) instead of adopting them.
+   - **Older stores:** an unbound store that already has orders is used only after the owner claims it: `python -m meme_trader.sniper.outbox claim <wallet>`. A store bound to another wallet is never rebound.
+   - **On this machine** no live store exists yet, so nothing needs claiming.
+4. **A recovered order keeps the coin's protections.** Each order's intent now carries:
+   - the coin's launch (creator, dev buy) and what the dev had sold;
+   - the decision quote and time, the entry features and the model id;
+   - for sells, the position's identity.
+
+   A position booked late is opened at the time it was sent, never at the time it's booked, so its age-based exits aren't pushed back. A test kills a real process in the middle of a send and checks the whole recovery: the order is held with its cash, then booked once the chain answers, with its creator and its age intact.
+
+---
+
 ## 2026-10-07 — Entry #64: The fourth review: a durable order outbox, crash-safe forward-test results, and a brief for reviewers
 
 **Source:** a fourth external review (revision 6f6101b). It came with eight offline contracts and a small candidate patch. All eight are rewritten as this project's own tests (`tests/test_review_astra4.py`, 13 tests). The reviewer's file wasn't run and its patch wasn't applied; its four small changes were read and done the same way here. All pass, and so does the full suite (437, 1 skipped).
