@@ -2073,10 +2073,13 @@ class Engine:
 
     @staticmethod
     def _tx_lookup(url: str, sig: str, commitment: str) -> dict | None:
+        """Only the transaction's slot, error and log messages are read - none of which depend on its message
+        version - so versions up to 1 are accepted (on 10-07 most sampled pump.fun transactions were version 1, and
+        asking for at most 0 was refused). A later version is refused by the RPC: no content, status only."""
         import httpx
         r = httpx.post(url, timeout=10, json={"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
                                               "params": [sig, {"commitment": commitment, "encoding": "json",
-                                                               "maxSupportedTransactionVersion": 0}]})
+                                                               "maxSupportedTransactionVersion": 1}]})
         r.raise_for_status()
         d = r.json()
         if "error" in d:
