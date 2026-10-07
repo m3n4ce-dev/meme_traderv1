@@ -70,3 +70,14 @@ def test_replays_and_a_full_book_dont_follow(tmp_path, monkeypatch):
     monkeypatch.setattr(e2, "entries_blocked", lambda *a: "max positions (3)")
     asyncio.run(e2._check_entry(s2))
     assert M not in e2.lab.open and not s2.decided                           # a moment's block: may still be bought
+
+
+def test_practice_and_pass_follows_run_every_exit_variant_but_score_on_as_now(tmp_path, monkeypatch):
+    from meme_trader.sniper.exitlab import TP10
+    e, s = engine(tmp_path, monkeypatch, Live())
+    e.lab.start(M, "PR", "practice-buy", s.curve.price, e.now, e.p, price_kind="raw_mark")
+    names = {sh["variant"] for sh in e.lab.open[M]}
+    assert set(TP10) <= names and "as now" in names
+    e._calls_open[M] = {"ts": e.now, "mint": M, "kind": "late"}
+    e._score_call({"variant": "all out at +10% net", "kind": "practice-buy", "mint": M, "opened": e.now, "pnl_pct": 9})
+    assert M in e._calls_open                                   # another variant doesn't score the team's call

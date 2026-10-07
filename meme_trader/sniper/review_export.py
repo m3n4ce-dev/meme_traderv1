@@ -458,6 +458,23 @@ class Export:
             (self.out / "research_as_run.json").write_text(json.dumps(listing, indent=1))
             self._note("research_as_run/", files=len(listing))
 
+    def quotes(self) -> None:
+        """The live price watcher (data/quotes.db): its coverage by reason for both arms, quote-priced P&L, and every
+        attempt (pool addresses and amounts are public chain data; no RPC URL is stored, only its host)."""
+        p = self.data / "quotes.db"
+        if not p.exists():
+            self.unavailable.append(("quotes_summary.json", "no price-watcher database yet"))
+            return
+        self.inputs.append(p)
+        from .quotes import QuoteBook
+        qb = QuoteBook.read_only(p)
+        (self.out / "quotes_summary.json").write_text(json.dumps(qb.view(max_age_s=0), indent=1))
+        rows = qb.attempts()
+        with open(self.out / "quote_attempts.jsonl", "w") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        self._note("quote_attempts.jsonl", rows=len(rows))
+
     def fork_conflicts(self) -> None:
         """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict's creation, with why it is
         or isn't looked up, and its terminal state, by code revision - so no conflict is unaccounted for."""
@@ -737,6 +754,7 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     ex.as_run()
     ex.t9_rerun()
     ex.fork_conflicts()
+    ex.quotes()
     for p in sorted((data / "research").glob("BUILDER_REPLY*.md")):   # the builder's reply to the review
         shutil.copy2(p, out / p.name)
     if config is not None:

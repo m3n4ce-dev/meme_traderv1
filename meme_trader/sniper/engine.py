@@ -1367,7 +1367,7 @@ class Engine:
                 s.decided = "rejected: desk passed"
                 self._audit_start(s, "desk passed")
                 if self.feed.realtime and v.votes and not all(x.error for x in v.votes):   # scored like a buy would be
-                    self.lab.start(s.mint, s.symbol, "sniper-pass", s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
+                    self.lab.start(s.mint, s.symbol, "sniper-pass", s.curve.price, self.now, self.p, price_kind="raw_mark")
             elif v.votes and not all(x.error for x in v.votes):
                 # follow what the passed coin does next, split by how many personas said buy, so the gate
                 # audit shows whether an outvoted majority (3 of 4) does better than a unanimous pass
@@ -1375,7 +1375,7 @@ class Engine:
                 label = {"late": "graduation"}.get(kind, kind)
                 self._audit_start(s, f"AI desk passed ({label}): {nb} of {len(v.votes)} said buy")
                 if kind == "late" and self.feed.realtime:   # what the pass would have made, on the bot's exits
-                    self.lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
+                    self.lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, self.now, self.p, price_kind="raw_mark")
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]
@@ -1390,7 +1390,7 @@ class Engine:
                 s.decided = "skipped: " + why          # don't pay for a fresh desk review every tick
             if kind in ("late", "sniper") and self.feed.realtime:      # the call still gets its score
                 self.lab.start(s.mint, s.symbol, "practice-buy" if kind == "late" else "sniper-skip", s.curve.price,
-                               self.now, self.p, only=("as now",), price_kind="raw_mark")
+                               self.now, self.p, price_kind="raw_mark")
             return
         await self._buy(s, score, size, notes, source, leader)
 
@@ -2845,7 +2845,7 @@ class Engine:
         if mode == "practice":
             follow = ("practice-buy" if v.approve else "practice-pass") if kind == "late" else \
                 ("sniper-skip" if v.approve else "sniper-pass")     # a sniper follow: as if bought, or as if passed
-            self.lab.start(s.mint, s.symbol, follow, s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
+            self.lab.start(s.mint, s.symbol, follow, s.curve.price, self.now, self.p, price_kind="raw_mark")
         elif s.mint in self.positions:
             self.positions[s.mint].desk = f"side vote: {v.summary}"
 
