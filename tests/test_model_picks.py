@@ -68,9 +68,9 @@ def test_a_pick_is_followed_instantly_and_landing_late():
     lab, p = ExitLab(None, 1.0), copy.deepcopy(P).sniper
     p.execution["paper_delay_s"] = 2.5
     s = priced()
-    lab.start(s.mint, "PK", PICKS, s.curve.price, 100.0, p, extra={"p": 0.33})
-    lab.start(s.mint, "PK", PICKS, s.curve.price, 100.0, p)                 # one follow per coin and kind
-    lab.start(s.mint, "PK", "sniper-pass", s.curve.price, 100.0, p)         # another kind on the same coin: fine
+    lab.start(s.mint, "PK", PICKS, s.curve.price, 100.0, p, extra={"p": 0.33}, price_kind="raw_mark")
+    lab.start(s.mint, "PK", PICKS, s.curve.price, 100.0, p, price_kind="raw_mark")   # one follow per coin and kind
+    lab.start(s.mint, "PK", "sniper-pass", s.curve.price, 100.0, p, price_kind="raw_mark")   # another kind: fine
     names = [sh["variant"] for sh in lab.open[s.mint] if sh["kind"] == PICKS]
     assert len(names) == 2 * len(PICK_EXITS) + 1 and sum("lands 2.5 s late" in n for n in names) == len(PICK_EXITS)
     toks = {s.mint: s}
@@ -78,18 +78,21 @@ def test_a_pick_is_followed_instantly_and_landing_late():
     lab.tick(toks, 101.0, p)
     lab.tick(toks, 103.0, p)
     late = next(sh for sh in lab.open[s.mint] if sh["variant"] == "+100% or -30%, out at 10 min · lands 2.5 s late")
-    assert abs(late["pos"].entry_price / s.curve.price - 1) < 1e-9
+    assert late["entry"]["landed_price"] == s.curve.price                  # its buy landed at the price then
     set_price(s, 2.05)                   # instant: +105% -> take profit now; late: only +37% on its 1.5 entry
     lab.tick(toks, 104.0, p)
     done = {r["variant"]: r for r in lab.done}
-    assert done["+100% or -30%, out at 10 min"]["pnl_pct"] > 100 and done["+100% or -30%, out at 10 min"]["p"] == 0.33
+    assert done["+100% or -30%, out at 10 min"]["pnl_pct"] > 95 and done["+100% or -30%, out at 10 min"]["p"] == 0.33   # (after costs)
     set_price(s, 0.9)                    # late: stop (-40%) triggers, the sell lands 2.5 s later at a lower price
     lab.tick(toks, 105.0, p)
     assert "+100% or -30%, out at 10 min · lands 2.5 s late" not in {r["variant"] for r in lab.done}
     set_price(s, 0.8)
     lab.tick(toks, 107.6, p)
     r = {r["variant"]: r for r in lab.done}["+100% or -30%, out at 10 min · lands 2.5 s late"]
-    assert abs(r["pnl_pct"] - ((0.8 / 1.5) * 0.99 / 1.01 - 1) * 100) < 0.05
+    tx = p.execution["priority_fee_sol"] + 0.000005           # (version-2 accounting: 0.25 SOL stake, costs paid once)
+    debit = 0.25 + tx
+    tokens = 0.25 * 0.99 / (1.5 * debit)
+    assert abs(r["pnl_pct"] - ((tokens * 0.8 * 0.99 - tx / debit) - 1) * 100) < 0.05
     v = lab.picks_view()
     assert v["picks"] == 1 and {x["variant"] for x in v["bands"]["30%+"]} >= {"+100% or -30%, out at 10 min"}
     assert v["bands"]["25-30%"] == [] and lab.view("sniper")["entries"] == 0     # picks aren't sniper trades

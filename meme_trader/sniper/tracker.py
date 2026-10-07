@@ -246,7 +246,9 @@ class TokenState:
         - a FAILED transaction: its trade never happened - retracted from the coin, which stays unsafe;
         - with the decoded content, the canonical version is the delivered one with that content; without it, the one
           delivered from the landed slot - and two differing copies from one slot can't be told apart that way;
-        - two finalized answers that disagree (slot, failure or content) are an integrity fault, not a choice."""
+        - two finalized answers that disagree on the slot or on failure, or two finalized transaction contents that
+          disagree, are an integrity fault, not a choice. A version chosen by its slot alone is an inference: the
+          transaction's decoded content can replace it at the same level without any contradiction."""
         c = self.conflicts.get(k)
         if c is None:
             return ""
@@ -269,10 +271,24 @@ class TokenState:
                 return ""                                # (a finalized answer stands)
             c["status"] = "unresolvable"
             return "unresolvable"
-        strong = c["strongest"]
+        strong = c["strongest"]                          # the STATUS facts: slot, level, failed or not
+        proof = c.get("proof")                           # the strongest decoded transaction CONTENT, if any
         rank = self.LEVEL
         if strong is not None and rank[level] < rank[strong["level"]]:
             return ""                                    # weaker than what's established: recorded, never applied
+        if strong is not None and (strong["slot"] != slot or bool(strong["err"]) != bool(err)):
+            if strong["level"] == level == "final":
+                c["fault"] = "finalized answers contradict each other (slot or failure)"
+                c["status"] = "unresolvable"
+                return "unresolvable"
+            if strong["level"] == level:                 # two confirmed answers disagree: wait for finalized
+                c["status"] = "unresolvable"
+                return "unresolvable"
+        if content is not None and proof is not None and proof["slot"] == slot and proof["level"] == level == "final" \
+                and list(proof["content"]) != list(content):
+            c["fault"] = "two finalized transaction contents contradict each other"
+            c["status"] = "unresolvable"
+            return "unresolvable"
         if err:
             canon = None
         else:
@@ -281,20 +297,9 @@ class TokenState:
             else:
                 match = [v for v in c["versions"] if v is not None and v.slot == slot]
             if len({_content(v) for v in match}) != 1:
-                if strong is not None and strong["level"] == "final" and level == "final" and content is not None:
-                    c["fault"] = "a finalized answer proved content no delivered version has"
                 c["status"] = "unresolvable"             # doesn't identify exactly one delivered version: unsafe
                 return "unresolvable"
             canon = match[0]
-        proved = None if canon is None else list(_content(canon))
-        if strong is not None and not self._agrees(strong, ev, proved):
-            if strong["level"] == "final" and level == "final":
-                c["fault"] = "finalized answers contradict each other"
-                c["status"] = "unresolvable"
-                return "unresolvable"
-            if strong["level"] == level:                 # two confirmed answers disagree: wait for finalized
-                c["status"] = "unresolvable"
-                return "unresolvable"
         applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
         out = ""
         if canon is None:
@@ -311,18 +316,19 @@ class TokenState:
         if self.unrepairable:
             c["status"] = "unresolvable"
             return "unresolvable"
-        if strong is None or rank[level] > rank[strong["level"]] or (strong["method"] != "tx" and content is not None):
-            c["strongest"] = {**ev, "content": proved}
+        if strong is None or rank[level] > rank[strong["level"]]:
+            strong = c["strongest"] = {**ev, "content": None, "inferred": None}
+        if canon is None or (proof is not None and proof["slot"] != slot):
+            proof = c["proof"] = None                    # a failed transaction, or a proof of another slot: stale
+        if content is not None and canon is not None and (proof is None or rank[level] >= rank[proof["level"]]):
+            proof = c["proof"] = {"level": level, "slot": slot, "content": list(content), "source": source}
+        # what `strongest` shows: content only when PROVED from the transaction; a version picked by its slot alone is
+        # an inference (`inferred`), never evidence of its bytes (a ninth review, 2026-10-07)
+        strong["content"] = list(proof["content"]) if proof is not None else None
+        strong["method"] = "tx" if proof is not None and rank[proof["level"]] >= rank[strong["level"]] else "status"
+        strong["inferred"] = None if canon is None or proof is not None else list(_content(canon))
         c["status"], c["slot"] = ("retracted" if canon is None else level), slot
         return out
-
-    @staticmethod
-    def _agrees(a: dict, b: dict, b_content: list | None) -> bool:
-        """Do two answers say the same thing: the same slot, both failed or both not, and (when both name the
-        content) the same content?"""
-        if a["slot"] != b["slot"] or bool(a["err"]) != bool(b["err"]):
-            return False
-        return a.get("content") is None or b_content is None or list(a["content"]) == list(b_content)
 
     def _early(self, w: str) -> None:
         """early_sold as the sum over early buyers of min(sold, bought early): the same in any arrival order."""

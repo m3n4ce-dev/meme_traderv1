@@ -4,6 +4,82 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #73: The ninth review: one cash ledger for exit experiments, proof apart from inference, an exit clock that waits for the quote, and SDK-exact PumpSwap quotes
+
+**Source:** a ninth external review (GPT 6.1 Sol, revision 8e05c96), with official PumpSwap SDK fixtures.
+- **The reviewer's nine new contracts:** **8 of 9** pass unchanged.
+  - **The ninth (outage timing) can't pass as written.** It drives the old call sequence, `Portfolio.try_enter(t, coin, 0.20)` with no fill time, then asserts the exit wasn't booked inside the outage. Nothing in that call tells the account when the recovered quote came, so only hidden global state could pass it.
+  - **What was done instead:** the bug itself is fixed (below), and the same property is tested on the fixed path in `tests/test_review_sol9.py`. A revised contract was proposed to the reviewer.
+- **Its 32 earlier contracts still pass.**
+- **Our own tests:** `tests/test_review_sol9.py` (18), and `tests/test_pumpswap.py` (110).
+- **Suite:** 653 passed (650 and 3 skipped without numpy).
+
+1. **Exit-lab accounting** (R9-1/2, `exitlab.py`, accounting version 2).
+   - **What was wrong:** the +10%-net trigger counted network costs while the recorded result didn't, and real bot shadows paid the entry fee twice. The two biases pushed in opposite directions.
+   - **The ledger:** each shadow has one cash ledger, normalized to its entry's cash.
+     - **A bot entry** starts from the bot's own fill (cash and tokens, costs inside).
+     - **An observation** (a pass, a pick) starts from the raw price and pays its costs once.
+     - **Every sell,** partial or full, books its receipt net of the sell fee and its own network cost.
+   - **One sum:** the trigger and the recorded row use the same arithmetic, and each row carries its entry and cash lines.
+   - **Late-landing variants** ("as now" and both TP10 rules, landing as late as the paper bot):
+     - keep partial fractions;
+     - fail 10% of sell attempts (a declared assumption) and retry;
+     - after 20 failed tries, the tokens count as lost.
+   - **After an early exit,** the price is followed to the 30-minute mark (`after_exit` rows).
+   - **Older rows** (no `accounting` field) mixed conventions and are no longer shown.
+2. **Exit experiments keep running during a halt.** The paper account has been halted by its 50% drawdown kill switch since 10-06 11:46 UTC, so there were **no** bot entries, and the TP10 shadows had collected nothing.
+   - **The change:** a graduation entry blocked by a halt or pause is now followed in the lab as `late-blocked`, from the raw price with every variant.
+   - **Measurement only:** nothing is bought, and later entries aren't affected.
+3. **Fork evidence: status facts, content proof and inference** (R9-3/4/5).
+   - **Kept apart:** a version picked by its slot is recorded as an inference (`inferred`), not proved content.
+   - **Transaction bytes can replace an inference** without a fault. Two **proved** finalized contents that differ are a fault, and so is a finalized slot or failure contradiction.
+   - **The registry for coins whose history is gone** stores and compares the decoded content too, with an identity check.
+   - **A status-only answer keeps bot buys blocked** while the transaction is fetched again, for a bounded time. Afterwards the coin stays blocked and the uncertainty is shown in HQ. Manual trading is never blocked.
+   - **Complete logs:** a fetched transaction's logs must close their program stack. The live feed counts unclosed ones (`feed_unclosed_logs`).
+   - **The lifecycle log:** every conflict's creation and terminal state are logged (`data/fork_conflicts.jsonl`). That explains, for example, the 71% of conflicts with no lookup: their coins weren't tracked.
+4. **The wallet ledger** (R9-6/7).
+   - **Pruning:** retracted events (tombstones) keep their identity through pruning, and pruned or folded identities are remembered, so a late reinstatement is marked unknown and never counted again.
+   - **Unknown order:** an arrival older than a bag's fold checkpoint, and two transactions in one slot with a sell (their order isn't proven), mark the bag unknown.
+5. **The T9 exit clock** (R9-8).
+   - **The account:** an exit filled by a later retry holds its cash until the fill, reserves risk from its due time, and is booked on the fill's day at the fill's return.
+   - **Power v4:**
+     - attempt-by-attempt exits;
+     - transient failures in 30–300 s streaks;
+     - unquotable pools independent of the return (the informative version as a labelled stress);
+     - both arms' coverage gated;
+     - the reviewer's availability envelope as a frozen 5-scenario grid.
+
+     **Results:**
+
+| Pass rate at 90 days (H = 1 SOL, +0 cost) | A1 | A2 | A3 | A4 | A5 |
+|---|---|---|---|---|---|
+| **No edge** (500 runs) | 0.020 [0.011, 0.036] | 0.004 | 0.000 | 0.000 | always INVALID |
+| A quarter of the replay's winner rate, flat | 0.70 | 0.59 | 0.23 | 0.01 | — |
+| Half, flat | 0.99 | 0.95 | 0.77 | 0.36 | — |
+| The replay's rate, flat | 1.00 | 1.00 | 1.00 | 0.97 | — |
+| The replay's rate, pessimistic | 0.97 | 0.97 | 0.83 | 0.56 | — |
+| *(median exit coverage)* | 0.995 | 0.989 | 0.968 | 0.944 | 0.81 |
+
+   - **The power result:** availability still decides. Power v3's numbers are superseded.
+6. **SDK-exact PumpSwap quotes** (`meme_trader/sniper/pumpswap.py`), ported from the official `@pump-fun/pump-swap-sdk@1.20.0`.
+   - **Provenance:** the tarball's sha512 matched the npm registry, and its source hashes matched the fixtures.
+   - **What it covers:** the four quote functions, the fee schedules (tiers, stable, exotic, global fallback, creator override), the pool PDA, the forward check on inverse sells, the Pool layout with its signed i128 virtual reserves, and bare mints.
+   - **Conformance:** written from the SDK source, independently of the reviewer's fixtures, it matches all **94** SDK quote cases, the 5 layouts, the 2 mints and the 12 inverse-sell shortfalls exactly.
+   - **Checked against mainnet** (100 real pools, public RPC, read-only), three things the fixtures couldn't show:
+     - **accounts are 287–301 bytes, not the IDL's 270:** a strict decoder, and the fixtures alone, would have refused every real pool;
+     - **the program has fields past the pinned IDL:** pump.fun's README documents `is_holder_reward`, and 22% of pools carry further undocumented non-zero bytes. The decoder reads the documented prefix and flags the rest;
+     - **54% of pools have a non-zero `virtual_quote_reserves`,** despite the README's "0 on all pools today". Real accounts (positive, negative, zero, with a tail) are saved as test fixtures.
+   - **Still only math:** it isn't a live observer, and a quote isn't a fill.
+7. **Designs and proposals:**
+   - `docs/LEDGER_DESIGN.md`: the SQLite ledger's schema and migration, against the reviewer's 12-point list, for review before any code.
+   - `research/registrations/`:
+     - `T14-TP10.proposed.md`: late family, trim 25% at +10% net, 60 days, H 0.5 SOL for the owner to confirm;
+     - `T15-retest-v1.proposed.md`: the reviewer's specification, plus notes: its anchor test is redundant, and a feasibility pass comes first;
+     - `T20-cohort-v1.proposed.md`: the owner's multi-KOL accumulation-and-distribution idea, with a feasibility pass first given T11.
+   - `hypotheses.csv`: T14, T15 and T20 updated.
+
+---
+
 ## 2026-10-07 — Entry #72: The eighth review: fork evidence that only stronger evidence can change, a replayed wallet ledger, the T9 account's economic P&L
 
 **Source:** an eighth external review (revision 59ae17a; the reviewer is GPT 6.1 Sol), plus its note on a 10% take-profit and new edge ideas.

@@ -52,6 +52,8 @@ UNRESOLVED_ALERT_S = 600              # an order still unknown this long: tell t
 FORK_GIVE_UP_S = 600                               # a conflicting event the chain hasn't shown in this long
 FORK_EVIDENCE_KEPT = 5000                         # strongest chain answers kept per event (restarts, evicted coins)
 FORK_TX_PER_PASS = 32                             # transactions fetched and decoded per lookup pass (the rest: status only)
+FORK_CONTENT_RETRY_S = 5                          # a status-only answer: fetch the transaction again this often
+FORK_UNPROVED_KEEP_S = 86400                      # a conflict whose content was never verified blocks bot buys this long
 CASH_TOLERANCE_SOL = 0.002            # ledger vs wallet SOL difference that's still just rounding/timing
 
 
@@ -231,6 +233,9 @@ class Engine:
         self.fork_pending: dict[tuple, dict] = {}          # (signature, event index) -> {mint, since, stage}: ask chain
         self.fork_blocks: dict[str, str] = {}              # mint -> why its trade state isn't trusted (survives restarts)
         self.fork_evidence: dict[tuple, dict] = {}         # (signature, event index) -> the strongest chain answer
+        self.fork_unproved: dict[tuple, dict] = {}         # conflicts answered by status only: {mint, since, given_up}
+        self._code_rev: str | None = None                  # (for the fork conflict log; read once)
+        self._late_followed: dict[str, float] = {}         # coins followed in the exit lab while entries were blocked
         self._events: OrderedDict = OrderedDict()          # recent trade identities -> content hash (disposition)
         self._fork_busy, self._last_fork_check = False, 0.0
         self._ack_alerted = False
@@ -511,6 +516,8 @@ class Engine:
                 return s.unsafe
             if self.fork_blocks.get(mint):                # known before a restart, or for a coin no longer tracked
                 return self.fork_blocks[mint]
+            if any(v["mint"] == mint for v in self.fork_unproved.values()):
+                return "fork conflict: the transaction's content isn't verified"
         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
@@ -873,6 +880,9 @@ class Engine:
             seen.add(h)
         else:
             self._events[k] = {seen, h}
+            s = self.tokens.get(e.mint)
+            self._fork_log("created", k, mint=e.mint, tracked=s is not None,
+                           lookup="" if s is not None else "no lookup: coin not tracked (nothing depends on it)")
         return "conflict"
 
     def _fanout(self, s: TokenState) -> None:
@@ -1349,7 +1359,7 @@ class Engine:
                 s.decided = "rejected: desk passed"
                 self._audit_start(s, "desk passed")
                 if self.feed.realtime and v.votes and not all(x.error for x in v.votes):   # scored like a buy would be
-                    self.lab.start(s.mint, s.symbol, "sniper-pass", s.curve.price, self.now, self.p, only=("as now",))
+                    self.lab.start(s.mint, s.symbol, "sniper-pass", s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
             elif v.votes and not all(x.error for x in v.votes):
                 # follow what the passed coin does next, split by how many personas said buy, so the gate
                 # audit shows whether an outvoted majority (3 of 4) does better than a unanimous pass
@@ -1357,7 +1367,7 @@ class Engine:
                 label = {"late": "graduation"}.get(kind, kind)
                 self._audit_start(s, f"AI desk passed ({label}): {nb} of {len(v.votes)} said buy")
                 if kind == "late" and self.feed.realtime:   # what the pass would have made, on the bot's exits
-                    self.lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, self.now, self.p, only=("as now",))
+                    self.lab.start(s.mint, s.symbol, "desk-pass", s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
             return
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]
@@ -1372,7 +1382,7 @@ class Engine:
                 s.decided = "skipped: " + why          # don't pay for a fresh desk review every tick
             if kind in ("late", "sniper") and self.feed.realtime:      # the call still gets its score
                 self.lab.start(s.mint, s.symbol, "practice-buy" if kind == "late" else "sniper-skip", s.curve.price,
-                               self.now, self.p, only=("as now",))
+                               self.now, self.p, only=("as now",), price_kind="raw_mark")
             return
         await self._buy(s, score, size, notes, source, leader)
 
@@ -1607,7 +1617,7 @@ class Engine:
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
             self.lab.start(s.mint, s.symbol, "late" if source == "late" else "sniper", fill.price, self.now, self.p,
-                           stake_sol=fill.sol)
+                           entry={"cash_sol": fill.sol, "tokens": fill.tokens})      # the bot's own fill, as is
             try:                                                     # the bot's call, on the record
                 self.ledger.call(s.mint, s.symbol, "bot", s.market_cap_sol * self.sol_price.usd, fill.price,
                                  self.sol_price.usd, thesis="; ".join(notes)[:280], source=source,
@@ -1976,8 +1986,20 @@ class Engine:
         event is also kept in a registry that outlives the coin's state (restarts, evicted coins), so a later weaker
         answer can't count for more there either, and contradicting finalized answers keep the coin blocked."""
         k = (e.signature, e.event_index)
-        if e.status != "confirmed":                       # finalized, or given up: no more lookups
+        level = e.status in ("confirmed", "finalized")
+        if level and not e.err and not e.content and self.feed.realtime:
+            # a status-only answer (the transaction couldn't be fetched or decoded): it places the event, but for a
+            # conflict of CONTENT that's an inference, so bot buys stay blocked until the bytes are verified (a ninth
+            # review, 2026-10-07). Replays of older recordings don't do this: they had no content lookups.
+            u = self.fork_unproved.setdefault(k, {"mint": e.mint, "since": self.now, "given_up": False})
+            u["mint"] = e.mint
+        elif level:
+            self.fork_unproved.pop(k, None)
+        if e.status == "finalized" and k in self.fork_unproved and k in self.fork_pending:
+            self.fork_pending[k].update(stage="content", next=self.now + FORK_CONTENT_RETRY_S)
+        elif e.status != "confirmed":                     # finalized, or given up: no more lookups
             self.fork_pending.pop(k, None)
+            self._fork_log("resolved", k, e)
         elif k in self.fork_pending:
             self.fork_pending[k].update(stage="final", next=self.now + 10)
         content = None
@@ -2005,20 +2027,61 @@ class Engine:
 
     def _registry_evidence(self, e: Reconcile, k: tuple) -> None:
         """A chain answer for an event whose coin no longer holds its versions: nothing can be rebuilt, but the
-        registry's evidence still ranks it - and a finalized answer contradicting a finalized one blocks the coin."""
+        registry's evidence still ranks it under the same rules as a live conflict (a ninth review, 2026-10-07):
+        weaker answers are ignored; at finalized, a different slot or failure, or different decoded transaction
+        content, is an integrity fault and blocks the coin; decoded content upgrades a status-only answer."""
         level = "final" if e.status == "finalized" else "confirmed" if e.status == "confirmed" else ""
         self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
         if not level:
             return
+        content = None
+        if e.content:
+            try:
+                content = list(json.loads(e.content))
+            except (ValueError, TypeError):
+                content = None
         old = self.fork_evidence.get(k)
+        if old is not None and old.get("mint") and old["mint"] != e.mint:
+            self.stats["fork_registry_mismatch"] += 1    # not the same event: compare nothing
+            return
         new = {"mint": e.mint, "slot": e.slot, "level": level, "status": e.status, "source": e.source,
-               "err": e.err, "method": "tx" if e.content else "status", "content": None, "fault": ""}
-        if old is None or TokenState.LEVEL[level] > TokenState.LEVEL[old["level"]]:
+               "err": e.err, "method": "tx" if content is not None else "status", "content": content, "fault": ""}
+        rank = TokenState.LEVEL
+        if old is None or rank[level] > rank[old["level"]]:
             self.fork_evidence[k] = new
             self._trim_evidence()
-        elif level == old["level"] == "final" and (old["slot"] != e.slot or bool(old["err"]) != bool(e.err)):
-            old["fault"] = "finalized answers contradict each other"
+            return
+        if rank[level] < rank[old["level"]]:
+            return
+        facts = old["slot"] != e.slot or bool(old["err"]) != bool(e.err)
+        bytes_ = content is not None and old.get("content") is not None and list(old["content"]) != content
+        if level == "final" and (facts or bytes_):
+            old["fault"] = ("finalized answers contradict each other (slot or failure)" if facts else
+                            "two finalized transaction contents contradict each other")
             self.fork_blocks[e.mint] = "fork conflict: the chain's finalized answers contradict each other"
+        elif not facts and content is not None and old.get("content") is None:
+            old["content"], old["method"], old["source"] = content, "tx", e.source
+
+    def _fork_log(self, kind: str, k: tuple, e: Reconcile | None = None, **kw) -> None:
+        """data/fork_conflicts.jsonl (live only): each fork conflict's creation (with why it is or isn't looked up)
+        and its terminal state (how it was proved, or why it couldn't be), with the code revision - so a packet can
+        account for every conflict (a ninth review, 2026-10-07)."""
+        if not (self.persist and self.feed.realtime):
+            return
+        if self._code_rev is None:
+            from .research import code_revision
+            self._code_rev = code_revision()
+        row = {"ts": round(self.feed.now(), 3), "kind": kind, "signature": k[0], "event_index": k[1],
+               "code": self._code_rev, **kw}
+        if e is not None:
+            u = self.fork_unproved.get(k)
+            row.update(mint=e.mint, status=e.status, slot=e.slot, failed=bool(e.err),
+                       method="tx" if e.content else "status", content_verified=bool(e.content) and u is None)
+        try:
+            with (DATA / "fork_conflicts.jsonl").open("a") as f:
+                f.write(json.dumps(row) + "\n")
+        except OSError:
+            self.stats["fork_log_errors"] += 1
 
     def _trim_evidence(self) -> None:
         while len(self.fork_evidence) > FORK_EVIDENCE_KEPT:
@@ -2065,7 +2128,7 @@ class Engine:
         if not isinstance(meta, dict) or tx.get("slot") != slot or not isinstance(meta.get("logMessages"), list):
             return "", "tx_unknown"
         evs = [t for t in SolanaTradeFeed.parse_logs({"signature": k[0], "err": meta.get("err"),
-                                                      "logs": meta["logMessages"]}, 0.0, slot)
+                                                      "logs": meta["logMessages"]}, 0.0, slot, complete=True)
                if t.event_index == k[1]]
         if len(evs) != 1:
             return "", "tx_unknown"
@@ -2108,23 +2171,42 @@ class Engine:
             for (k, info), st in zip(items, vals):
                 ok = isinstance(st, dict) and isinstance(st.get("slot"), int) and st["slot"] > 0 and \
                     st.get("confirmationStatus") in ("confirmed", "finalized") and "err" in st
-                if ok and (st["confirmationStatus"] == "finalized" or info.get("stage") != "final"):
+                stage = info.get("stage")
+                if ok and (st["confirmationStatus"] == "finalized" or stage not in ("final", "content")):
                     err = json.dumps(st["err"])[:200] if st["err"] is not None else ""   # FAILED: never happened
                     content = ""
-                    if not err and fetched < FORK_TX_PER_PASS:
+                    if not err:
+                        if fetched >= FORK_TX_PER_PASS:   # over this pass's budget: the next pass, not status-only
+                            info["next"] = self.now + 1
+                            continue
                         fetched += 1
                         content, how = await asyncio.to_thread(self._tx_content, url, k, st["slot"],
                                                                st["confirmationStatus"])
                         self.stats["fork_" + how] += 1
+                    if stage == "content" and not content and not err:     # still unverified: retry, bounded
+                        if now - info["since"] >= FORK_GIVE_UP_S:
+                            self.fork_pending.pop(k, None)
+                            u = self.fork_unproved.get(k)
+                            if u is not None:
+                                u["given_up"] = True       # (bot buys stay blocked; the uncertainty is shown)
+                            self.stats["fork_content_given_up"] += 1
+                            self._fork_log("resolved", k, None, state="content never verified")
+                        else:
+                            info["next"] = self.now + FORK_CONTENT_RETRY_S
+                        continue
                     ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"],
                                    src + ("+getTransaction" if content else ""), err=err, content=content)
                 elif now - info["since"] >= FORK_GIVE_UP_S:
                     why = "not finalized" if info.get("stage") == "final" else "not found"
                     ev = Reconcile(now, info["mint"], k[0], k[1], 0, why, src)
                 else:
-                    info["next"] = self.now + (10 if info.get("stage") == "final" else 1)
+                    info["next"] = self.now + (10 if stage == "final" else FORK_CONTENT_RETRY_S
+                                               if stage == "content" else 1)
                     continue
                 await self.handle(ev)
+            cut = self.now - FORK_UNPROVED_KEEP_S
+            for k in [k for k, u in self.fork_unproved.items() if u["since"] < cut and k not in self.fork_pending]:
+                del self.fork_unproved[k]
         finally:
             self._fork_busy = False
 
@@ -2359,7 +2441,8 @@ class Engine:
                  "forks": {"blocks": {**self.fork_blocks, **{m: s.unsafe for m, s in self.tokens.items() if s.unsafe}},
                            "pending": [[k[0], k[1], v["mint"], v["since"], v.get("stage", "first")]
                                        for k, v in self.fork_pending.items()],
-                           "evidence": [[k[0], k[1], v] for k, v in self.fork_evidence.items()]},
+                           "evidence": [[k[0], k[1], v] for k, v in self.fork_evidence.items()],
+                           "unproved": [[k[0], k[1], v] for k, v in self.fork_unproved.items()]},
                  "leaders": self.leaders.to_json(),
                  "owner": self.outbox.owner if self.outbox is not None else None,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
@@ -2494,6 +2577,10 @@ class Engine:
         for sig, ei, ev in forks.get("evidence") or []:
             if isinstance(ev, dict) and ev.get("level") in ("confirmed", "final"):
                 self.fork_evidence[(sig, int(ei))] = ev
+        for sig, ei, u in forks.get("unproved") or []:
+            if isinstance(u, dict) and u.get("mint"):
+                self.fork_unproved[(sig, int(ei))] = {"mint": u["mint"], "since": float(u.get("since", 0)),
+                                                      "given_up": bool(u.get("given_up"))}
         try:
             self.leaders.load_state(d.get("leaders"))      # followed wallets' bags and observed results carry over
         except (KeyError, TypeError, ValueError) as ex:
@@ -2593,6 +2680,9 @@ class Engine:
         blocked = self.entries_blocked() if L.enabled else "graduation plays are off"
         practice = bool(blocked) and self._practicing(blocked)
         if blocked and not practice:
+            if L.enabled and self.feed.realtime:
+                self._last_late_scan = self.now
+                self._follow_blocked_late(blocked)
             return
         self._last_late_scan = self.now
         en = self.p.entry
@@ -2630,6 +2720,33 @@ class Engine:
             if self.entries_blocked():
                 break
 
+    def _follow_blocked_late(self, blocked: str) -> None:
+        """Entries are blocked (the kill switch, a pause, low SOL): the coins the graduation play would have bought are
+        followed in the exit lab anyway ("late-blocked", from the raw price, every exit variant - TP10 included), so
+        the exit experiments keep collecting while the account can't trade. Measurement only: nothing is bought, and
+        nothing about later entries changes (a separate record of what was followed, not `late_tried`)."""
+        L, en = self.p.late, self.p.entry
+        for s in list(self.tokens.values()):
+            if s.mint in self._late_followed or not s.decided or s.late_tried or s.mint in self.positions \
+                    or s.mint in self.pending or not s.price_known or s.migrated:
+                continue
+            ok, why = evaluate_late_entry(s, self.now, L, {
+                "max_bundle_pct": en.max_bundle_pct, "max_early_sold_ratio": en.max_early_sold_ratio,
+                "creator_launches": len(self.creators.get(s.creator, ())),
+                "max_creator_launches_24h": en.max_creator_launches_24h,
+                "max_cluster_pct": en.funding.max_cluster_pct, "skip_mayhem": self._skip_mayhem()})
+            if not ok:
+                continue
+            if self._skip_mayhem() and (s.mayhem or not s.mayhem_checked):
+                self._check_mayhem(s)                    # (queued once; followed when it's known not Mayhem)
+                continue
+            self._late_followed[s.mint] = self.now
+            self.lab.start(s.mint, s.symbol, "late-blocked", s.curve.price, self.now, self.p, price_kind="raw_mark",
+                           stake_sol=float(self.p.capital.buy_sol), extra={"blocked": blocked[:60], "entry": why[:60]})
+        if len(self._late_followed) > 5000:
+            cut = sorted(self._late_followed.values())[-2500]
+            self._late_followed = {m: t for m, t in self._late_followed.items() if t >= cut}
+
     def _model_picks(self) -> None:
         """The stronger model looks at each new coin at the ages it was trained on (predict.checkpoints_s); a coin at
         or over picks.min_p is followed in the exit lab on PICK_EXITS, filled instantly and as late as the paper bot
@@ -2658,7 +2775,7 @@ class Engine:
             if p >= min_p:
                 self._picked[s.mint] = p
                 self.lab.start(s.mint, s.symbol, "model-pick", s.curve.price, self.now, self.p,
-                               extra={"p": round(p, 3), "age_s": round(age)})
+                               extra={"p": round(p, 3), "age_s": round(age)}, price_kind="raw_mark")
         if len(self._pick_cp) > 20_000:                  # coins long past their last checkpoint
             self._pick_cp = {k: v for k, v in self._pick_cp.items() if k in self.tokens}
             self._picked = {k: v for k, v in self._picked.items() if k in self.tokens}
@@ -2697,7 +2814,7 @@ class Engine:
         if mode == "practice":
             follow = ("practice-buy" if v.approve else "practice-pass") if kind == "late" else \
                 ("sniper-skip" if v.approve else "sniper-pass")     # a sniper follow: as if bought, or as if passed
-            self.lab.start(s.mint, s.symbol, follow, s.curve.price, self.now, self.p, only=("as now",))
+            self.lab.start(s.mint, s.symbol, follow, s.curve.price, self.now, self.p, only=("as now",), price_kind="raw_mark")
         elif s.mint in self.positions:
             self.positions[s.mint].desk = f"side vote: {v.summary}"
 
@@ -2798,6 +2915,7 @@ class Engine:
             pass
 
     def intel_view(self) -> dict:
+        from .feeds import SolanaTradeFeed
         day = time.strftime("%Y-%m-%d", time.gmtime())
         return {"x_reads_today": self._x_day[1] if self._x_day[0] == day else 0,
                 "x_per_day": int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)),
@@ -2807,7 +2925,9 @@ class Engine:
                           "replaced": self.stats["fork_replaced"], "unresolvable": self.stats["fork_unresolvable"],
                           "pending": len(self.fork_pending), "lookup_errors": self.stats["fork_lookup_errors"],
                           "tx_decoded": self.stats["fork_tx_decoded"], "tx_unknown": self.stats["fork_tx_unknown"],
-                          "tx_errors": self.stats["fork_tx_errors"],
+                          "tx_errors": self.stats["fork_tx_errors"], "content_unverified": len(self.fork_unproved),
+                          "content_given_up": self.stats["fork_content_given_up"],
+                          "feed_unclosed_logs": SolanaTradeFeed.unclosed_logs,
                           "entries_held": self.stats["skipped_fork_conflict_unresolved"] +
                           self.stats["skipped_fork_conflict"]}}
 

@@ -107,7 +107,8 @@ def test_practice_with_the_graduation_play_off_scores_every_call(monkeypatch):
     assert e.desk_reviews[-1]["kind"] == "practice" and s.late_tried
     e.lab._close(e.lab.open[s.mint][0], s.curve.price * 1.2, e.now + 60, "graduation exit")
     c = e.desk_calls[-1]
-    assert c["mode"] == "practice" and c["approve"] and c["pnl_pct"] > 15 and s.mint not in e._calls_open
+    # +20% on the price: ~+15% after both fees and both transactions' network costs (version-2 lab accounting)
+    assert c["mode"] == "practice" and c["approve"] and 14 < c["pnl_pct"] < 16 and s.mint not in e._calls_open
     assert e.desk_scorecard()["late"]["personas"]["skeptic"]["pass"]["n"] == 1 and e.desk_scorecard()["sniper"]["calls"] == 0
     e.p.desk["practice"] = False                                          # the switch
     assert not e._practicing()
@@ -174,7 +175,8 @@ def test_the_exit_lab_tries_a_curve_ladder_on_sniper_entries():
         vt = INITIAL_V_TOKENS - prog * CURVE_TOKENS
         s.curve = Curve(30.0 * INITIAL_V_TOKENS / vt, vt)
         e.lab.tick(e.tokens, e.now + 1, e.p)
-    assert sh["rung"] == 3 and abs(sh["pos"].tokens / sh["pos"].initial_tokens - .25) < 1e-6 and sh["proceeds"] > 0
+    assert sh["rung"] == 3 and abs(sh["pos"].tokens / sh["pos"].initial_tokens - .25) < 1e-6
+    assert [x["frac"] for x in sh["cash"]] == [.25, pytest.approx(1 / 3), .5] and sum(x["sol"] for x in sh["cash"]) > 0
 
 
 def _settle(coro):

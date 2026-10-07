@@ -19,7 +19,7 @@ Modes per leader:
 from __future__ import annotations
 
 import json
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -53,6 +53,7 @@ class LeaderStats:
 OBSERVED = ("trades", "closed", "wins", "realized_sol")      # the leader's own results: rebuilt from its events
 LEDGER_EVENTS = 256        # events kept per wallet x coin for exact corrections; older ones fold into its snapshot
 PAIR_IDLE_S = 3600         # a flat wallet x coin with no event for this long folds into the wallet's totals
+FOLDED_IDS_KEPT = 50_000   # identities remembered after folding, so a late correction is marked, not re-counted
 
 
 @dataclass
@@ -71,11 +72,13 @@ class _Pair:
     start: _Bag = field(default_factory=_Bag)          # the bag before `events` (what's folded in can't be corrected)
     start_n: list = field(default_factory=lambda: [0, 0, 0, 0.0])   # trades, closed, wins, realized before `events`
     start_unknown: str = ""
-    events: list = field(default_factory=list)         # [seq, trade or None (retracted / moved), slot]
+    events: list = field(default_factory=list)         # [seq, trade or None (retracted / moved), slot, identity]
     n: list = field(default_factory=lambda: [0, 0, 0, 0.0])         # the same totals after `events`
     unknown: str = ""                                  # why its accounting isn't exact: "" = it is
-    forced: str = ""                                   # (a correction that couldn't be applied)
+    forced: str = ""                                   # (a correction or an arrival that couldn't be replayed)
     last_ts: float = 0.0
+    checkpoint: int = 0                                # the newest slot folded into `start`: older arrivals can't be
+                                                       # placed in order any more (a ninth review, 2026-10-07)
 
 
 class LeaderBook:
@@ -92,6 +95,7 @@ class LeaderBook:
         self.base: dict[str, list] = {}               # wallet -> observed totals not in any pair (earlier runs, folded)
         self.base_unknown: dict[str, int] = defaultdict(int)
         self.where: dict[tuple, tuple] = {}           # event identity (signature, index) -> ((wallet, mint), seq)
+        self.folded_ids: OrderedDict = OrderedDict()  # identities whose events were folded/pruned away -> wallet
         self._seq = self._calls = 0
         self._newest_ts = 0.0
         self.path = path
@@ -146,16 +150,29 @@ class LeaderBook:
             p = self.pairs[key] = self.by_wallet[key[0]][key[1]] = _Pair()
         return p
 
+    @staticmethod
+    def _ident(t: Trade | None) -> tuple | None:
+        return (t.signature, t.event_index) if t is not None and t.signature and t.event_index >= 0 else None
+
+    @staticmethod
+    def _ambiguous(prev: Trade | None, t: Trade) -> str:
+        """Two different transactions in one slot, one of them a sell: (slot, arrival) doesn't prove their chain order
+        (the event index orders events inside one transaction, not transactions inside a slot)."""
+        if prev is None or not t.slot or prev.slot != t.slot or prev.signature == t.signature:
+            return ""
+        return "two transactions in one slot: their order isn't proven" if "sell" in (prev.side, t.side) else ""
+
     def _rebuild(self, key: tuple[str, str]) -> dict:
         """Replay the pair from its snapshot, in chain order: (slot, then arrival). Returns each event's sold fraction."""
         p = self.pairs[key]
         p.events.sort(key=lambda e: (e[2], e[0]))
         b = _Bag(**asdict(p.start))
-        n, why, fr = list(p.start_n), p.start_unknown, {}
-        for seq, t, _ in p.events:
+        n, why, fr, prev = list(p.start_n), p.start_unknown, {}, None
+        for seq, t, _, _ in p.events:
             if t is not None:
                 fr[seq], w = self._step(b, n, t)
-                why = why or w
+                why = why or w or self._ambiguous(prev, t)
+                prev = t
         self.bags[key], p.n, p.unknown = b, n, p.forced or why
         return fr
 
@@ -176,35 +193,48 @@ class LeaderBook:
         key = (t.trader, t.mint)
         p = self._pair(key)
         self._seq += 1
-        p.events.append([self._seq, t, t.slot])
+        ident = self._ident(t)
+        p.events.append([self._seq, t, t.slot, ident])
         p.last_ts = max(p.last_ts, t.ts)
-        if t.signature and t.event_index >= 0:
-            self.where[(t.signature, t.event_index)] = (key, self._seq)
+        if ident:
+            self.where[ident] = (key, self._seq)
+        if t.slot and p.checkpoint and t.slot <= p.checkpoint:
+            p.forced = p.forced or "an event older than its folded snapshot arrived: its order can't be replayed"
         return key, self._seq
+
+    def _forget(self, key: tuple[str, str], seq: int, ident: tuple | None) -> None:
+        """An event leaves the replayable ledger (folded or pruned): its identity is remembered, so a later correction
+        for it marks the history unknown instead of counting it again."""
+        if ident and self.where.get(ident, (None, None))[1] == seq:
+            del self.where[ident]
+        if ident:
+            self.folded_ids[ident] = key[0]
+            while len(self.folded_ids) > FOLDED_IDS_KEPT:
+                self.folded_ids.popitem(last=False)
 
     def _fold(self, key: tuple[str, str]) -> None:
         """Past LEDGER_EVENTS, the oldest events move into the snapshot (they can't be corrected after that)."""
         p = self.pairs[key]
         p.events.sort(key=lambda e: (e[2], e[0]))
         while len(p.events) > LEDGER_EVENTS:
-            seq, t, _ = p.events.pop(0)
+            seq, t, slot, ident = p.events.pop(0)
             if t is not None:
                 _, w = self._step(p.start, p.start_n, t)
                 p.start_unknown = p.start_unknown or w
-                if t.signature and t.event_index >= 0 and self.where.get((t.signature, t.event_index), (0, 0))[1] == seq:
-                    del self.where[(t.signature, t.event_index)]
+            p.checkpoint = max(p.checkpoint, slot or 0)
+            self._forget(key, seq, ident)
 
     def _prune(self) -> None:
-        """A flat bag with no event for PAIR_IDLE_S folds into its wallet's totals (fork corrections come in minutes)."""
+        """A flat bag with no event for PAIR_IDLE_S folds into its wallet's totals (fork corrections come in minutes).
+        Every event's identity goes, retracted ones (tombstones) included."""
         for key, p in list(self.pairs.items()):
             if self.bags.get(key, _Bag()).tokens <= 1e-6 and p.last_ts < self._newest_ts - PAIR_IDLE_S:
                 tot = self.base.setdefault(key[0], [0, 0, 0, 0.0])
                 for i in range(4):
                     tot[i] += p.n[i]
                 self.base_unknown[key[0]] += bool(p.unknown)
-                for seq, t, _ in p.events:
-                    if t is not None and self.where.get((t.signature, t.event_index), (0, 0))[1] == seq:
-                        del self.where[(t.signature, t.event_index)]
+                for seq, _, _, ident in p.events:
+                    self._forget(key, seq, ident)
                 del self.pairs[key], self.by_wallet[key[0]][key[1]]
                 self.bags.pop(key, None)
 
@@ -214,11 +244,11 @@ class LeaderBook:
         p = self._pair(key)
         last = p.events[-1] if p.events else None
         key, seq = self._insert(t)
-        if last is None or (t.slot, seq) >= (last[2], last[0]):      # in chain order: one more step
-            frac, why = self._step(self.bags[key], p.n, t)
-            p.unknown = p.unknown or why
-        else:                                                         # an earlier slot arrived late: replay
+        if p.forced or last is None or (t.slot, seq) < (last[2], last[0]):   # out of order, or marked: replay
             frac = self._rebuild(key)[seq]
+        else:                                                                 # in chain order: one more step
+            frac, why = self._step(self.bags[key], p.n, t)
+            p.unknown = p.unknown or why or self._ambiguous(last[1], t)
         if len(p.events) > LEDGER_EVENTS:
             self._fold(key)
         self._newest_ts = max(self._newest_ts, t.ts)
@@ -232,17 +262,22 @@ class LeaderBook:
         """A fork correction from the coin's state machine: the version of an event already counted (`old`) wasn't
         the chain's - it kept `new`, or none (the transaction failed); old None reinstates a retracted event. The
         affected bags are replayed from their snapshots, so inventory, cost, realized profit, closed bags and wins
-        all match a fresh replay of the corrected history. An event already folded into a snapshot can't be: that
-        bag is marked unknown instead. (Our own copied trades and their fees are real and never touched here.)"""
+        all match a fresh replay of the corrected history. An event already folded or pruned away can't be: its
+        history is marked unknown instead, and nothing is counted again. (Our own copied trades and their fees are
+        real and never touched here.)"""
         t = old if old is not None else new
         if t is None:
             return
-        ident = (t.signature, t.event_index) if t.signature and t.event_index >= 0 else None
+        ident = self._ident(t)
         loc = self.where.get(ident) if ident else None
         touched: set = set()
+        if loc is not None and loc[0] not in self.pairs:     # (an index left behind: treat it as folded away)
+            del self.where[ident]
+            loc = None
+            self.folded_ids[ident] = t.trader
         if loc is not None:
             key, seq = loc
-            ev = next((e for e in self.pairs[key].events if e[0] == seq), None) if key in self.pairs else None
+            ev = next((e for e in self.pairs[key].events if e[0] == seq), None)
             if new is not None and ev is not None and (new.trader, new.mint) == key:
                 ev[1], ev[2] = new, new.slot
             elif ev is not None:
@@ -250,6 +285,15 @@ class LeaderBook:
                 if new is not None and new.trader in self.leaders:
                     touched.add(self._insert(new)[0])
             touched.add(key)
+        elif ident and ident in self.folded_ids:             # folded or pruned away: can't be replayed exactly
+            w = self.folded_ids[ident]
+            pair = self.pairs.get((w, t.mint))
+            if pair is not None:
+                pair.forced = "a fork correction came for an event already folded away"
+                touched.add((w, t.mint))
+            else:
+                self.base_unknown[w] += 1
+                self._restat(w)
         elif old is not None and old.trader in self.leaders:  # counted, but no longer replayable
             if (old.trader, old.mint) in self.pairs:
                 self.pairs[(old.trader, old.mint)].forced = "a fork correction came for an event it can't replay"
@@ -277,9 +321,12 @@ class LeaderBook:
         def tr(t):
             return asdict(t) if t is not None else None
         return {"seq": self._seq, "base": self.base, "base_unknown": dict(self.base_unknown),
+                "folded_ids": [[i[0], i[1], w] for i, w in list(self.folded_ids.items())[-5000:]],
                 "pairs": [{"wallet": k[0], "mint": k[1], "start": asdict(p.start), "start_n": p.start_n,
                            "start_unknown": p.start_unknown, "forced": p.forced, "last_ts": p.last_ts,
-                           "events": [[seq, tr(t), slot] for seq, t, slot in p.events]}
+                           "checkpoint": p.checkpoint,
+                           "events": [[seq, tr(t), slot, list(ident) if ident else None]
+                                      for seq, t, slot, ident in p.events]}
                           for k, p in self.pairs.items()]}
 
     def load_state(self, d: dict | None) -> None:
@@ -290,17 +337,22 @@ class LeaderBook:
         self._seq = int(d.get("seq", 0))
         self.base = {w: list(v) for w, v in (d.get("base") or {}).items()}
         self.base_unknown = defaultdict(int, d.get("base_unknown") or {})
+        for sig, ei, w in d.get("folded_ids") or []:
+            self.folded_ids[(sig, int(ei))] = w
         fields = Trade.__dataclass_fields__
         for r in d.get("pairs") or []:
             key = (r["wallet"], r["mint"])
             p = self._pair(key)
             p.start, p.start_n = _Bag(**r["start"]), list(r["start_n"])
             p.start_unknown, p.forced, p.last_ts = r.get("start_unknown", ""), r.get("forced", ""), r.get("last_ts", 0.0)
-            for seq, t, slot in r.get("events") or []:
+            p.checkpoint = int(r.get("checkpoint", 0))
+            for ev in r.get("events") or []:
+                seq, t, slot = ev[:3]
                 tt = Trade(**{k: v for k, v in t.items() if k in fields}) if t else None
-                p.events.append([seq, tt, slot])
-                if tt is not None and tt.signature and tt.event_index >= 0:
-                    self.where[(tt.signature, tt.event_index)] = (key, seq)
+                ident = tuple(ev[3]) if len(ev) > 3 and ev[3] else self._ident(tt)
+                p.events.append([seq, tt, slot, ident])
+                if ident:
+                    self.where[ident] = (key, seq)
             self._rebuild(key)
             self._newest_ts = max(self._newest_ts, p.last_ts)
         for w in set(self.base) | set(self.by_wallet):
