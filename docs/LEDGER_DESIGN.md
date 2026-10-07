@@ -1,6 +1,52 @@
-# One transactional ledger: schema and migration (DESIGN, revision 2, for review before implementation)
+# One transactional ledger: schema and migration (DESIGN, revision 3, for review before implementation)
 
 **Status: a proposal, nothing built.** It answers the eighth review's answer 7 and the ninth review's 12-point acceptance list, and is meant to be reviewed before implementation. Numbers in brackets, like [A3], refer to that list.
+
+**The current specification** is `research/ledger/schema.sql` and `reference.py`, with the revision 3 and 2 sections below. The revision 1 sections after them are kept for history and are **superseded wherever they disagree** (listed at the end of revision 3).
+
+## Revision 3 (the eleventh review): acceptance work before any engine integration
+
+The reviewer approved the architecture and continued isolated work, not engine migration. Revision 3 makes its blockers concrete, each with tests on real SQLite (`tests/test_ledger_design.py`):
+
+- **The opening is the observed cash.** Revision 2's worked vectors debited the legacy residual from cash a second time, although the observed cash already reflects it. Now:
+  - the adoption posts the observed cash (3.472391524 SOL in the vector);
+  - the residual (0.00804 SOL, the legacy books' expected cash minus the observed) is carried as `unresolved` **against the opening book**, so no cash moves;
+  - the opening book's total is then the legacy expected cash.
+
+  The test compares the result with a separate source snapshot, not with the vector's own legs. `unresolved` is a suspense item: not cash, not equity.
+- **Every economic append has the caller's stable key:** `(account, kind, key)`, unique.
+  - The same content again is a replay: the original is returned and nothing is written. This covers a crash after commit and before the acknowledgement, which is tested.
+  - Different content under the same key is a conflict.
+  - An append without a key is refused. Only an adoption and a residual, once per account, default to their kind.
+- **Effects are unique** whatever event carries them: each fill (`signature:event index`) and each signature's network fee once per account. One signature can carry several fills.
+- **Holdings never go negative.** Cash, reserved, inventory and rent are checked after each event, inside its transaction. External and unresolved books may go negative.
+- **Seals:**
+  - an event is inserted open and unsealed;
+  - sealing freezes every other column;
+  - startup recomputes every sealed event's payload hash, content hash, per-asset sums and postings hash, plus every holding and every stored signed transaction's hash, and fails closed on any inconsistency.
+
+  This catches a forged seal from a bad writer, and history edited around the triggers. It's a defence against bugs and bad migrations: a writer able to rewrite the whole file, hashes included, defeats any in-file check.
+- **Observations are append-only**, and carry the block height they were made at.
+- **Attempts:**
+  - an attempt stores the exact signed transaction (≤ 1232 bytes) with its signature and expiry, before it's sent, and the bytes are immutable;
+  - its state moves only along legal transitions: signed → submitted or not sent; submitted or unknown → unknown, landed OK, landed failed, or expired absent;
+  - a terminal state needs an observation of that signature;
+  - expired absent needs a **finalized** absence observed above the last valid block height;
+  - a restored unknown attempt blocks any new signature for its order, and there's one live sell intent per position.
+- **Crash, lock and fault injection on the writer:** a crash at each point inside the transaction leaves nothing; a locked database fails the append cleanly and a later retry succeeds.
+
+**Still before integration** (the reviewer's conditions, unchanged):
+- the real order, fill, fee and outbox paths, written atomically with crash injection, disk and lock failure, replayed receipts, recovery, and exact-export tests;
+- residual partial-fill accounting;
+- the all-writer cutover with the actual opening, unknown orders and inventory, rent and the residual, validated against the source and chain balances;
+- owner and manual-order durability, with no unjournaled emergency send.
+
+**Superseded revision-1 statements:**
+- `event_id` as a ULID: now `seq` is the commit order and the id derives from the key;
+- `receipts UNIQUE(signature, commitment, source)`: now observations, keyed by a digest of everything they say, with contradictions appended;
+- `fills UNIQUE(signature, event_index)` and a fee `UNIQUE(signature)`: now the `effects` table;
+- an attempt's transaction **hash**: now the signed bytes plus their hash;
+- migration step 3's residual: now the opening rule above.
 
 ## Revision 2 (the tenth review): DDL, protocol and worked postings
 
@@ -65,6 +111,8 @@ Answers to the ten points, in order:
 
 **Still not implemented:** wiring this into the engine, fault injection against the real order paths, and a real post-adoption interval. Those come after this design is reviewed.
 
+> **Revision 1 (history).** The sections from here on are the first, logical design. Where they disagree with revisions 2 and 3 above, those win. The superseded statements are listed at the end of revision 3, and marked "(superseded)" in place.
+
 ## Why
 
 Today the account lives in four places:
@@ -100,12 +148,12 @@ They're kept consistent by careful ordering, not by a transaction. The journal c
 | table | what | uniqueness / constraints |
 |---|---|---|
 | `accounts` | scope: mode (`paper` / `live` / `synthetic`), chain/genesis, owner wallet, strategy or test account, the opening event | `UNIQUE(account_id)`; `CHECK(mode IN (...))`. A synthetic account's rows can't reference a live account (enforced by the foreign key plus mode checks in the posting trigger) |
-| `events` | append-only economic journal: every cash or inventory change, and every lifecycle fact | `event_id` (ULID) primary key. Also: account, mode, `schema_version`, `code_revision`, `recorded_at` (wall), `engine_ts`, `chain_ts`, `causation_id` / `correlation_id`, `payload` (JSON), `payload_sha256`, `corrects` (the event id it reverses or replaces) [A2, A7]. No UPDATE or DELETE: a trigger raises |
+| `events` | append-only economic journal: every cash or inventory change, and every lifecycle fact | `event_id` (ULID) primary key *(superseded: rev 2/3, `seq` and a key-derived id)*. Also: account, mode, `schema_version`, `code_revision`, `recorded_at` (wall), `engine_ts`, `chain_ts`, `causation_id` / `correlation_id`, `payload` (JSON), `payload_sha256`, `corrects` (the event id it reverses or replaces) [A2, A7]. No UPDATE or DELETE: a trigger raises |
 | `postings` | the balanced integer effects of each event, per asset and account (cash, inventory, reserved, fees, rent, external flows) | `FOREIGN KEY(event_id)`; per event, `sum(amount)` per asset across the account's books and the external-flow book is 0 (checked in the same transaction) |
 | `orders` | durable logical intent: buy/sell, mint, size, reason, policy and strategy versions, state | `state IN (intent, signed, submitted, unknown, confirmed, final, failed, expired)` [A4]; one open sell per position (partial unique index) |
-| `attempts` | each signed transaction: exact signature, blockhash and expiry, serialized transaction hash, submission state | `UNIQUE(signature)`. A retry reuses the attempt, never signs a second economic order for the same intent [A4, A5] |
-| `receipts` | what the chain said about an attempt: commitment, slot, error, source, observed time | `UNIQUE(signature, commitment, source)`. The strongest evidence wins, by the fork rules |
-| `fills` | a proven execution: attempt, event locator, tokens, lamports, fees broken down | `UNIQUE(signature, event_index)`. A network fee is `UNIQUE(signature)` once per transaction, never once per event |
+| `attempts` | each signed transaction: exact signature, blockhash and expiry, serialized transaction hash *(superseded: rev 3 stores the signed bytes)*, submission state | `UNIQUE(signature)`. A retry reuses the attempt, never signs a second economic order for the same intent [A4, A5] |
+| `receipts` | what the chain said about an attempt: commitment, slot, error, source, observed time | `UNIQUE(signature, commitment, source)` *(superseded: rev 2 observations keyed by digest, contradictions appended)*. The strongest evidence wins, by the fork rules |
+| `fills` | a proven execution: attempt, event locator, tokens, lamports, fees broken down | `UNIQUE(signature, event_index)`. A network fee is `UNIQUE(signature)` once per transaction, never once per event *(superseded: rev 3's `effects` table)* |
 | `inventory`, `lots` | projections: holdings, cost basis and unknown-basis lots, quarantined tokens | rebuilt from `postings`; a cache only [A3] |
 | `quotes` | the quote observer's records (T9-E1's quote contract) | `UNIQUE(quote_id)` |
 | `outbox` | durable effects with stable keys: notifications, dashboard pushes | `UNIQUE(effect_key)`. Delivery at least once; application idempotent |
@@ -174,7 +222,7 @@ It also injects:
 3. **Import into a new epoch:**
    - original ids and account boundaries;
    - unknown outcomes, reservations, and the opening provenance;
-   - the **legacy residual (−0.00804 SOL)**, kept as an unresolved reconciliation item. No trades or fees are fabricated to make it balance.
+   - the **legacy residual (−0.00804 SOL)**, kept as an unresolved reconciliation item. No trades or fees are fabricated to make it balance. *(Revision 3: the opening is the observed cash, and the residual is carried against the opening book without moving cash.)*
 4. **Prove it against the sources:**
    - cash, held inventory, reservations, closed results and per-transaction fees;
    - for a live scope, on-chain balances first.
