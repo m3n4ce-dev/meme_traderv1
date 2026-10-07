@@ -158,3 +158,35 @@ def test_the_account_ledger_is_by_close_day_and_reconciles_cash(tmp_path):
     rec = json.loads((tmp_path / "pkg" / "account_reconciliation.json").read_text())
     assert rec["net_pnl_sol"] == pytest.approx(0.04) and rec["open_positions_cash_effect_sol"] == pytest.approx(-0.2)
     assert rec["residual_sol"] == pytest.approx(-0.003)             # a fee no position carries (a failed buy, say)
+
+
+def test_untagged_rows_the_book_claims_are_recovered_and_one_row_set_feeds_both_checks(tmp_path):
+    d = tmp_path / "data"
+    d.mkdir()
+    base = {"symbol": "C", "cost": 0.1, "pnl_pct": 0, "source": "chains", "pnl_schema": 2, "failed_fees_sol": 0.0}
+    tagged = {**base, "mint": "A" * 44, "opened": DAY, "closed": DAY + 60, "proceeds": 0.12, "pnl": 0.02,
+              "gross_pnl": 0.02, "mode": "paper"}
+    untagged = {**base, "mint": "B" * 44, "opened": DAY + 100, "closed": DAY + 160, "proceeds": 0.05, "pnl": -0.05,
+                "gross_pnl": -0.05}                                                     # logged without a mode
+    jl(d / "trades-2026-10-06.jsonl", [tagged, untagged])
+    (d / "sniper_state_paper.json").write_text(json.dumps({
+        "account_id": "acct1", "book": {"sol": 9.0 - 0.03 - 0.001, "start_sol": 9.0, "closed": [tagged, untagged]},
+        "positions": {}}))
+    jl(d / "account-paper.jsonl", [
+        {"ts": DAY - 10, "account": "acct1", "kind": "adopted", "sol": 0, "cash_after": 9.0},
+        {"ts": DAY, "account": "acct1", "kind": "buy", "sol": -0.1},
+        {"ts": DAY + 60, "account": "acct1", "kind": "sell", "sol": 0.12},
+        {"ts": DAY + 100, "account": "acct1", "kind": "buy", "sol": -0.1},
+        {"ts": DAY + 120, "account": "acct1", "kind": "failed_fee", "sol": -0.001},
+        {"ts": DAY + 160, "account": "acct1", "kind": "sell", "sol": 0.05}])
+    root = tmp_path / "root"
+    root.mkdir()
+    rx.run(d, tmp_path / "pkg", root=root)
+    rows = {r["mint"][:1]: r for r in csv.DictReader(open(tmp_path / "pkg" / "paper_trades.csv"))}
+    assert rows["B"]["mode"] == "paper" and rows["B"]["provenance"].startswith("trade log; mode recovered")
+    led = list(csv.DictReader(open(tmp_path / "pkg" / "account_ledger.csv")))
+    rec = json.loads((tmp_path / "pkg" / "account_reconciliation.json").read_text())
+    assert sum(float(r["net_pnl_sol"]) for r in led if r["account"] == "current") == pytest.approx(rec["net_pnl_sol"])
+    assert rec["net_pnl_sol"] == pytest.approx(-0.03) and rec["residual_sol"] == pytest.approx(-0.001)
+    ev = rec["event_journal"]
+    assert ev["available"] and ev["residual_sol"] == pytest.approx(0) and ev["unattached_failed_fees_sol"] == -0.001

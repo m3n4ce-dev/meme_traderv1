@@ -4,6 +4,63 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #70: The seventh review: revisable fork evidence, logical events for wallet-following, one T9 account model, typed account events
+
+**Source:** a seventh external review (revision 0f9ab0a).
+- **The reviewer's nine new contracts:** 0/9 → **9/9** pass. Its 14 earlier checks still pass.
+- **Our own tests:** `tests/test_review_astra7.py`, `tests/test_t9_signal.py`, plus additions to `tests/test_review_export.py`.
+- **Suite:** 501 passed, 1 skipped.
+
+1. **Fork evidence has levels and can be revised** (`tracker.py`, `engine.py`).
+   - **Levels:** a conflict is `unresolved` (provisional state, coin flagged), `confirmed` (usable, but re-checked every 10 s until finalized), `final`, `unresolvable` or `retracted`.
+   - **Revision:** a finalized answer revises a confirmed one. Weaker evidence never overrides final, and two contradicting final answers make it unresolvable.
+   - **New contradicting content reopens a settled event:** flagged again and re-asked.
+   - **Failed transactions:** a transaction that landed but **failed** has its trade **retracted** from the coin (and from followed wallets' bags), and the coin stays flagged.
+   - **Same-slot copies:** two differing copies from one slot can't be told apart by slot, so the event is unresolvable, not a guess.
+   - **Malformed answers:** RPC answers without a valid slot, confirmation and `err` field aren't evidence.
+   - **Restarts:** known fork blocks and pending lookups are saved and restored, for held and unheld coins. A restored coin without its history stays blocked until proven safe; manual trading is never blocked.
+2. **Wallet-following sees logical events, not deliveries** (`engine._dispose`).
+   - **One disposition per delivery:** new, repeat or conflict.
+   - **Only new events reach** the gate audit, the market pulse, wallet-following (bags, stats, signals) and the known-wallet tape.
+   - **The bug it fixes:** a duplicate buy used to double a followed wallet's bag.
+   - **Corrections:** a proven replacement or retraction corrects the wallet's bag (`LeaderBook.replace`).
+   - **Raw deliveries** stay in the recording for diagnostics.
+3. **One T9 account model** (`meme_trader/sniper/t9_portfolio.py`) for the future paper runner and the simulation.
+   - **Cash:** debited on entry, credited on exit.
+   - **Capacity:** positions hold it until they exit. Unmeasured exits hold capacity and capital for the retry window, then are written off, never returned to cash.
+   - **Days:** exits and daily losses land on their own UTC day.
+   - **Window:** nothing enters that couldn't close inside it.
+   - **Trace:** every entry, skip and exit is recorded.
+   - **`research/power_t9_e1.py` v2 runs the whole procedure through it** at H = 1 SOL, with 5% independent or 17% clustered missingness, Wilson intervals per cell, and its constants, packages and code revision in the output. The draft-2 power table is superseded.
+
+   **Results:**
+
+| Scenario (H = 1 SOL; 150 runs a cell) | 5% unmeasured, independent: pass at 60 / 90 / 120 days | +1.5% cost, 90 days | 17% unmeasured, in outage days |
+|---|---|---|---|
+| **No edge** (breakeven after costs) | 0.00 / 0.00 / 0.00 (95% CI to 0.025) | 0.00 | 0.00 |
+| A quarter of the replay's winner rate | 0.39 / 0.43 / 0.50 | 0.33 | 0.00 |
+| Half the rate | 0.89 / 0.94 / 0.97 | 0.81 | 0.00 |
+| The replay's rate (optimistic) | 1.00 / 1.00 / 1.00 | 1.00 | 0.00–0.03 |
+| Half the rate, worse ordinary trades | 0.34 / 0.31 / 0.43 | 0.19 | 0.00 |
+
+   - **False passes are still rare.**
+   - **Through a real account, the borderline cases are weaker than the first simulation said:** a quarter of the rate passes 39–50%, not 68–90%.
+   - **The decisive finding is coverage.** With replay-like missingness (17%, concentrated in outage days), measured coverage lands at about 0.70–0.76. That's under the registered 80% gate, so nothing passes, even at the replay's rate.
+   - **What that means:** the test only means something if the runner measures nearly every exit (fresh on-chain quotes). That has to be shown in a shadow run before registering.
+
+4. **Typed account events and one row set** (`engine._cash`, `review_export.ledger`).
+   - **The journal:** every cash change goes through one method that writes `data/account-<mode>.jsonl`: buy, sell, failed fee (attached to a position or not), deposit, reset, wallet sync, plus close links. It carries a durable account id that persists in the saved state; a reset records the old and new id.
+   - **The ledger and the cash check now use one row set:** the account's closes as the saved book knows them, matched to the trade logs.
+   - **The three "missing" closes:** other-chain trades from 10-05 whose log rows had no mode tag (the other-chain close path didn't tag one then). Recovered and labelled.
+   - **The check:** a tolerance declared in advance (0.01 SOL), and an event-based check once the journal exists.
+5. **The T9 signal is one shared, versioned implementation** (`meme_trader/sniper/t9_signal.py`, `t9-signal-2`).
+   - **The fix:** the price 5 and 15 minutes ago is the last trade AT OR BEFORE the boundary, as registered. The replay used strictly-before.
+   - **The rerun:** `t9_replay_v2` gives 133 signals and 106 measured; mean +29.2%, median −10.3%; the top 3 episodes are 89% of the total.
+   - **The two stresses together:** without the top 3 episodes AND with unmeasured trades at zero recovery, **−18.9** position-units. At their last prints without the top 3, about flat (−0.2). Each stress alone was positive.
+   - **What it means:** the revival result depends on a few huge episodes and on exits being executable. 17% of entered trades had no measurable exit.
+
+---
+
 ## 2026-10-07 — Entry #69: The fork repair asks the feed's own provider; T9-E1 draft 2 with the whole procedure simulated
 
 - **The fork repair asks the feed's provider, live.** In its first minutes it settled 27 conflicts out of about 5,000 trade deliveries, all `confirmed`.

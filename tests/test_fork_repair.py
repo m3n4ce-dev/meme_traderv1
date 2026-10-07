@@ -65,7 +65,7 @@ def test_the_chains_answer_keeps_or_reverts_and_is_idempotent():
     s2 = coin()
     s2.on_trade(tr("S", 100, "W", 10, 31), 10)
     s2.on_trade(tr("S", 101, "W", 12, 32), 10)
-    assert s2.resolve_conflict(("S", 0), 101) == "kept" and s2.holders["W"] == 12 and not s2.unsafe
+    assert s2.resolve_conflict(("S", 0), 101, "confirmed") == "kept" and s2.holders["W"] == 12 and not s2.unsafe
 
 
 def test_an_answer_matching_no_copy_stays_unsafe():
@@ -105,7 +105,7 @@ def test_automated_buys_wait_for_the_chain_and_manual_ones_dont():
     s.on_trade(tr("S", 101, "W", 12, 32), 10)
     assert e._authorize(M, 0.01, "late") == "fork conflict unresolved"
     assert e._authorize(M, 0.01, "manual") == ""
-    s.resolve_conflict(("S", 0), 101)
+    s.resolve_conflict(("S", 0), 101, "finalized")
     assert e._authorize(M, 0.01, "late") == ""
 
 
@@ -134,7 +134,7 @@ def test_the_engine_asks_the_chain_in_batches(monkeypatch):
 
     def lookup(url, sigs):
         seen.append(("getSignatureStatuses", sigs))
-        return [{"slot": 101, "confirmationStatus": "confirmed"}, None]
+        return [{"slot": 101, "confirmationStatus": "confirmed", "err": None}, None]
     monkeypatch.setattr(Engine, "_status_lookup", staticmethod(lookup))
     monkeypatch.setenv("SOLANA_WS_URL", "wss://feed.example/?api_key=SECRET")
 
@@ -146,7 +146,8 @@ def test_the_engine_asks_the_chain_in_batches(monkeypatch):
         await e._reconcile_forks()
     asyncio.run(go())
     assert seen and seen[0][0] == "getSignatureStatuses" and set(seen[0][1]) == {"S", "X"}
-    assert e.tokens[M].conflicts[("S", 0)]["status"] == "resolved" and ("X", 0) in e.fork_pending
+    assert e.tokens[M].conflicts[("S", 0)]["status"] == "confirmed" and ("X", 0) in e.fork_pending
+    assert e.fork_pending[("S", 0)]["stage"] == "final"          # confirmed is provisional: re-checked until final
     ev = NS(**e.tokens[M].conflicts[("S", 0)]["evidence"])
     assert ev.source == "getSignatureStatuses@feed.example" and "SECRET" not in json.dumps(vars(ev))   # host only
     assert e._fork_rpc()[0] == "https://feed.example/?api_key=SECRET"            # the feed's own provider, over HTTP
