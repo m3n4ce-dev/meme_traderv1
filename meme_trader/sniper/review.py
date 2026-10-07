@@ -59,10 +59,11 @@ def recorded_feeds() -> list[str]:
 
 def gather(days: int, sniper_params: dict) -> dict:
     from .analytics import compute
+    from .pnl import upgrade
 
     trades = []
     for path in sorted(glob.glob(str(DATA / "trades-*.jsonl")))[-days:]:
-        trades += [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
+        trades += [upgrade(json.loads(x)) for x in Path(path).read_text().splitlines() if x.strip()]
     # real-market trades only: demo (synthetic) and untagged rows would distort the post-mortem
     trades = [t for t in trades if t.get("mode") in ("paper", "live")]
     summary = json.loads((DATA / "sniper_summary.json").read_text()) if (DATA / "sniper_summary.json").exists() else {}

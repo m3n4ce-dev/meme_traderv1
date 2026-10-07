@@ -4,6 +4,42 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #68: The sixth review: honest exports, net P&L, replays that don't invent exits, fork repair
+
+**Source:** a sixth external review (revision 75fb797). It reproduced three defect families and the wider consequence of the fork copies, with six failing contracts. Our own tests: `tests/test_review_astra6.py`, `tests/test_replay_exec.py`, `tests/test_fork_repair.py`. The reviewer's file now passes 6 of 6 (it was 0 of 6), and their earlier round-5 checks pass 8 of 8. The suite: 481 passed, 1 skipped.
+
+1. **Replays never invent an exit** (`meme_trader/sniper/replay_exec.py`).
+   - **What failed:** the first T9 replay filled a delayed exit with no trade after it at the trigger print, and sold a position whose holding period outran the day's file at its last print. The reviewer's synthetic cases booked +898.8% and +98.8%.
+   - **The shared rules, now used by the replay and the forward test alike:** a fill is only a recorded trade at or after its time, inside what the recording observed. Otherwise the trade is `censored` (no trade for 30 min), `pending` (the recording ended) or `execution_unmeasured` (a recording gap), with a mark kept for sensitivity only. The published scripts' `run` is corrected and their old T9 numbers are marked invalid.
+   - **The rerun:** `research/exploratory/t9_replay_v2.py` reads the sealed 10-04..06 recordings as one series per pool, so positions cross midnight. Its coverage includes 126 recording gaps totalling about 15 h.
+   - **Primary-like rule** (+40% in 5 min on 4× volume, 60 s, hold 1 h, 1.2% cost):
+     - 134 signals, 107 measured (80%; 13 censored, 13 unmeasured, 1 pending);
+     - mean +28.2%, median −10.7%; per day +54.5 / +21.0 / +15.2%;
+     - the top 3 of 87 episodes are 91% of the total; +2.6 position-units without them;
+     - still +7.9 if every unmeasured trade recovered nothing; leaving out any one day, at least +14.4.
+   - **Across the grid:** momentum is positive every day in 90 of 189 variants; dip-buying in 8 of 126.
+   - **The verdict is unchanged in kind:** in-sample, selected on the same days, carried by a few revivals. Exploratory.
+2. **Fork copies repair the whole coin, and only with the chain's answer** (`tracker.py`, `events.Reconcile`, `engine._reconcile_forks`).
+   - **What failed:** dropping the second copy kept the first copy's holder balance, flows and early-buyer history, not just its price, and the next trade only fixed the price.
+   - **Now:** each coin keeps a ledger of the trades applied (up to 3,000). The same event delivered again with the same content counts once. With different content it's a conflict:
+     - **while unresolved:** the coin is flagged, with no new automated entry (manual is never blocked), and rebuilt from its ledger with the later slot's version as a provisional state;
+     - **the chain's answer:** the engine asks `getSignatureStatuses` (batched, every second while any are pending) which slot the transaction landed in, and records it as a `Reconcile` event. That keeps or reverts the version, and replays repair state the same way;
+     - **no answer within 10 min, or one matching no copy:** the coin stays flagged, never reported clean;
+     - **a coin restored mid-life**, or past its ledger, can't be rebuilt exactly, so it stays flagged.
+3. **The forward-test export is one row per (follow, exit).**
+   - An exit with a durable result is no longer also written as open (84 such duplicates in the last package).
+   - A terminal state found only in the checkpoint is labelled `inconsistent`.
+   - Counts come from the rows actually written.
+4. **A closed trade's `pnl` is net** (`pnl.py`, schema 2).
+   - It's `gross_pnl − failed_fees_sol`, matching cash and daily P&L. The reviewer's example (0.05 in, a 0.01 failed sell, 0.06 out) is now 0, not a +0.01 win. Win counts, defense mode, copy pausing, analytics and research read net through it.
+   - Older rows are upgraded from their own fees when loaded (`net_derived`).
+   - **New in the export:**
+     - `account_ledger.csv`: realized P&L by close day, not the entry-day cohorts;
+     - `account_reconciliation.json`: the current account's cash against its trades.
+   - **The current paper account** (since an account restart on 10-05 ~01:30 UTC that the journal never recorded) reconciles to **−0.008 SOL**: fees of failed buys with no position. Earlier periods can't be reconciled, because their resets weren't all journaled.
+
+---
+
 ## 2026-10-07 — Entry #67: The research scripts published, a private name and a wallet address out of the repo, a correction
 
 - **The exploratory scripts behind T1–T9 are in `research/exploratory/`** (with the owner's go-ahead). `README.md` there maps each test to its scripts, splits and run times. Only three things changed from the originals:

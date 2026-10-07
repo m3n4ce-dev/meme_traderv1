@@ -110,6 +110,17 @@ def read_jsonl(p: Path):
     return rows, bad
 
 
+def _days(known: list[str]) -> list[str]:
+    """Every calendar day from the first to the last (days with nothing included)."""
+    span = []
+    if known:
+        t = calendar.timegm(time.strptime(known[0], "%Y-%m-%d"))
+        while day_of(t) <= known[-1]:
+            span.append(day_of(t))
+            t += 86400
+    return span
+
+
 def interval_of(r: dict) -> str:
     mode = r.get("mode")
     if mode is None:
@@ -144,18 +155,21 @@ class Export:
             rows += rs
             bad += b
         fixed = ["trade_id", "interval", "day_utc", "mode", "source", "session", "config", "model", "mint", "symbol",
-                 "chain", "pool", "opened", "closed", "cost", "proceeds", "pnl", "pnl_pct", "peak_gain_pct", "mae_pct",
+                 "chain", "pool", "opened", "closed", "close_day_utc", "cost", "proceeds", "gross_pnl",
+                 "failed_fees_sol", "pnl", "pnl_pct", "pnl_schema", "net_derived", "peak_gain_pct", "mae_pct",
                  "exit", "score", "initials", "desk", "p", "start_sol", "entry_delay_s", "exit_delay_s",
-                 "entry_vs_signal_pct", "exit_vs_signal_pct", "failed_fees_sol", "entry_mcap_sol", "exit_mcap_sol",
+                 "entry_vs_signal_pct", "exit_vs_signal_pct", "entry_mcap_sol", "exit_mcap_sol",
                  "cost_usd", "proceeds_usd", "pnl_usd", "leader"]
         extra = set()
         out = []
+        from .pnl import upgrade
         for r in rows:
-            r = self.ps.row(r)
+            r = self.ps.row(upgrade(r))
             o = {k: r.get(k) for k in fixed}
             o["trade_id"] = hashlib.sha1(f"{r.get('mint')}|{r.get('opened')}|{r.get('source')}|{r.get('session')}"
                                          .encode()).hexdigest()[:16]
             o["interval"], o["day_utc"] = interval_of(r), day_of(r.get("opened"))
+            o["close_day_utc"] = day_of(r.get("closed"))
             for k in ("fees", "real"):
                 for kk, vv in (r.get(k) or {}).items():
                     o[f"{k}_{kk}"] = vv
@@ -171,6 +185,70 @@ class Export:
                    by_interval=dict(Counter(o["interval"] for o in out)),
                    brief_cohort_by_source=dict(Counter(o["source"] for o in out if o["interval"].startswith("brief"))))
         return out
+
+    def ledger(self, trades: list[dict]) -> None:
+        """The paper account by close day (realized, chronological - not the entry-day cohorts in paper_trades.csv),
+        and whether the current account's cash reconciles with its trades (a sixth review, 2026-10-07)."""
+        from .pnl import upgrade_all
+        sp = self.data / "sniper_state_paper.json"
+        state = json.loads(sp.read_text()) if sp.exists() else {}
+        if state:
+            self.inputs.append(sp)
+        book = state.get("book") or {}
+        closed = upgrade_all([dict(r) for r in book.get("closed") or []])
+        start_ts = min((r["closed"] for r in closed), default=None)   # the current account's first close
+        paper = sorted((t for t in trades if t.get("mode") == "paper"), key=lambda t: t["closed"] or 0)
+        days: dict[tuple, dict] = {}
+        for t in paper:
+            acct = "current" if start_ts is not None and t["closed"] >= start_ts - 1 else "earlier"
+            g = days.setdefault((t["close_day_utc"], acct), {"positions": 0, "gross_pnl": 0.0, "failed_fees": 0.0,
+                                                               "net_pnl": 0.0, "sources": Counter()})
+            g["positions"] += 1
+            g["gross_pnl"] += float(t.get("gross_pnl") or 0.0)
+            g["failed_fees"] += float(t.get("failed_fees_sol") or 0.0)
+            g["net_pnl"] += float(t.get("pnl") or 0.0)
+            g["sources"][str(t.get("source", "")).split(":")[0]] += 1
+        span = _days(sorted({d for d, _ in days}))
+        with open(self.out / "account_ledger.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["close_day_utc", "account", "positions", "gross_pnl_sol", "failed_fees_sol", "net_pnl_sol",
+                        "cumulative_net_sol", "by_source"])
+            cum = {"current": 0.0, "earlier": 0.0}
+            for d in span:
+                for acct in ("earlier", "current"):
+                    g = days.get((d, acct))
+                    if g is None:
+                        if acct == "current" and not any((d, a) in days for a in cum):
+                            w.writerow([d, "", 0, 0, 0, 0, "", "{}"])        # a day with no closes at all
+                        continue
+                    cum[acct] += g["net_pnl"]
+                    w.writerow([d, acct, g["positions"], round(g["gross_pnl"], 6), round(g["failed_fees"], 6),
+                                round(g["net_pnl"], 6), round(cum[acct], 6), json.dumps(dict(g["sources"]))])
+        rec = {"account_start": start_ts, "note": "the current account = since the first close in the saved book; "
+               "earlier resets (before it) weren't all journaled, so earlier periods can't be reconciled to cash"}
+        if book:
+            net = sum(float(r["pnl"]) for r in closed)
+            opened = list((state.get("positions") or {}).values())
+            open_part = sum(float(p.get("proceeds_sol", 0)) - float(p.get("initial_cost_sol", 0)) -
+                            float(p.get("rent_sol", 0)) - float(p.get("failed_fees_sol", 0)) for p in opened)
+            expected = float(book["start_sol"]) + net + open_part
+            logged = {(t["mint"], round(t["opened"] or 0, 3)) for t in paper if start_ts and t["closed"] >= start_ts - 1}
+            saved = {(r["mint"], round(r["opened"], 3)) for r in closed}
+            rec.update({
+                "start_sol_incl_deposits": book["start_sol"], "deposits": book.get("deposits") or [],
+                "closed_positions": len(closed), "closed_list_truncated": len(closed) >= 500,
+                "gross_pnl_sol": round(sum(float(r.get("gross_pnl", r["pnl"])) for r in closed), 6),
+                "failed_fees_on_positions_sol": round(sum(float(r.get("failed_fees_sol") or 0) for r in closed), 6),
+                "net_pnl_sol": round(net, 6), "open_positions": len(opened), "open_positions_cash_effect_sol":
+                round(open_part, 6), "expected_cash_sol": round(expected, 6), "cash_sol": round(float(book["sol"]), 6),
+                "residual_sol": round(float(book["sol"]) - expected, 6),
+                "residual_means": "cash spent outside any closed or open position: fees of failed buys that never "
+                                  "opened one, and anything not journaled (negative = unexplained loss)",
+                "closes_in_book_not_in_trade_logs": len(saved - logged),
+                "closes_in_trade_logs_not_in_book": len(logged - saved)})
+        (self.out / "account_reconciliation.json").write_text(json.dumps(rec, indent=1))
+        self._note("account_ledger.csv", rows=sum(1 for _ in open(self.out / "account_ledger.csv")) - 1)
+        self._note("account_reconciliation.json", residual_sol=rec.get("residual_sol"))
 
     def journal(self) -> None:
         files = sorted(self.data.glob("journal-*.jsonl"))
@@ -249,23 +327,36 @@ class Export:
         signals: dict[str, dict] = {}
         keep = ("pool", "mint", "symbol", "rule", "delay", "control", "signal_t", "decided_at", "lag_s", "ret5",
                 "surge", "cost", "cost_how")
+        # one row per (follow, exit) - a sixth review, 2026-10-07: a follow stays in the checkpoint while any of its
+        # exits is pending, so an exit that already has its durable result must not be written again as open
+        rows_out, terminal = [], set()
+        for r in results:
+            terminal.add((r["id"], r["exit"]))
+            rows_out.append({"follow_id": r["id"], "status": "censored" if r.get("censored") else "closed",
+                             "exploratory": True, **r})
+            signals.setdefault(r["id"], {k: r.get(k) for k in keep})
+        for fo in follows:
+            for name, x in (fo.get("exits") or {}).items():
+                if (fo["id"], name) in terminal:
+                    continue                             # its result row stands
+                done = "pnl" in x or x.get("censored")   # terminal in the checkpoint, yet absent from the store
+                rows_out.append({"follow_id": fo["id"], "status": "inconsistent" if done else "open",
+                                 "exploratory": True, "exit": name, **{k: fo.get(k) for k in keep},
+                                 "p0": fo.get("p0"), "fill_t": fo.get("fill_t"), "state": x})
+            signals.setdefault(fo["id"], {k: fo.get(k) for k in keep})
+        keys = [(r["follow_id"], r["exit"]) for r in rows_out]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"revival export: {len(keys) - len(set(keys))} duplicate (follow, exit) rows")
         with open(self.out / "revival_outcomes.jsonl", "w") as f:
-            for r in results:
-                f.write(json.dumps({"follow_id": r["id"], "status": "censored" if r.get("censored") else "closed",
-                                    "exploratory": True, **r}) + "\n")
-                signals.setdefault(r["id"], {k: r.get(k) for k in keep})
-            for fo in follows:
-                for name, x in (fo.get("exits") or {}).items():
-                    f.write(json.dumps({"follow_id": fo["id"], "status": "open", "exploratory": True, "exit": name,
-                                        **{k: fo.get(k) for k in keep}, "p0": fo.get("p0"), "fill_t": fo.get("fill_t"),
-                                        "state": x}) + "\n")
-                signals.setdefault(fo["id"], {k: fo.get(k) for k in keep})
+            for r in rows_out:
+                f.write(json.dumps(r) + "\n")
         with open(self.out / "revival_signals.jsonl", "w") as f:
             for sid, s in signals.items():
                 f.write(json.dumps({"signal_id": sid, "eligible": True, **s}) + "\n")
-        self._note("revival_outcomes.jsonl", rows=len(results), open_follows=len(follows),
-                   closed=sum(1 for r in results if not r.get("censored")),
-                   censored=sum(1 for r in results if r.get("censored")), checkpoint_saved=st.get("saved"))
+        by = Counter(r["status"] for r in rows_out)
+        self._note("revival_outcomes.jsonl", rows=len(rows_out), by_status=dict(by),
+                   unique_follows=len({r["follow_id"] for r in rows_out}), duplicate_keys=0,
+                   store_results=len(results), checkpoint_follows=len(follows), checkpoint_saved=st.get("saved"))
         self._note("revival_signals.jsonl", rows=len(signals))
         self.unavailable.append(("revival_signals.jsonl: rejected signals and as-of pool/safety inputs",
                                  "the forward test records the follows it takes (signal, control, decision clock, "
@@ -359,13 +450,7 @@ class Export:
         with open(self.out / "day_quality.csv", "w", newline="") as f:
             w = csv.DictWriter(f, cols, extrasaction="ignore")
             w.writeheader()
-            known = sorted(d for d in days if d)
-            span = []
-            if known:                                    # every calendar day from the first to the last, gaps too
-                t = calendar.timegm(time.strptime(known[0], "%Y-%m-%d"))
-                while day_of(t) <= known[-1]:
-                    span.append(day_of(t))
-                    t += 86400
+            span = _days(sorted(d for d in days if d))  # every calendar day from the first to the last
             for day in span:
                 q = dict(days.get(day, {}))
                 q["trades_by_interval"] = json.dumps(dict(q.get("trades_by_interval", {})))
@@ -512,6 +597,7 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
     ex = Export(data, out, Pseudo.for_data(data, owner_wallet, public))
     started = ex.now
     trades = ex.trades()
+    ex.ledger(trades)
     ex.journal()
     ex.lab()
     ex.revival()
@@ -593,7 +679,9 @@ def readme(man: dict) -> str:
         "paper_trades.csv": "every closed paper trade in the trade logs, all intervals; `interval` separates the "
                             "brief's 303-trade cohort (mode paper, sources late/sniper) from manual, other-chain, "
                             "synthetic-demo and untagged rows. One row per position: partial exits are summed into "
-                            "`proceeds`, never counted as separate trades",
+                            "`proceeds`, never counted as separate trades. `pnl` is **net** (schema 2: `gross_pnl` minus "
+                            "`failed_fees_sol`; older rows upgraded from their own fees, `net_derived`). `day_utc` is "
+                            "the ENTRY day; realized P&L by day is in `account_ledger.csv`",
         "paper_orders.jsonl": "every journal event (buys, sells, failures, signals, AI-team notes) verbatim as text",
         "graduation_latency_runs.jsonl": "lab A/B runs (per-day aggregates) and the T8 variant table, one row per "
                                          "variant and day, with the exact code it ran on",
@@ -602,6 +690,9 @@ def readme(man: dict) -> str:
         "revival_signals.jsonl": "one row per follow taken (signal, control flag, decision clock, cost model)",
         "model_picks_follow.jsonl": "T2: the live follow of the model's picks and the exit lab",
         "ai_team_calls.jsonl": "T10: the AI team's graduation calls",
+        "account_ledger.csv": "the paper account's realized P&L by close day (gross, failed-transaction fees, net, "
+                              "cumulative), current account vs earlier periods; `account_reconciliation.json` checks "
+                              "the current account's cash against it",
         "day_quality.csv": "each UTC day: feed span, gaps, lag percentiles, feed health, duplicates, trades by "
                            "interval, revival follows (days with no trades included)",
         "models/": "the deployed logistic and tree models (weights, features, feature version, training info)",

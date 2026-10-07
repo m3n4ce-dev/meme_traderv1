@@ -673,11 +673,12 @@ class XChain:
     def _closed_rows(self) -> list[dict]:
         """Every closed other-chain paper trade: from the trade journal (all time) when there is one."""
         if self.path and getattr(self.e, "journal", False):
+            from .pnl import upgrade
             rows = []
             for f in sorted(self.path.parent.glob("trades-*.jsonl")):
                 try:
                     with open(f) as fh:
-                        rows += [json.loads(line) for line in fh if '"source": "chains"' in line]
+                        rows += [upgrade(json.loads(line)) for line in fh if '"source": "chains"' in line]
                 except (OSError, ValueError):
                     continue
             from .report import row_mode

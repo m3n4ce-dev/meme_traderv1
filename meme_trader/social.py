@@ -42,9 +42,10 @@ def _card(spec: str) -> bytes | None:
             sys.exit(f"no call {ident!r} in the ledger")
         return cards.call_card(row)
     if kind == "trade":
+        from .sniper.pnl import upgrade
         rows = []
         for f in sorted(DATA.glob("trades-*.jsonl"))[-14:]:
-            rows += [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
+            rows += [upgrade(json.loads(line)) for line in f.read_text().splitlines() if line.strip()]
         t = next((r for r in reversed(rows) if r.get("mint") == ident or r.get("symbol", "").lower() == ident.lower()), None)
         if t is None:
             sys.exit(f"no closed trade for {ident!r} in the last 14 days")
