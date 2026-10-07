@@ -608,6 +608,7 @@ def test_a_desk_approval_that_cannot_be_sized_says_why(monkeypatch):
     e.desk = FakeDesk()
     monkeypatch.setattr(deskmod, "snapshot_for", lambda *a, **k: {})
     monkeypatch.setattr(e, "_size", lambda *a, **k: 0.0)
+    monkeypatch.setattr(e, "_still_eligible", lambda *a: "")         # (the re-check after the vote has its own test)
     s = TokenState("T" * 40 + "pump", None, e.now)
     asyncio.run(e._desk_then_buy(s, "late", 60, 0.1, [], "late", "", 0.0))
     assert any("desk approved" in l["text"] and "too thin" in l["text"] for l in e.log)

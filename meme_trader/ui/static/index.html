@@ -5786,15 +5786,21 @@ function renderPicks(v) {               // the stronger model's picks, followed 
       ${vs.map(x => `<tr><td>${esc(x)}</td>${names.map(b => cell(bands[b].find(r => r.variant === x))).join("")}</tr>`).join("")}</tbody></table></div>`);
 }
 function renderRevival(v) {             // established coins jumping on volume, followed live: never traded
-  const head = `<p class="note">Established pump.fun coins (2+ days old, on PumpSwap): when one jumps 20-40%+ in 5 minutes on 4x its usual volume, it's followed from that moment, filled 5 s or 60 s later, after 1.2% costs. On Oct 4-6 recordings this made money every day, but a few revivals carried it. This is the forward test, on trades it never saw. Nothing is bought.</p>`;
+  const head = `<p class="note"><b>Exploratory.</b> Established pump.fun coins (2+ days old, on PumpSwap): when one jumps 20-40%+ in 5 minutes on 4x its usual volume, it's followed from the moment the bot READ it, filled 5 s or 60 s after that, with fees and price impact for a ${v && v.order_sol || 0.25} SOL order on the pool's depth. A random other active coin is followed at the same moment as a control. A coin that stops trading is <i>censored</i> (no sale was possible), not booked. ${v ? v.variants : 18} correlated variants: read the pattern, not the best row. Nothing is bought.</p>`;
   if (!v) { setHTML($("an-lab"), head + `<div class="empty">Off: it needs the wallet recorder running in stream mode.</div>`); return; }
-  if (!v.table.length) { setHTML($("an-lab"), head + `<div class="empty">No follows closed yet${v.open ? ` (${v.open} signals being followed now)` : ""}${v.lag_s != null ? ` · trades read ${v.lag_s} s after they happen` : ""}. The first results come an hour after the first signal.</div>`); return; }
+  const lag = v.read_lag_p50_s != null ? ` · trades read ${v.read_lag_p50_s} s after they happen (median)` : "";
+  if (!v.table.length) { setHTML($("an-lab"), head + `<div class="empty">No follows closed yet${v.open ? ` (${v.open} signals being followed now)` : ""}${lag}. The first results come an hour after the first signal.</div>`); return; }
   const best = (v.best || []).map(r => `${esc(r.symbol || "?")} ${pct(r.pnl_pct, 0)}`).join(" · ");
-  setHTML($("an-lab"), head + `<p class="note">${v.signals} signals${v.open ? ` · ${v.open} being followed now` : ""}${v.since ? ` · since ${new Date(v.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""} · P&amp;L per follow after costs.${v.signals < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}${best ? ` Best so far: ${best}.` : ""}</p>
-    <div class="tablewrap"><table><thead><tr><th>Signal</th><th>Fill</th><th>Exit</th><th class="r">Follows</th><th class="r">Mean</th><th class="r">Without best 3</th><th class="r">Median</th><th class="r">Won</th></tr></thead><tbody>
-    ${v.table.map(r => `<tr><td>${esc(r.rule)}</td><td>${r.delay_s} s late</td><td>${esc(r.exit)}</td><td class="r num">${r.n}</td>
-      <td class="r num ${cls(r.mean_pct)}">${pct(r.mean_pct, 1)}</td><td class="r num ${r.mean_without_best3 == null ? "" : cls(r.mean_without_best3)}">${r.mean_without_best3 == null ? "–" : pct(r.mean_without_best3, 1)}</td>
-      <td class="r num ${cls(r.median_pct)}">${pct(r.median_pct, 1)}</td><td class="r num">${Math.round(r.win_rate * 100)}%</td></tr>`).join("")}</tbody></table></div>`);
+  const ctl = {}; v.table.filter(r => r.control).forEach(r => ctl[r.rule + "|" + r.delay_s + "|" + r.exit] = r);
+  const range = r => r.lo_pct == null ? `<span class="note">${r.days || 0} day${r.days === 1 ? "" : "s"}</span>` : `${pct(r.lo_pct, 1)} to ${pct(r.hi_pct, 1)}`;
+  setHTML($("an-lab"), head + `<p class="note">${v.signals} signals${v.open ? ` · ${v.open} being followed now` : ""}${v.since ? ` · since ${new Date(v.since * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}` : ""}${lag} · P&amp;L per follow after costs.${v.signals < 100 ? " <b>Small sample: read it as a hint, not a verdict.</b>" : ""}${best ? ` Best so far: ${best}.` : ""}</p>
+    <div class="tablewrap"><table><thead><tr><th>Signal</th><th>Fill</th><th>Exit</th><th class="r">Follows</th><th class="r">Censored</th><th class="r">Mean</th><th class="r">90% range (by day)</th><th class="r">Without best 3</th><th class="r">Won</th><th class="r">Control coins: mean</th></tr></thead><tbody>
+    ${v.table.filter(r => !r.control).map(r => { const c = ctl[r.rule + "|" + r.delay_s + "|" + r.exit];
+      return `<tr><td>${esc(r.rule)}</td><td>${r.delay_s} s late</td><td>${esc(r.exit)}</td><td class="r num">${r.n}</td><td class="r num">${r.censored || 0}</td>
+      <td class="r num ${r.mean_pct == null ? "" : cls(r.mean_pct)}">${r.mean_pct == null ? "–" : pct(r.mean_pct, 1)}</td><td class="r num">${range(r)}</td>
+      <td class="r num ${r.mean_without_best3 == null ? "" : cls(r.mean_without_best3)}">${r.mean_without_best3 == null ? "–" : pct(r.mean_without_best3, 1)}</td>
+      <td class="r num">${r.win_rate == null ? "–" : Math.round(r.win_rate * 100) + "%"}</td>
+      <td class="r num ${c && c.mean_pct != null ? cls(c.mean_pct) : ""}">${c && c.mean_pct != null ? `${pct(c.mean_pct, 1)} <span class="note">(${c.n})</span>` : "–"}</td></tr>`; }).join("")}</tbody></table></div>`);
 }
 function renderExitLab() {
   const all = S.analytics && S.analytics.exit_lab; if (!all || !$("an-lab")) return;

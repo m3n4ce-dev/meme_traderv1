@@ -142,7 +142,7 @@ def cluster_report(s, wallets: list[str], funders: dict, fanout: Counter, exchan
     for f, ws in groups.items():
         if len(ws) >= 2:
             linked.update(ws)                     # several early buyers share one (non-exchange) funder
-    pct = sum(s.holders.get(w, 0.0) for w in linked) / getattr(s, "supply", TOTAL_SUPPLY) * 100
+    pct = sum(s.holders.get(w, 0.0) for w in linked) / TOTAL_SUPPLY * 100     # of the tradable 1B (tracker.TRADABLE)
     biggest = max((len(v) for v in groups.values()), default=0)
     known = sum(1 for w in wallets if funders.get(w, ("", ""))[0])
     return {"pct": pct, "linked": len(linked), "biggest_group": biggest, "known": known, "cohort": len(wallets)}
