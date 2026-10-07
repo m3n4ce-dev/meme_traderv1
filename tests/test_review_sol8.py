@@ -299,11 +299,9 @@ def test_a_failed_exit_reserves_risk_while_retried_and_the_coin_stays_quarantine
 
 # --------------------------------------------------------------------------- the take-profit experiment (shadow)
 def test_ten_percent_net_means_net_of_both_fees_and_both_transactions():
-    from meme_trader.sniper.strategy import SniperPosition
-    lab = ExitLab(None, 1.75)
-    pos = SniperPosition(mint="m", symbol="s", opened_at=0, entry_price=1.0, tokens=1.0, initial_tokens=1.0,
-                         cost_sol=1.0, initial_cost_sol=1.0, score=0, peak_price=1.0, exits=[], source="late")
-    sh = {"proceeds": 0.0, "pos": pos, "tx": 0.001005 / 0.25}
+    lab = ExitLab(None, 1.75)                               # a raw curve price: the buy's fee and network cost paid once
+    lab.start(M, "T", "late", 1.0, 0, P.sniper, only=("all out at +10% net",), stake_sol=0.25, price_kind="raw_mark")
+    sh = lab.open[M][0]
     assert lab.net_gain_pct(sh, 1.10) == pytest.approx(5.4, abs=0.1)        # +10% on the price is ~+5% net
     assert lab.net_gain_pct(sh, 1.148) == pytest.approx(10.0, abs=0.1)      # +10% net needs ~+15%
     assert set(TP10) == {"all out at +10% net", "trim 25% at +10% net"}

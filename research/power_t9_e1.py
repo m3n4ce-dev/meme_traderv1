@@ -4,25 +4,23 @@ the paper runner (meme_trader/sniper/t9_portfolio.py).
     python research/power_t9_e1.py [--sims 150] [--null-sims 500] [--boots 400] [--hurdle 1.0] [--procs 8]
                                    [--json out.json]                                                 (needs numpy)
 
-Version 3 (an eighth review, 2026-10-07). Version 2 bootstrapped the measured-only series while cash also lost the
-written-off positions; only the signal arm ever missed an exit; missingness was drawn per episode day, not when an
-exit and its retries actually happen; observed-hours invalidation wasn't simulated; and its provenance was a HEAD
-string for a run on uncommitted code. Now:
-- the PRIMARY statistic is the account's economic daily P&L (`Portfolio.daily`: measured exits plus impairments at
-  zero recovery and fees, on the day they're recognized). The bootstrap, the hurdle H and the total all use it;
-- AVAILABILITY is a calendar of provider outages (an alternating renewal process: up ~ Exp(mean up), down ~ Exp(mean
-  outage), plus rare long maintenance outages), SHARED by the signal and control arms, plus each quote attempt's own
-  transient failures and pools that can't be quoted at all (more often the ones collapsing: informative missingness,
-  never revealed to the strategy). A quote is needed at entry (else the signal is skipped, in that arm) and at the
-  exit or one of its retries (every 30 s for RETRY_S, as registered) - else the position is impaired;
-- the registered INVALID rule is applied: observed hours < 80% of the window, or > 20% of attempted trades
-  execution-unmeasured;
-- the one-day bootstrap is the registered verdict; a moving-block (3-day) bootstrap is reported beside it;
-- the scenario envelope varies winner rate (0 to replay-like), winner magnitude (full, halved), ordinary net outcome
-  (pessimistic, flat after costs, mildly positive), availability (good / medium / poor) and extra cost;
-- the output records the script's and the account model's sha256, the git revision with a fingerprint of any
-  uncommitted changes, packages, seeds, constants, and the output's own sha256 (beside it, in <json>.sha256).
-The availability profiles are DECLARED assumptions until a quote observer's reason-coded logs exist to estimate them.
+Version 4 (a ninth review, 2026-10-07). Version 3 found that SOME retry within the window got a quote, then credited
+the exit at its intended time - inside the very outage that delayed it - at the intended return; a failed-then-
+recovered exit also skipped the failed-exit risk reservation; unquotable pools were drawn from the trade's eventual
+return (a stress, not a base case); transient failures were independent per attempt (recovery looked too easy); and
+only the signal arm had to reach the coverage gate. Now:
+- each arm's exits are simulated attempt by attempt on the fixed 30 s retry clock (`_arm_quotes` returns the FIRST
+  valid quote's time): the position holds its cash until then, is a failed exit (risk reserved) from the due time,
+  and fills at the price then - the hour's return moved on by the extra minutes (the ordinary spread per hour);
+- transient failures come in streaks (one failure blocks the next 30-300 s of attempts on that pool);
+- an unquotable pool is drawn independently of the trade's return; the informative version (collapsing pools fail
+  three times as often) is a separately labelled stress scenario;
+- INVALID if observed hours < 80%, or EITHER arm's coverage is < 80%;
+- availability scenarios follow the reviewer's planning envelope as a small, frozen joint grid (A1 best .. A5 worst),
+  declared before running: they bracket engineering risk and are not estimates of any provider.
+Everything else as version 3: the economic primary series for every gate, one-day bootstrap registered and 3-day
+blocks beside it, the INVALID rule, provenance (sha256 of this script and the account model, the revision and any
+uncommitted diff taken before the run, the output's own sha256). Version 3's output is kept, labelled historical.
 
 `one_test` is version 2's procedure (independent or outage-day missingness, signal arm only), kept for its earlier
 table and the reviewer's contracts on it; the account model under it is the current one.
@@ -43,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from meme_trader.sniper import t9_portfolio as tp  # noqa: E402
 from meme_trader.sniper.t9_portfolio import BANK, DELAY_S, HOLD_S, MAX_OPEN, RETRY_S, SIZE, Portfolio  # noqa: E402
 
-__all__ = ["one_test", "one_test_v3", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
+__all__ = ["one_test", "one_test_v4", "wilson", "BANK", "MAX_OPEN", "SIZE"]      # (the account constants, for callers)
 
 SEED = 20261007
 EPISODES_PER_DAY = 35.4              # the corrected replay, primary-like rule, ~3.1 days of coverage
@@ -57,9 +55,21 @@ ORDINARY = {"base": (-0.0758, SD), "pessimistic": (-0.1368, SD),
             "flat": (math.log(1 + FEE) - SD ** 2 / 2, SD),
             "mild": (math.log(1.01 + FEE) - SD ** 2 / 2, SD)}       # +1% a trade after costs
 # (mean up h, mean outage min, long outages a day, long outage h, transient failure per attempt, unquotable pool)
-AVAILABILITY = {"good": (48.0, 10.0, 0.0, 0.0, 0.05, 0.01),
-                "medium": (12.0, 30.0, 1 / 30, 4.0, 0.10, 0.03),
-                "poor": (6.0, 60.0, 1 / 15, 8.0, 0.20, 0.08)}
+AVAILABILITY = {
+    # version 4's frozen joint grid (the reviewer's planning envelope, round 9): best to worst, declared in advance
+    "A1": (168.0, 0.5, 0.0, 0.0, 0.01, 0.005),
+    "A2": (48.0, 5.0, 1 / 30, 4.0, 0.05, 0.01),
+    "A3": (24.0, 5.0, 1 / 30, 8.0, 0.10, 0.03),
+    "A4": (12.0, 30.0, 1 / 7, 8.0, 0.10, 0.03),
+    "A5": (6.0, 120.0, 1 / 7, 24.0, 0.20, 0.08),
+    "A3 informative": (24.0, 5.0, 1 / 30, 8.0, 0.10, 0.03),
+    # version 3's named scenarios (kept for reference)
+    "good": (48.0, 10.0, 0.0, 0.0, 0.05, 0.01),
+    "medium": (12.0, 30.0, 1 / 30, 4.0, 0.10, 0.03),
+    "poor": (6.0, 60.0, 1 / 15, 8.0, 0.20, 0.08)}
+INFORMATIVE = {"A3 informative"}     # collapsing pools (net return < -50%) are unquotable 3x as often: a stress
+STREAK_S = (30.0, 300.0)             # a transient failure blocks that pool's attempts for this long (uniform)
+LATE_SD = SD                         # the price keeps moving after the hour: this log spread per hour, per extra minute
 ATTEMPT_S = 30                       # exit retries, from the exit time until RETRY_S after it (as registered)
 
 
@@ -102,7 +112,7 @@ def one_test(rng, days, win_per_day, ordinary, extra, u, hurdle, boots, cluster=
 # --------------------------------------------------------------------------- version 3
 def outages(rng, end: float, profile: str) -> tuple[list, list, float]:
     """The provider's outage calendar over [0, end + slack): sorted, merged (starts, ends), and the observed share."""
-    up_h, down_min, long_per_day, long_h, _, _ = AVAILABILITY[profile]
+    up_h, down_min, long_per_day, long_h = AVAILABILITY[profile][:4]
     horizon = end + 2 * 86400
     iv, t = [], rng.exponential(up_h * 3600)
     while t < horizon:
@@ -132,14 +142,47 @@ def _up(starts: list, ends: list, t: np.ndarray) -> np.ndarray:
 
 
 def _arm_quotes(rng, starts, ends, t_entry: np.ndarray, ret: np.ndarray, profile: str) -> tuple[np.ndarray, np.ndarray]:
-    """(entry quote available, exit measured within its retries) for each signal in one arm."""
-    *_, q_t, q_p = AVAILABILITY[profile]
+    """For each signal in one arm: (a quote was available at entry, the time of the FIRST valid exit quote - the
+    due time or a later 30 s retry within RETRY_S - or 0.0 if none was). Attempts run in time order: the provider's
+    calendar, a pool that can't be quoted at all, and transient failures that block the pool for a streak."""
+    q_t, q_p = AVAILABILITY[profile][4:6]
+    lo, hi = STREAK_S
     n = len(t_entry)
     entry_ok = _up(starts, ends, t_entry) & (rng.random(n) >= q_t)
-    attempts = t_entry[:, None] + HOLD_S + ATTEMPT_S * np.arange(RETRY_S // ATTEMPT_S + 1)[None, :]
-    ok = _up(starts, ends, attempts.ravel()).reshape(attempts.shape) & (rng.random(attempts.shape) >= q_t)
-    dead = rng.random(n) < np.where(ret < -0.5, min(1.0, 3 * q_p), q_p)     # collapsing pools fail more often
-    return entry_ok, ok.any(1) & ~dead
+    p_dead = np.where(ret < -0.5, min(1.0, 3 * q_p), q_p) if profile in INFORMATIVE else np.full(n, q_p)
+    dead = rng.random(n) < p_dead
+    first = np.zeros(n)
+    blocked = np.full(n, -np.inf)                     # a transient failure's streak: no quote before this
+    for i in range(int(RETRY_S // ATTEMPT_S) + 1):
+        a = t_entry + HOLD_S + ATTEMPT_S * i
+        live = (first == 0) & ~dead & _up(starts, ends, a) & (a >= blocked)
+        fail = live & (rng.random(n) < q_t)
+        if fail.any():
+            blocked[fail] = a[fail] + rng.uniform(lo, hi, int(fail.sum()))
+        ok = live & ~fail
+        first[ok] = a[ok]
+    return entry_ok, first
+
+
+def _late_return(r: np.ndarray, extra: float, late_s: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """A net return filled late_s after its due time: the gross price moved on by a draw of the hourly spread."""
+    gross = 1 + r + FEE + extra
+    return gross * np.exp(LATE_SD * np.sqrt(np.maximum(late_s, 0) / 3600) * z) - 1 - FEE - extra
+
+
+def _run_arm(port: Portfolio, t_sig: np.ndarray, coin: list, r: np.ndarray, entry_ok: np.ndarray,
+             first: np.ndarray, extra: float, z: np.ndarray) -> None:
+    """One arm's signals through its account, in time order: skipped without an entry quote; measured at the first
+    valid exit quote's time and return; impaired when none came within the retries."""
+    due = t_sig + DELAY_S + HOLD_S
+    r_fill = np.where(first > due, _late_return(r, extra, first - due, z), r)
+    for i in range(len(t_sig)):
+        if not entry_ok[i]:
+            continue
+        if first[i] > 0:
+            port.try_enter(t_sig[i], coin[i], float(r_fill[i]), exit_at=float(first[i]))
+        else:
+            port.try_enter(t_sig[i], coin[i], None)
 
 
 def _bootstrap(rng, x: np.ndarray, boots: int, block: int) -> np.ndarray:
@@ -152,7 +195,7 @@ def _bootstrap(rng, x: np.ndarray, boots: int, block: int) -> np.ndarray:
     return x[idx].mean(1)
 
 
-def one_test_v3(rng, days: int, win_frac: float, magnitude: float, ordinary: str, profile: str, extra: float,
+def one_test_v4(rng, days: int, win_frac: float, magnitude: float, ordinary: str, profile: str, extra: float,
                 hurdle: float, boots: int) -> dict:
     mu, sd = ORDINARY[ordinary]
     end = days * 86400
@@ -176,26 +219,27 @@ def one_test_v3(rng, days: int, win_frac: float, magnitude: float, ordinary: str
     win_r = np.asarray(WIN_NET)[rng.integers(0, len(WIN_NET), n)] * magnitude - extra
     r_sig = np.where(win, win_r, ordinary_r)
     r_ctl = np.exp(rng.normal(*CONTROL, n)) - 1 - FEE - extra
+    z_sig, z_ctl = rng.normal(size=n), rng.normal(size=n)
     starts, ends, observed = outages(rng, end, profile)
     t_entry = t_sig + DELAY_S
-    s_entry, s_exit = _arm_quotes(rng, starts, ends, t_entry, r_sig, profile)
-    c_entry, c_exit = _arm_quotes(rng, starts, ends, t_entry, r_ctl, profile)
+    s_entry, s_first = _arm_quotes(rng, starts, ends, t_entry, r_sig, profile)
+    c_entry, c_first = _arm_quotes(rng, starts, ends, t_entry, r_ctl, profile)
     port, ctl = Portfolio(end), Portfolio(end)
-    for i in range(n):
-        if s_entry[i]:
-            port.try_enter(t_sig[i], coin[i], float(r_sig[i]) if s_exit[i] else None)
-        if c_entry[i]:
-            ctl.try_enter(t_sig[i], coin[i], float(r_ctl[i]) if c_exit[i] else None)
+    _run_arm(port, t_sig, coin, r_sig, s_entry, s_first, extra, z_sig)
+    _run_arm(ctl, t_sig, coin, r_ctl, c_entry, c_first, extra, z_ctl)
     port.close()
     ctl.close()
     s_day, c_day = np.array(port.daily(days)), np.array(ctl.daily(days))
     cov = port.measured / port.attempted if port.attempted else 0.0
+    c_cov = ctl.measured / ctl.attempted if ctl.attempted else 0.0
     total, ctl_total = float(s_day.sum()), float(c_day.sum())
     assert abs(total - (port.cash - BANK)) < 1e-6          # the primary series reconciles to cash
-    out = {"total": total, "coverage": cov, "observed": observed, "control_total": ctl_total,
-           "measured_only_total": float(sum(port.measured_daily(days))), "attempted": port.attempted,
-           "entry_skipped": int((~s_entry).sum())}
-    invalid = observed < 0.8 or cov < 0.8
+    late = [(first - (t + DELAY_S + HOLD_S)) for t, first, ok in zip(t_sig, s_first, s_entry) if ok and first > 0]
+    out = {"total": total, "coverage": cov, "control_coverage": c_cov, "observed": observed,
+           "control_total": ctl_total, "measured_only_total": float(sum(port.measured_daily(days))),
+           "attempted": port.attempted, "entry_skipped": int((~s_entry).sum()),
+           "late_fill_share": float(np.mean([x > 0 for x in late])) if late else 0.0}
+    invalid = observed < 0.8 or cov < 0.8 or c_cov < 0.8
     for name, block in (("verdict", 1), ("verdict_block3", 3)):
         m = _bootstrap(rng, s_day, boots, block)
         diff = _bootstrap(rng, s_day - c_day, boots, block)
@@ -216,9 +260,12 @@ def wilson(k: int, n: int, z: float = 1.96) -> list:
     return [round(max(0.0, c - h), 3), round(min(1.0, c + h), 3)]
 
 
+GRID = ("A1", "A2", "A3", "A4", "A5")
+
+
 def cells(sims: int, null_sims: int) -> list[dict]:
     out = []
-    for profile in AVAILABILITY:
+    for profile in GRID + ("A3 informative",):
         for extra in (0.0, 0.015):
             for days in (60, 90, 120):
                 out.append(dict(scenario="null", win_frac=0.0, magnitude=1.0, ordinary="flat", profile=profile,
@@ -226,13 +273,16 @@ def cells(sims: int, null_sims: int) -> list[dict]:
     for win_frac, name in ((0.125, "eighth"), (0.25, "quarter"), (0.5, "half"), (1.0, "replay")):
         for magnitude in (1.0, 0.5):
             for ordinary in ("pessimistic", "flat", "mild"):
-                for profile in AVAILABILITY:
+                for profile in GRID:
                     for extra in (0.0, 0.015):
                         for days in (60, 90, 120):
                             out.append(dict(scenario=name, win_frac=win_frac, magnitude=magnitude, ordinary=ordinary,
                                             profile=profile, extra=extra, days=days, sims=sims))
+                for days in (60, 90, 120):                    # the informative-missingness stress, at +0 cost
+                    out.append(dict(scenario=name, win_frac=win_frac, magnitude=magnitude, ordinary=ordinary,
+                                    profile="A3 informative", extra=0.0, days=days, sims=sims))
     for ordinary in ("pessimistic", "mild"):                  # no winners at all: ordinary trades only
-        for profile in AVAILABILITY:
+        for profile in GRID:
             for days in (60, 90, 120):
                 out.append(dict(scenario="no winners", win_frac=0.0, magnitude=1.0, ordinary=ordinary,
                                 profile=profile, extra=0.0, days=days, sims=sims))
@@ -242,7 +292,7 @@ def cells(sims: int, null_sims: int) -> list[dict]:
 def run_cell(args) -> dict:
     i, cell, hurdle, boots = args
     rng = np.random.default_rng(np.random.SeedSequence(SEED, spawn_key=(i,)))
-    res = [one_test_v3(rng, cell["days"], cell["win_frac"], cell["magnitude"], cell["ordinary"], cell["profile"],
+    res = [one_test_v4(rng, cell["days"], cell["win_frac"], cell["magnitude"], cell["ordinary"], cell["profile"],
                        cell["extra"], hurdle, boots) for _ in range(cell["sims"])]
     row = {**cell, "cell": i}
     n = len(res)
@@ -252,7 +302,8 @@ def run_cell(args) -> dict:
         for k in ("pass", "fail", "inconclusive", "invalid"):
             row[pre + k] = round(v.count(k) / n, 4)
             row[pre + k + "_ci95"] = wilson(v.count(k), n)
-    for k in ("total", "measured_only_total", "coverage", "observed", "control_total"):
+    for k in ("total", "measured_only_total", "coverage", "control_coverage", "observed", "control_total",
+              "late_fill_share"):
         row["median_" + k] = round(float(np.median([r[k] for r in res])), 4)
     return row
 
@@ -294,27 +345,34 @@ def main(argv=None) -> int:
     else:
         rows = [run_cell(j) for j in jobs]
     for r in rows:
-        print(f"{r['scenario']:10} x{r['magnitude']:.1f} {r['ordinary']:11} {r['profile']:6} cost+{r['extra']:.3f} "
+        print(f"{r['scenario']:10} x{r['magnitude']:.1f} {r['ordinary']:11} {r['profile']:14} cost+{r['extra']:.3f} "
               f"{r['days']:3}d: pass {r['pass']:.3f} {r['pass_ci95']} fail {r['fail']:.2f} inconcl "
               f"{r['inconclusive']:.2f} invalid {r['invalid']:.2f} | block3 pass {r['block3_pass']:.3f} | total "
               f"{r['median_total']:+.2f} SOL, coverage {r['median_coverage']:.3f}, observed {r['median_observed']:.3f}",
               flush=True)
     if a.json:
-        doc = {"version": 3, "seed": SEED, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell",
+        doc = {"version": 4, "seed": SEED, "seeding": "numpy SeedSequence(seed, spawn_key=(cell index,)) per cell",
                "sims": a.sims, "null_sims": a.null_sims, "boots": a.boots, "hurdle_sol": a.hurdle, **prov,
                "constants": {"bank": tp.BANK, "size": tp.SIZE, "max_open": tp.MAX_OPEN, "day_stop": tp.DAY_STOP,
                              "hold_s": tp.HOLD_S, "delay_s": tp.DELAY_S, "retry_s": tp.RETRY_S, "fee": FEE,
                              "attempt_s": ATTEMPT_S, "episodes_per_day": EPISODES_PER_DAY,
                              "win_episodes_per_day": WIN_EPISODES_PER_DAY, "win_net": WIN_NET, "ordinary": ORDINARY,
-                             "control": CONTROL, "availability": AVAILABILITY},
+                             "control": CONTROL, "availability": AVAILABILITY,
+                             "availability_fields": ["mean up h", "mean outage min", "long outages a day",
+                                                     "long outage h", "transient failure per attempt",
+                                                     "unquotable pool"],
+                             "grid": GRID, "informative": sorted(INFORMATIVE), "streak_s": STREAK_S,
+                             "late_sd_per_hour": LATE_SD},
                "primary_statistic": "economic daily P&L (Portfolio.daily): measured exits + impairments at zero "
                                     "recovery and fees, on the day recognized; reconciles to cash",
-               "verdict_rule": "INVALID if observed hours < 80% or coverage < 80%; PASS if the day bootstrap's 5th "
+               "verdict_rule": "INVALID if observed hours < 80% or either arm's coverage < 80%; PASS if the day bootstrap's 5th "
                                "percentile of mean daily P&L > 0, of mean daily (signal - control) > 0, and total >= "
                                "H; FAIL if its 95th percentile <= 0 or total < control total; else INCONCLUSIVE",
                "control_policy": "an independent synthetic draw per signal (no revival), through the same provider "
-                                 "outage calendar with its own transient/pool failures; real matched-pool controls "
-                                 "need the runner's pre-decision data",
+                                 "outage calendar with its own transient/pool failures and the same retry clock; real "
+                                 "matched-pool controls need the runner's pre-decision data",
+               "exit_clock": "exits fill at the first valid quote (due time or a 30 s retry within RETRY_S), at the "
+                             "return then; cash, the UTC day and the risk reservation follow that time",
                "availability_note": "declared profiles, not estimates: replace them with a quote observer's "
                                     "reason-coded logs",
                "rows": rows}
