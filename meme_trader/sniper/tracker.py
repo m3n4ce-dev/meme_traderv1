@@ -11,6 +11,10 @@ from .events import Launch, Social, Trade
 # pump.fun's Mayhem-mode agent: a Mayhem token mints 2B, half of it to this wallet, which then trades it
 MAYHEM_AGENT = "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
 MAYHEM_SUPPLY = 2 * TOTAL_SUPPLY
+# Concentration (dev, bundle, snipers, insiders, top holders) is a share of the TRADABLE supply: the 1B on the curve.
+# A Mayhem coin mints 2B, but ~1B sits with the Mayhem agent (checked on-chain 2026-10-06): dividing by 2B would halve
+# every risk share on those coins. Market cap uses the full minted supply (`supply`).
+TRADABLE = TOTAL_SUPPLY
 
 
 @dataclass
@@ -47,10 +51,16 @@ class TokenState:
     p_ts: float = -1e12
     late_tried: bool = False      # graduation play already attempted
     price_known: bool = False     # False until a launch/trade gave us real reserves (e.g. right after a restart)
-    mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): seen when the agent trades it
+    mayhem: bool = False          # Mayhem mode (2B supply, the agent trades it): read from its curve, or its first agent trade
+    mayhem_checked: bool = False  # its curve account was read: `mayhem` is known, not just "not seen yet"
     non_organic_trades: int = 0
     curve_slot: int = 0           # the slot of the newest reserves applied to `curve`
     slot_moves: list = field(default_factory=list)   # that slot's trades: (tokens before, tokens after, sol after)
+    slot_start: tuple | None = None                  # (v_tokens, v_sol) before that slot's first trade
+    net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
+    sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
+    early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
+    seen: dict = field(default_factory=dict)         # recent trade identities (signature, side, size, reserves)
 
     @property
     def created_ts(self) -> float:
@@ -82,33 +92,60 @@ class TokenState:
         self.price_known = True
         self.peak_price = self.curve.price
         if e.dev_buy_tokens > 0:
-            self.holders[e.creator] = e.dev_buy_tokens
+            self.holders[e.creator] = self.net[e.creator] = e.dev_buy_tokens
             self.buyers.add(e.creator)
 
     def _apply_reserves(self, t: Trade) -> None:
         """The curve after `t`, in chain order, not arrival order: some endpoints deliver trades late or out of order
-        (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within
-        one slot, the trades chain by reserves (each starts where another ended): the newest state is the one no
-        other trade starts from. While a link is missing, a trade that doesn't continue the current state leaves it."""
+        (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within a
+        slot, each trade is a step from the reserves before it to the reserves after; in chain order the steps form one
+        path, so the slot's last state is the one reached once more than it's left - whatever order they arrived in,
+        and when the path revisits a state (buy, sell, buy). While a step is missing (several such states) the current
+        state stays; a slot whose steps return to where it started ends there."""
         if not t.slot:                                   # no chain order known (synthetic, old recordings): arrival
             self.curve = Curve(t.v_sol, t.v_tokens)
             return
         if t.slot < self.curve_slot:
             return
         if t.slot > self.curve_slot:
+            self.slot_start = (self.curve.v_tokens, self.curve.v_sol) if self.price_known else None
             self.curve_slot, self.slot_moves = t.slot, []
         before = t.v_tokens + t.tokens if t.side == "buy" else t.v_tokens - t.tokens
-        first = not self.slot_moves
         self.slot_moves.append((before, t.v_tokens, t.v_sol))
-        starts = [b for b, _, _ in self.slot_moves]
-        heads = [m for m in self.slot_moves if not any(abs(m[1] - b) < 1.0 for b in starts)]
-        cur = self.curve.v_tokens
-        if not first and abs(before - cur) >= 1.0 and any(abs(h[1] - cur) < 1.0 for h in heads):
-            return          # a separate piece of the chain (its link hasn't arrived): keep the newest state known
-        _, vt, vs = (heads or self.slot_moves)[-1]
-        self.curve = Curve(vs, vt)
+        bal: dict[int, int] = {}
+        at: dict[int, tuple] = {}
+        for b0, a0, vs in self.slot_moves:
+            bal[round(b0)] = bal.get(round(b0), 0) - 1
+            bal[round(a0)] = bal.get(round(a0), 0) + 1
+            at[round(a0)] = (a0, vs)
+        ends = [k for k, v in bal.items() if v > 0]
+        if len(ends) == 1:
+            vt, vs = at[ends[0]]
+            self.curve = Curve(vs, vt)
+        elif not ends and self.slot_start:               # a closed loop: the slot ends where it began
+            self.curve = Curve(self.slot_start[1], self.slot_start[0])
+
+    def _duplicate(self, t: Trade) -> bool:
+        """The same trade delivered twice (a reconnect can replay it): counted once."""
+        if not t.signature:
+            return False
+        k = (t.signature, t.side, round(t.tokens), round(t.v_tokens))
+        if k in self.seen:
+            return True
+        self.seen[k] = None
+        if len(self.seen) > 256:
+            self.seen.pop(next(iter(self.seen)))
+        return False
+
+    def _early(self, w: str) -> None:
+        """early_sold as the sum over early buyers of min(sold, bought early): the same in any arrival order."""
+        new = min(self.sold_by.get(w, 0.0), self.early_bought.get(w, 0.0))
+        self.early_sold += new - self.early_c.get(w, 0.0)
+        self.early_c[w] = new
 
     def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
+        if self._duplicate(t):
+            return
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
             self._apply_reserves(t)
             self.price_known = True
@@ -129,38 +166,42 @@ class TokenState:
                 self.mayhem = True
             return
         self.volume_sol += t.sol
-        prev = self.holders.get(t.trader, 0.0)
+        w = t.trader
         if t.side == "buy":
             self.buys += 1
-            self.buyers.add(t.trader)
-            bal = prev + t.tokens
-            if t.trader != self.creator:
+            self.buyers.add(w)
+            if w != self.creator:
                 if t.ts - self.created_ts <= bundle_window_s:
-                    self.early_bought[t.trader] = self.early_bought.get(t.trader, 0.0) + t.tokens
+                    self.early_bought[w] = self.early_bought.get(w, 0.0) + t.tokens
+                    self._early(w)
                 if t.ts - self.created_ts <= sniper_window_s:
-                    self.snipers.add(t.trader)
+                    self.snipers.add(w)
         else:
             self.sells += 1
-            self.sellers.add(t.trader)
-            bal = max(prev - t.tokens, 0.0)
-            if t.trader == self.creator:
+            self.sellers.add(w)
+            if w == self.creator:
                 self.dev_sold += t.tokens
-            if t.trader in self.early_bought:
-                self.early_sold += min(t.tokens, prev)
-        self.holders[t.trader] = t.new_balance if t.new_balance >= 0 else bal
-        if self.holders[t.trader] <= 0:
-            del self.holders[t.trader]
+            self.sold_by[w] = self.sold_by.get(w, 0.0) + t.tokens
+            if w in self.early_bought:
+                self._early(w)
+        # balances as signed sums: a sell that arrives before its buy nets out instead of being clipped at 0
+        n = t.new_balance if t.new_balance >= 0 else self.net.get(w, 0.0) + (t.tokens if t.side == "buy" else -t.tokens)
+        self.net[w] = n
+        if n > 0:
+            self.holders[w] = n
+        else:
+            self.holders.pop(w, None)
 
     # ---- metrics ------------------------------------------------------------
     def dev_pct(self) -> float:
-        return self.holders.get(self.creator, 0.0) / self.supply * 100 if self.creator else 0.0
+        return self.holders.get(self.creator, 0.0) / TRADABLE * 100 if self.creator else 0.0
 
     def dev_initial_pct(self) -> float:
-        return (self.launch.dev_buy_tokens / self.supply * 100) if self.launch else 0.0
+        return (self.launch.dev_buy_tokens / TRADABLE * 100) if self.launch else 0.0
 
     def bundle_pct(self) -> float:
         """Supply bought by non-dev wallets inside the bundle window (insider/sniper proxy)."""
-        return sum(self.early_bought.values()) / self.supply * 100
+        return sum(self.early_bought.values()) / TRADABLE * 100
 
     def fees_paid_sol(self, fee_pct: float = 1.25) -> float:
         """Total trading fees paid on the curve so far - a proxy for real, paying demand."""
@@ -168,20 +209,20 @@ class TokenState:
 
     def sniper_pct(self) -> float:
         """Supply currently held by wallets that bought within the sniper window (excl. dev)."""
-        return sum(self.holders.get(w, 0.0) for w in self.snipers) / self.supply * 100
+        return sum(self.holders.get(w, 0.0) for w in self.snipers) / TRADABLE * 100
 
     def insider_pct(self) -> float:
         """Supply currently held by the dev + bundle-window wallets. (Funding-graph clustering would
         catch more insiders - see roadmap.)"""
         ws = set(self.early_bought) | ({self.creator} if self.creator else set())
-        return sum(self.holders.get(w, 0.0) for w in ws) / self.supply * 100
+        return sum(self.holders.get(w, 0.0) for w in ws) / TRADABLE * 100
 
     def early_sold_ratio(self) -> float:
         total = sum(self.early_bought.values())
         return self.early_sold / total if total else 0.0
 
     def top_holders_pct(self, n: int) -> float:
-        return sum(sorted(self.holders.values(), reverse=True)[:n]) / self.supply * 100
+        return sum(sorted(self.holders.values(), reverse=True)[:n]) / TRADABLE * 100
 
     def window(self, now: float, seconds: float) -> list[tuple]:
         """Organic trades of the last `seconds` (flow, buyers). Price history uses self.trades directly."""

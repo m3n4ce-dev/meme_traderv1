@@ -269,6 +269,9 @@ class Engine:
         self.linked_x: dict[str, dict] = {}                # what a coin's X link is (read as it gets active)
         self._x_next_at, self._x_day = 0.0, ("", 0)
         self._x_cache: dict[str, tuple[float, dict]] = {}  # link -> (read at, what it is): a shared link is read once
+        self._mayhem_q: deque = deque()                     # coins whose curve account is to be read for Mayhem mode
+        self._mayhem_busy: dict[str, int] = {}              # mint -> failed reads so far (in the queue or reading)
+        self._mayhem_next = 0.0
         self._last_x_scan = 0.0
         # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
         from .gradlog import GradLog
@@ -449,6 +452,10 @@ class Engine:
         why = self._global_block(manual=source == "manual")
         if why:
             return why
+        if source != "manual" and self._skip_mayhem():     # the owner: no Mayhem coins for any automated buy
+            why = self._mayhem_block(self.tokens.get(mint))
+            if why:
+                return why
         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
@@ -466,6 +473,53 @@ class Engine:
     def _skip_mayhem(self) -> bool:
         """market.skip_mayhem (the owner, 2026-10-06): the bots stay out of Mayhem-mode coins."""
         return bool((self.p.get("market") or {}).get("skip_mayhem", True))
+
+    def _mayhem_block(self, s) -> str:
+        """Why an automated buy of `s` can't go ahead under skip_mayhem: it is Mayhem, or (the real bot) nobody has read
+        its curve yet - unknown doesn't count as safe. Replays, demos and tests don't read accounts: there, only a
+        seen agent trade counts."""
+        if s is None:
+            return ""
+        if s.mayhem:
+            return "Mayhem mode"
+        if self.feed.realtime and self.persist and not s.mayhem_checked:
+            self._check_mayhem(s)
+            return "checking Mayhem mode"
+        return ""
+
+    def _check_mayhem(self, s) -> None:
+        """Queue a read of the coin's curve account (live feed only; once per coin)."""
+        if self.feed.realtime and self.persist and s.launch is not None and not s.mayhem and not s.mayhem_checked \
+                and s.mint not in self._mayhem_busy and len(self._mayhem_q) < 500:
+            self._mayhem_busy[s.mint] = 0
+            self._mayhem_q.append(s.mint)
+
+    def _mayhem_tick(self) -> None:
+        """Up to 4 reads a second, off the event loop; a failed read is retried twice, then left unknown."""
+        if not self._mayhem_q or time.time() < self._mayhem_next:
+            return
+        self._mayhem_next = time.time() + 0.25
+        mint = self._mayhem_q.popleft()
+
+        async def read():
+            from .mayhem import lookup
+            try:
+                yes = await asyncio.to_thread(lookup, mint)
+            except Exception:
+                n = self._mayhem_busy.get(mint, 0) + 1
+                if n < 3:
+                    self._mayhem_busy[mint] = n
+                    self._mayhem_q.append(mint)
+                else:
+                    self._mayhem_busy.pop(mint, None)
+                return
+            self._mayhem_busy.pop(mint, None)
+            s = self.tokens.get(mint)
+            if s is not None:
+                s.mayhem_checked = True
+                if yes:
+                    s.mayhem = True
+        asyncio.create_task(read())
 
     @staticmethod
     def _mtime(path: Path) -> float:
@@ -810,6 +864,21 @@ class Engine:
                           notes=[f"copy {label}", f"leader {e.sol:.2f} SOL"], source=f"copy:{label}", leader=e.trader,
                           ref_price=e.sol / e.tokens if e.tokens else s.curve.price)
 
+    def _still_eligible(self, s: TokenState, kind: str) -> str:
+        """After an AI vote (seconds later): its hard gates again - Mayhem, the window, red flags, the creator's
+        launches, the insider cluster - not its momentum, which naturally moves while the team votes."""
+        if s.mayhem and self._skip_mayhem():
+            return "Mayhem mode"
+        if kind == "late":
+            ok, why = evaluate_late_entry(s, self.now, self.p.late, self._late_red(s))
+            if not ok and why in ("window", "red flag", "serial deployer", "insider cluster", "Mayhem mode", "too young"):
+                return why
+        elif kind == "sniper":
+            d = evaluate_entry(s, self.now, self.p.entry, self._ctx(s))
+            if d.action == "reject":
+                return d.notes[0] if d.notes else "no longer eligible"
+        return ""
+
     def _copy_blocked(self, s: TokenState, e: Trade) -> str:
         c, en = self.p.copy, self.p.entry
         blocked = self.entries_blocked(c.buy_sol)
@@ -882,6 +951,10 @@ class Engine:
             if pr.require_positive_ev and self._ev(s.p) < 0:
                 s.score_notes = [f"negative EV ({self._ev(s.p):+.0f}%)"] + s.score_notes
                 return
+        if self._skip_mayhem() and self._mayhem_block(s):
+            if s.mayhem:
+                s.decided = "rejected: Mayhem mode"
+            return                                       # being read: decided on a later tick
         blocked = self.entries_blocked() if self.p.entry.enabled else "sniper off"
         practice = bool(blocked) and self._practicing(blocked)
         if blocked:
@@ -1163,7 +1236,7 @@ class Engine:
         moved = (s.curve.price / start_price - 1) * 100 if start_price else 0
         notes = notes + [f"desk x{v.size_mult:.2f}"]
         size = self._size(s, kind, score, buy_sol, v.size_mult, notes)
-        why = self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
+        why = self._still_eligible(s, kind) or self.entries_blocked(size) or ("already held" if s.mint in self.positions else "") or \
             ("the curve is too thin to size a buy" if size <= 0 else "") or \
             (f"price moved {moved:+.0f}% during review" if moved > self.p.desk.max_price_move_pct else "") or \
             ("dev sold" if (not late_dev_ok(s, self.p.late) if kind == "late" else s.dev_sold) else "")
@@ -1239,7 +1312,7 @@ class Engine:
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
                                                     "add": bool((meta or {}).get("add")),
                                                     "notes": list(notes), "source": source, "leader": leader},
-                                   fill.blockhash)
+                                   fill.blockhash, fill.landed)
             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
                               "its cash stays reserved until the chain says", s.mint)
             return
@@ -1466,7 +1539,7 @@ class Engine:
         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason},
-                                   fill.blockhash)
+                                   fill.blockhash, fill.landed)
             self.say("error", f"sell {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - no new "
                               "sell until the chain says", s.mint)
             return
@@ -1511,9 +1584,28 @@ class Engine:
             self._close(pos, s)
         self.save_state()
 
-    def _track_unresolved(self, sig: str, order: dict, blockhash: str = "") -> None:
-        self.unresolved[sig] = {**order, "sent_at": time.time(), "blockhash": blockhash}
+    def _track_unresolved(self, sig: str, order: dict, blockhash: str = "", landed: bool = False) -> None:
+        self.unresolved[sig] = {**order, "sent_at": time.time(), "blockhash": blockhash, "landed": bool(landed)}
         self.save_state()
+
+    def reconcile_unresolved(self, sig: str, outcome: str) -> str:
+        """The owner settles an order the chain can't prove either way (no blockhash recorded): "not landed" after
+        checking the wallet's history (a buy's cash is released, a coin's sells resume). An order the chain showed
+        landed can't be settled as not landed. "" or why not."""
+        o = self.unresolved.get(sig)
+        if o is None:
+            return "no such unresolved order"
+        if outcome != "not landed":
+            return "only 'not landed' can be settled by hand; a landed order is booked from its transaction"
+        if o.get("landed"):
+            return "the chain showed this order landed: it can't be settled as not landed"
+        del self.unresolved[sig]
+        if o["side"] == "buy":
+            self.book.reserved.pop(o["mint"], None)
+        self.pending.discard(o["mint"])
+        self.say("info", f"{o['side']} {sig[:8]}… settled by the owner as not landed", o["mint"])
+        self.save_state()
+        return ""
 
     async def _resolve_unresolved(self) -> None:
         """Ask the chain about orders whose outcome was unknown. Landed: book them (a late buy becomes a
@@ -1536,6 +1628,12 @@ class Engine:
                 fill = await resolve(sig, mint, o["side"], blockhash=o.get("blockhash", ""), age_s=age)
             except Exception:
                 continue
+            if fill.landed and not o.get("landed"):     # once seen landed, it never becomes "never landed"
+                o["landed"] = True
+                self.save_state()
+            if fill.unknown and fill.expired and o.get("landed"):
+                fill = SniperFill(False, unknown=True, landed=True, signature=sig,
+                                  error="it landed earlier: its record is missing now, not its trade")
             if fill.unknown and not fill.expired:
                 if age >= UNRESOLVED_ALERT_S and not o.get("alerted"):
                     o["alerted"] = True
@@ -1716,6 +1814,7 @@ class Engine:
             self._maybe_reload_model()
         await self._maybe_callout()
         await self._maybe_late()
+        self._mayhem_tick()
         self._model_picks()
         self._x_intel()
         if self.gradlog is not None:
@@ -1988,6 +2087,8 @@ class Engine:
             if self.feed.realtime and self.persist and s.mint not in self.linked_x and s.launch is not None \
                     and s.launch.twitter and not s.migrated and s.curve.progress * 100 >= L.min_curve_pct - 15:
                 self._read_x_link(s)
+            if s.curve.progress * 100 >= L.min_curve_pct - 15 and not s.migrated and self._skip_mayhem():
+                self._check_mayhem(s)                    # known before it qualifies, so the buy isn't delayed
             if not s.decided or s.late_tried or s.mint in self.positions or s.mint in self.pending \
                     or s.mint in self.reviewing or not s.price_known:
                 continue
@@ -1998,6 +2099,10 @@ class Engine:
                 "max_cluster_pct": en.funding.max_cluster_pct, "skip_mayhem": self._skip_mayhem()})
             if not ok:
                 if why in SKIP_FOR_GOOD:                   # it qualified but looks like the dump profile: never this coin
+                    s.late_tried = True
+                continue
+            if self._skip_mayhem() and self._mayhem_block(s):   # not known yet: read it, look again next scan
+                if s.mayhem:
                     s.late_tried = True
                 continue
             if practice:

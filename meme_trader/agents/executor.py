@@ -20,6 +20,12 @@ class Executor:
         self.wallet = wallet
         if params.mode == "live" and (wallet is None or not jupiter.has_key()):
             raise RuntimeError("live mode needs a wallet and JUPITER_API_KEY")
+        if params.mode == "live" and not getattr(params, "allow_unproven_live_executor", False):
+            # Two external reviews (2026-10-06): this executor confirms and measures balances, but has none of the
+            # pump.fun engine's unresolved-order lifecycle (signature history, blockhash expiry, no re-send while
+            # unknown). Until it shares that lifecycle, it doesn't trade real money.
+            raise RuntimeError("the DexScreener bot's live executor is blocked until it shares the pump.fun engine's "
+                               "unresolved-order handling (see docs/BUILD_LOG.md #62). Paper mode works.")
 
     # ---- pre-trade checks -------------------------------------------------
     def _quote(self, order: Order) -> dict:

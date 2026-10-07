@@ -583,6 +583,9 @@ def make_app(engine, agent_token: str | None = None, chat=None, data_dir: Path |
                 err = engine.set_desk(True, who="key")   # rebuild the desk's client with the new key now
                 note = f" · AI desk {'restarted with it' if not err else 'could not restart: ' + err}"
             return {"ok": True, "keys": keymod.status(env_path), "text": f"{k['label']} saved to .env{note}"}
+        if action == "order_reconcile":           # Live: an unknown order the chain can't prove either way
+            why = engine.reconcile_unresolved(str(cmd.get("signature") or ""), str(cmd.get("outcome") or ""))
+            return {"ok": not why, "text": why or "settled as not landed"}
         if action == "key_test":
             ok, text = await keymod.test_key(str(cmd.get("name") or "ANTHROPIC_API_KEY"))
             return {"ok": ok, "text": ("✓ " if ok else "✕ ") + text}
