@@ -27,7 +27,7 @@ The originals, byte for byte, with their sha256 and printed outputs, are in the 
 | T6 | `edge-style.py DAY`, `edge-style_sum.py`, `edge-manual.py` | the owner's style as 540 rules, run per day (`DAY` = `feed-2026-10-0N.jsonl.gz`); the owner's manual entries vs the bots' | each day |
 | T7 | `edge2-grad_collect.py DAY`, then `edge2-grad_eval.py` | which half-full coins graduate | train earlier days, grade a later one |
 | T8 | `run_compare.sh` | graduation variants: slippage caps, fill delays, near-high, dev-sell size | 10-03..05 (10-06 not reached) |
-| T9 | **`t9_replay_v2.py`** (2026-10-07) | the corrected replay: one series per pool across days, fills and censoring by `meme_trader/sniper/replay_exec.py` (the forward test's rules), statuses for every unmeasured trade, episodes, bounds | 10-04..06 |
+| T9 | **`t9_replay_v2.py`** (2026-10-07) | the corrected replay: one series per pool across days, fills and censoring by `meme_trader/sniper/replay_exec.py` (the forward test's rules), statuses for every unmeasured trade, episodes, bounds. Its signal is the shared, versioned `meme_trader/sniper/t9_signal.py` (version 2: the price AT OR BEFORE t-300, as registered; version 1 took the price strictly before it, and its outputs are kept as `signal-v1/`) | 10-04..06 |
 | T9 (superseded) | `edge2-swap_study.py [COST]`, `edge2-swap_robust.py COST DELAY`, `edge2-swap_top.py` | the first version. A sixth review found it filling a missing delayed exit at the trigger print, and selling positions that outran a day's series at their last print. `run` is corrected; its old numbers are invalid for executable-return inference | 10-04, 10-05, 10-06 |
 
 ## When they ran (and so how much of 10-06 they saw)
