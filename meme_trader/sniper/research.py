@@ -153,7 +153,8 @@ def code_revision() -> str:
     try:
         rev = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=12", "HEAD"], capture_output=True,
                              text=True, timeout=5).stdout.strip()
-        dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "meme_trader", "config/params.example.yaml"],
+        dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=all", "--",
+                                "meme_trader", "config/params.example.yaml"],
                                capture_output=True, text=True, timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"
@@ -171,10 +172,18 @@ def manifest(files: list | None = None) -> dict:
 
     out: dict = {"code_revision": code_revision()}
     try:
-        diff = subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD", "--", "meme_trader", "config/params.example.yaml"],
-                              capture_output=True, text=True, timeout=10).stdout
+        diff = subprocess.run(["git", "-C", str(ROOT), "diff", "--binary", "HEAD", "--", "meme_trader",
+                               "config/params.example.yaml"], capture_output=True, text=True, timeout=10).stdout
+        untracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--others", "--exclude-standard", "--",
+                                    "meme_trader", "config/params.example.yaml"],
+                                   capture_output=True, text=True, timeout=10).stdout.split()
     except (OSError, subprocess.SubprocessError):
-        diff = ""
+        diff, untracked = "", []
+    for rel in sorted(untracked):                    # new files git doesn't track yet: their content is code too
+        try:
+            diff += f"\n--- untracked {rel}\n" + (ROOT / rel).read_text(errors="replace")
+        except OSError:
+            diff += f"\n--- untracked {rel} (unreadable)\n"
     if diff:
         h = hashlib.sha256(diff.encode()).hexdigest()[:16]
         out["patch"] = h
@@ -241,6 +250,11 @@ def write_lock(pol: dict, at: str, h: str) -> None:
     lock_path(pol).write_text(json.dumps({"policy": pol["name"], "frozen_at": at, "signature": h, "sniper": sn,
                                           "code_revision": m["code_revision"], "manifest": m},
                                          indent=1, sort_keys=True) + "\n")
+
+
+def clean_tree() -> bool:
+    """No uncommitted or untracked engine/config changes: the commit alone says what code ran."""
+    return not code_revision().endswith("+dirty") and code_revision() != "unknown"
 
 
 def code_note(pol: dict) -> dict:
@@ -727,6 +741,9 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
                                              f" - no results shown until then", "data": q}
     rep["gates"] = gates_check(pol, rep)
     rep["verdict"] = "PASS" if rep["gates"]["pass"] else "FAIL"
+    if not clean_tree():                                 # a confirmatory verdict runs committed code only
+        raise ConfigError("a final verdict needs committed code: commit (or stash) the engine and config changes, "
+                          "then run it again - an uncommitted tree can't be identified exactly")
     rep.update(code_note(pol))
     rep["manifest"] = manifest(paths)
     if rep.get("code_changed_since_freeze"):            # not the code that was registered: no verdict on it
@@ -737,7 +754,10 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
         rep["provenance"] = "the code at the freeze wasn't recorded: this verdict can't prove it ran the frozen code"
         rep["verdict"] = f"{rep['verdict']} (provenance unverified)"
     env = rep.get("environment_changed_since_freeze") or {}
-    if any(env.values()):
+    uses_model = not (policy_params(pol)["sniper"].get("predict") or {}).get("display_only", True)
+    if env.get("models") and uses_model:                 # the model decides trades in this policy: different model,
+        rep["verdict"] = f"INVALID (its model changed since the freeze); exploratory {rep['verdict']}"   # different test
+    elif any(env.values()):
         rep["verdict"] = f"{rep['verdict']} (changed since the freeze: {', '.join(k for k, v in env.items() if v)})"
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_text(json.dumps(rep, indent=1, default=str))

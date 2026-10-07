@@ -4,6 +4,45 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-07 — Entry #64: The fourth review: a durable order outbox, crash-safe forward-test results, and a brief for reviewers
+
+**Source:** a fourth external review (revision 6f6101b). It came with eight offline contracts and a small candidate patch. All eight are rewritten as this project's own tests (`tests/test_review_astra4.py`, 13 tests). The reviewer's file wasn't run and its patch wasn't applied; its four small changes were read and done the same way here. All pass, and so does the full suite (437, 1 skipped).
+
+1. **A durable live order outbox** (`sniper/outbox.py`, the review's top priority). Before, the engine recorded an order only after the executor returned, so a crash while sending or confirming could leave a transaction on-chain that a restart didn't know about. Now, for every attempt (each escalating sell retry is its own signed transaction):
+   - **Before sending:** the signature, blockhash, side, coin and the engine's intent (size, score, source, reason) are committed to `data/orders.db` (SQLite, synchronous). If that write fails, the transaction isn't sent.
+   - **Booking is keyed by signature.** The saved state lists the signatures whose outcome it booked, and is flushed to disk (fsync) before it replaces the old one. A crash between booking and marking the outbox can't book twice.
+   - **On restart,** every signed order the saved state never booked becomes an unresolved order: its cash is reserved again and the coin's other orders pause until the chain says what happened. The owner's manual "not landed" settle closes it in the outbox too.
+   - **Live only:** paper orders never reach the network.
+2. **Forward-test results are committed exactly once** (`revival.py`). Results and the checkpoint now live in one SQLite file, keyed (follow id, exit), and each result is committed in the same transaction as its checkpoint.
+   - **A failed write raises:** nothing is taken as done, and the engine stops the forward test, not the bot.
+   - **The JSONL file is only an export now.** The old file is imported once: an unfinished last row goes to a quarantine file instead of discarding every row.
+   - **A chunk re-read after a crash** can't stop a follow with trades from before its fill.
+3. **The small ones:**
+   - **Mayhem:** only the two documented pre-Mayhem layouts (49 and 81 bytes) count as "not Mayhem", and the account data must be strict base64. Any other length is unknown.
+   - **Timed exits:** one that's already due wins over a stop seen on the same trade.
+   - **Models:** a model keeps the feature version it was trained on, so re-saving old weights can't relabel them as current.
+   - **Replays:** a replay queued with a day's `.jsonl` reads the `.gz` if the recorder compressed it in the meantime. With neither file there, it fails loudly instead of skipping the day.
+4. **Research identity includes untracked files.** New files git doesn't track yet are hashed into the code identity. A final verdict now refuses to run on uncommitted or untracked engine or config code. A final whose policy lets the model decide trades is INVALID if the model files changed since the freeze.
+
+**The review on speed:** "promising hypothesis, not a purchase justification". Changing `paper_delay_s` shifts fills on the *received*-event timeline. It doesn't simulate what a faster feed would show earlier, or prove a transaction lands in 0.5 s. Its plan, adopted as the gate for buying faster infrastructure:
+1. Timestamp every stage (receive, decide, build, check, sign, send, inclusion, settled) with slot, event index, provider, retries and actual fees.
+2. Measure distributions (p50/p90/p99), not a constant.
+3. Replay with separate observation and landing clocks, jitter, failed and expired orders, own-order impact, recorded creator fees and retry costs.
+4. Freeze one latency policy and test it on new days.
+5. Pay only if the conservative incremental profit beats the subscription plus higher tips.
+
+Never turn off pre-sign checks or unknown-order safety for speed.
+
+**`docs/EDGE_BRIEF.md`:** what's holding us back from an edge, written for outside reviewers. It covers:
+- where things stand;
+- why the bots' trades lose (a ~9–10% round-trip cost before the coin moves, and adverse selection);
+- every hypothesis tested, with numbers;
+- the bottlenecks;
+- the options;
+- specific questions.
+
+---
+
 ## 2026-10-07 — Entry #63: The third review's seven edge cases, versioned features, and what speed is worth to graduation plays
 
 **Source:** a third external review (revision 337ff7d, main with #86 and #87). It confirmed the earlier fixes and found seven edge cases. Each is rewritten as this project's own test (`tests/test_review_astra3.py`); the reviewer's file wasn't run here. All pass.

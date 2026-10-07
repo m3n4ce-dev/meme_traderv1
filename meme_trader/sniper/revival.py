@@ -28,10 +28,51 @@ from __future__ import annotations
 
 import json
 import random
+import sqlite3
 import statistics
 import time
 from collections import deque
 from pathlib import Path
+
+
+class Store:
+    """The forward test's results and checkpoint, in one SQLite file (a fourth review, 2026-10-07): each result is
+    keyed (follow id, exit) and committed in the same transaction as the checkpoint it belongs to, so a result is
+    durable exactly once, and a failed write raises (the caller stops) instead of being taken as done. The JSONL file
+    is only an export."""
+
+    def __init__(self, path: Path):
+        self.db = sqlite3.connect(str(path), isolation_level=None)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("CREATE TABLE IF NOT EXISTS results (id TEXT NOT NULL, exit TEXT NOT NULL, row TEXT NOT NULL, "
+                        "PRIMARY KEY (id, exit))")
+        self.db.execute("CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+
+    def results(self) -> list[dict]:
+        return [json.loads(r) for (r,) in self.db.execute("SELECT row FROM results ORDER BY rowid")]
+
+    def checkpoint(self) -> dict | None:
+        r = self.db.execute("SELECT v FROM state WHERE k = 'checkpoint'").fetchone()
+        return json.loads(r[0]) if r else None
+
+    def commit(self, rows: list[dict], checkpoint: dict | None) -> list[dict]:
+        """Write rows (new ones only) and the checkpoint atomically; returns the rows actually new. Raises on failure."""
+        new = []
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            for row in rows:
+                cur = self.db.execute("INSERT OR IGNORE INTO results (id, exit, row) VALUES (?, ?, ?)",
+                                      (row["id"], row["exit"], json.dumps(row)))
+                if cur.rowcount:
+                    new.append(row)
+            if checkpoint is not None:
+                self.db.execute("INSERT OR REPLACE INTO state (k, v) VALUES ('checkpoint', ?)", (json.dumps(checkpoint),))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return new
 
 RULES = {"+40% in 5 min, volume x4": (0.40, 4.0), "+30% in 5 min, volume x4": (0.30, 4.0),
          "+20% in 5 min, volume x4": (0.20, 4.0)}
@@ -52,7 +93,9 @@ class Revival:
     def __init__(self, data_dir: Path, now: float | None = None, seed: int = 7):
         self.src = Path(data_dir) / "wallets"
         self.out = Path(data_dir) / "revival-v2.jsonl"           # v2: decision clocks, censoring, costs, control
-        self.state_path = Path(data_dir) / "revival-v2-state.json"
+        self.state_path = Path(data_dir) / "revival-v2-state.json"    # (before the store: read once, then ignored)
+        self.store = Store(Path(data_dir) / "revival-v2.db")
+        self.ckpt_offset = 0                           # the file position every processed row is before
         self.started = now if now is not None else time.time()
         self.path: Path | None = None
         self.offset = 0
@@ -74,15 +117,14 @@ class Revival:
         self._saved_at = 0.0
         self.gaps: list = []                           # (from, to) wall times this evaluator wasn't reading
         self.last_wall = 0.0
-        try:
-            self.done = [json.loads(x) for x in self.out.read_text().splitlines() if x.strip()]
-        except (OSError, ValueError):
-            self.done = []
+        self.done = self.store.results()
+        if not self.done:
+            self._import_jsonl()
         self.done_keys = {(r.get("id"), r.get("exit")) for r in self.done if r.get("id")}
         try:
-            st = json.loads(self.state_path.read_text())
+            st = self.store.checkpoint() or json.loads(self.state_path.read_text())
             self.path = Path(st["path"]) if st.get("path") else None
-            self.offset = int(st.get("offset", 0))
+            self.offset = self.ckpt_offset = int(st.get("offset", 0))
             self.warm_from = max(0, self.offset - WARMUP_BYTES) if self.path else None
             self.fired = dict(st.get("fired") or {})
             self.open = {p: fs for p, fs in (st.get("open") or {}).items() if fs}
@@ -92,19 +134,44 @@ class Revival:
             pass
 
     # ------------------------------------------------------------------ persistence
+    def _import_jsonl(self) -> None:
+        """The export from before the store: its whole rows go in, an unfinished last row goes to a quarantine file,
+        and a broken row inside the file is counted (never a reason to drop the rest)."""
+        try:
+            lines = self.out.read_text().split("\n")
+        except OSError:
+            return
+        rows, bad = [], 0
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                if i == len(lines) - 1:
+                    with self.out.with_suffix(".quarantine.jsonl").open("a") as q:
+                        q.write(line + "\n")
+                else:
+                    bad += 1
+                continue
+            if r.get("id") and r.get("exit"):
+                rows.append(r)
+        self.import_bad = bad
+        if rows:
+            self.store.commit(rows, None)
+            self.done = self.store.results()
+
+    def _state(self) -> dict:
+        return {"path": str(self.path) if self.path else "", "offset": self.ckpt_offset,
+                "fired": {k: v for k, v in self.fired.items() if self.newest_t - v < COOLDOWN_S},
+                "open": self.open, "saved": time.time()}
+
     def save(self, force: bool = False) -> None:
+        """The checkpoint, committed through the store (raises if it can't be written: the caller stops)."""
         if not (self._dirty or force) or (not force and time.time() - self._saved_at < 10):
             return
-        st = {"path": str(self.path) if self.path else "", "offset": self.offset - len(self.rest),
-              "fired": {k: v for k, v in self.fired.items() if self.newest_t - v < COOLDOWN_S},
-              "open": self.open, "saved": time.time()}
-        tmp = self.state_path.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(st))
-            tmp.replace(self.state_path)
-            self._dirty, self._saved_at = False, time.time()
-        except OSError:
-            pass
+        self.store.commit([], self._state())
+        self._dirty, self._saved_at = False, time.time()
 
     # ------------------------------------------------------------------ reading
     def _file_for(self, now: float) -> Path:
@@ -127,6 +194,7 @@ class Revival:
             except OSError:
                 return 0
             self.offset, self.warm_from = size, max(0, size - WARMUP_BYTES)
+            self.ckpt_offset = size
         if self.warm_from is not None:                 # history before the resume point: pools only
             self._warm(max_bytes)
         if want != self.path:                          # a new UTC day: finish yesterday's file first
@@ -139,7 +207,7 @@ class Revival:
                 self._expire(now)
                 self.save()
                 return n
-            self.path, self.offset, self.rest = want, 0, b""
+            self.path, self.offset, self.rest, self.ckpt_offset = want, 0, b"", 0
             self._dirty = True
         n += self._read(max_bytes, now)
         self._expire(now)
@@ -188,6 +256,7 @@ class Revival:
             return 0
         if not chunk:
             return 0
+        self.ckpt_offset = self.offset - len(self.rest)  # a crash mid-chunk re-reads it (results are keyed: once)
         self.offset += len(chunk)
         self._dirty = True
         data = self.rest + chunk
@@ -202,6 +271,7 @@ class Revival:
             if r:
                 self.on_trade(*r, seen=seen)
                 n += 1
+        self.ckpt_offset = self.offset - len(self.rest)
         return n
 
     @staticmethod
@@ -307,6 +377,8 @@ class Revival:
             if t >= f["decided_at"] + f["delay"]:      # the first trade after the decision plus the delay
                 f["p0"], f["fill_t"] = px, t
             return
+        if t < f["fill_t"]:                            # a chunk re-read after a crash: trades from before its fill
+            return
         for name, (stop, hold) in EXITS.items():
             x = f["exits"].setdefault(name, {})
             if "pnl" in x or x.get("censored"):
@@ -316,9 +388,7 @@ class Revival:
                     x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
                     self._close(f, name, x, t)
                 continue
-            if stop is not None and px <= f["p0"] * (1 - stop):
-                x["why"], x["sell_at"] = "stop", seen + f["delay"]           # noticed when read
-            elif t >= f["fill_t"] + hold:
+            if t >= f["fill_t"] + hold:                  # the timer came due first: its sale goes, whatever this price
                 due = f["fill_t"] + hold
                 for a, b in self.gaps:                 # due while this wasn't running: it sells when it's back
                     if a <= due <= b:
@@ -327,25 +397,29 @@ class Revival:
                 if t >= x["sell_at"]:                  # the timer was set when it filled: this trade is the first after
                     x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
                     self._close(f, name, x, t)
+            elif stop is not None and px <= f["p0"] * (1 - stop):
+                x["why"], x["sell_at"] = "stop", seen + f["delay"]           # noticed when read
         if len(f["exits"]) == len(EXITS) and all("pnl" in x or x.get("censored") for x in f["exits"].values()):
             f["finished"] = True
 
     def _close(self, f: dict, name: str, x: dict, t: float) -> None:
-        if (f.get("id"), name) in self.done_keys:       # already written (a restart replayed it): once only
+        if (f.get("id"), name) in self.done_keys:       # already committed (a restart replayed it): once only
             return
-        if f.get("id"):
-            self.done_keys.add((f["id"], name))
-        row = {"id": f.get("id"), "closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
+        row = {"id": f.get("id") or f"{f['pool']}|{f['rule']}|{f['signal_t']:.0f}|{f['delay']}|{'c' if f.get('control') else 's'}",
+               "closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
                "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"], "rule": f["rule"], "delay": f["delay"],
                "control": f.get("control", False), "exit": name, "why": x.get("why", ""), "pnl_pct": x.get("pnl"),
                "censored": bool(x.get("censored")), "mark_pct": x.get("mark"), "cost": f.get("cost"),
                "cost_how": f.get("cost_how"), "ret5": f.get("ret5"), "surge": f.get("surge")}
-        self.done.append(row)
-        try:
-            with self.out.open("a") as fh:
-                fh.write(json.dumps(row) + "\n")
-        except OSError:
-            pass
+        new = self.store.commit([row], self._state())   # raises if it can't be written: nothing is taken as done
+        self.done_keys.add((row["id"], name))
+        if new:
+            self.done.append(row)
+            try:                                       # the export (the store is the record)
+                with self.out.open("a") as fh:
+                    fh.write(json.dumps(row) + "\n")
+            except OSError:
+                pass
 
     def _expire(self, now: float) -> None:
         """A follow whose pool went quiet: no trade means no sale was possible. Censored, with its last-trade mark

@@ -237,6 +237,7 @@ def test_eval_report_and_registry(tmp_path, policy):
 
 
 def test_freeze_then_holdout_only(tmp_path, policy, monkeypatch):
+    monkeypatch.setattr(R, "clean_tree", lambda: True)          # (a final needs committed code: tested on its own)
     rec_dev = recording(tmp_path, seed=3)
     with pytest.raises(config.ConfigError, match="isn't frozen"):
         R.cmd_final(policy, [str(rec_dev)], jobs=1)
