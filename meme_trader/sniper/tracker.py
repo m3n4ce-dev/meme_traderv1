@@ -84,11 +84,17 @@ class TokenState:
     safety_hold: str = ""                            # a block carried across a restart (the engine's fork registry)
     replacements: list = field(default_factory=list)   # (old trade, new trade or None): for downstream consumers
 
-    # a conflict's status (a seventh review, 2026-10-07): "unresolved" (provisional state, unsafe), "confirmed" (the
-    # chain's confirmed answer: usable, still re-checked until finalized), "final" (finalized), "unresolvable" (no
-    # answer, or one matching no single delivered version) and "retracted" (the transaction failed on chain: its trade
-    # never happened). New differing content reopens any of them; weaker evidence never overrides "final".
+    # a conflict keeps two things apart (an eighth review, 2026-10-07):
+    # - its STRONGEST EVIDENCE, which only stronger evidence replaces: the chain's answer (slot, level "confirmed" or
+    #   "final", failed or not, source, method, the content it proved) that the coin's state is built on;
+    # - its STATUS, the state of the resolution: "unresolved" (provisional, or new content arrived since the evidence:
+    #   unsafe until a fresh answer at least as strong agrees), "confirmed" (usable, re-checked until finalized),
+    #   "final", "unresolvable" (no answer, or one matching no single delivered version) and "retracted" (the
+    #   transaction failed on chain: its trade never happened; stays unsafe).
+    # Weaker evidence, success or failure, never changes the state. Two finalized answers that disagree are an
+    # integrity fault (`fault`): unresolvable for good, never a reason to pick the later one.
     SAFE: ClassVar[tuple] = ("confirmed", "final")
+    LEVEL: ClassVar[dict] = {"": 0, "confirmed": 1, "final": 2}
 
     @property
     def unsafe(self) -> str:
@@ -98,6 +104,8 @@ class TokenState:
         if self.unrepairable:
             return "fork conflict: state can't be rebuilt"
         st = [c["status"] for c in self.conflicts.values()]
+        if any(c.get("fault") for c in self.conflicts.values()):
+            return "fork conflict: the chain's finalized answers contradict each other"
         if "retracted" in st:
             return "fork conflict: a version's transaction failed on chain"
         if any(x not in self.SAFE for x in st):
@@ -195,15 +203,15 @@ class TokenState:
         if c is None:
             first = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
             c = self.conflicts[k] = {"versions": [first] if first is not None else [], "status": "unresolved",
-                                     "history": []}
+                                     "history": [], "strongest": None, "fault": ""}
             self.new_conflicts.append(k)
-        elif c["status"] != "unresolved":                 # new contradicting content reopens a settled event
-            c["status"], c["reopened"] = "unresolved", c.get("reopened", 0) + 1
-            self.new_conflicts.append(k)
+        elif c["status"] != "unresolved":                 # new contradicting content reopens a settled event: unsafe
+            c["status"], c["reopened"] = "unresolved", c.get("reopened", 0) + 1     # until it's verified again - but
+            self.new_conflicts.append(k)                  # the evidence already established stays (`strongest`)
         c["versions"].append(t)
         applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
-        if applied is not None and t.slot > applied.slot:
-            self._replace(k, t)                         # provisional: the later slot's version
+        if applied is not None and t.slot > applied.slot and not c.get("strongest"):
+            self._replace(k, t)                         # provisional, with no evidence yet: the later slot's version
         return "conflict"
 
     def _replace(self, k: tuple, t: Trade | None) -> None:
@@ -228,48 +236,93 @@ class TokenState:
             setattr(self, name, getattr(fresh, name))
         self.mayhem = self.mayhem or fresh.mayhem
 
-    def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "", err: str = "") -> str:
-        """The chain's answer for a conflicting event: the slot its transaction landed in, at what confirmation, and
-        whether it failed. Returns "kept", "replaced", "retracted", "unresolvable" or "" (nothing new).
+    def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "", err: str = "",
+                         content: tuple | None = None, method: str = "") -> str:
+        """The chain's answer for a conflicting event: the slot its transaction landed in, at what confirmation,
+        whether it failed, and - when the transaction itself was fetched and decoded - the event's content there.
+        Returns "kept", "replaced", "retracted", "unresolvable" or "" (nothing changed).
+        - evidence is ranked by level (finalized over confirmed); weaker evidence never changes the state, success
+          or failure, and the same evidence again changes nothing;
         - a FAILED transaction: its trade never happened - retracted from the coin, which stays unsafe;
-        - "finalized" is final; "confirmed" is usable but provisional, and a later finalized answer can revise it;
-          weaker evidence never overrides final, and a contradicting final answer makes it unresolvable;
-        - the landed slot must match exactly ONE delivered content: two differing copies from one slot can't be told
-          apart by slot, so it's unresolvable (unsafe) rather than a guess."""
+        - with the decoded content, the canonical version is the delivered one with that content; without it, the one
+          delivered from the landed slot - and two differing copies from one slot can't be told apart that way;
+        - two finalized answers that disagree (slot, failure or content) are an integrity fault, not a choice."""
         c = self.conflicts.get(k)
         if c is None:
             return ""
+        c.setdefault("strongest", None)
+        c.setdefault("fault", "")
         level = "final" if status == "finalized" else "confirmed" if status == "confirmed" else ""
-        if not err and c["status"] == "final":
-            if level != "final" or c.get("slot") == slot:
-                return ""                                # weaker, or the same final answer again
-        elif not err and c["status"] == level and c.get("slot") == slot:
-            return ""                                    # the same answer again: idempotent
-        ev = {"slot": slot, "status": status, "source": source, "err": err}
-        c["evidence"] = ev
-        c.setdefault("history", []).append(ev)
-        if err:
-            self._replace(k, None)
-            c["status"] = "retracted"
-            return "retracted"
-        if c["status"] == "final":                       # final contradicted by final: can't be both
+        ev = {"slot": slot, "level": level, "status": status, "source": source, "err": err,
+              "method": method or ("tx" if content is not None else "status"),
+              "content": list(content) if content is not None else None}
+        hist = c.setdefault("history", [])
+        if ev in hist and c["status"] != "unresolved":
+            return ""                                    # the same evidence again: idempotent
+        if ev not in hist:
+            hist.append(ev)
+        c["evidence"] = ev                               # (the latest answer; `strongest` is what counts)
+        if c["fault"]:
+            return ""                                    # contradictory finalized answers: nothing settles it now
+        if not level:                                    # no answer in time: a state, not evidence
+            if c["status"] == "unresolvable" or (c["strongest"] or {}).get("level") == "final":
+                return ""                                # (a finalized answer stands)
             c["status"] = "unresolvable"
             return "unresolvable"
-        match = [v for v in c["versions"] if v is not None and v.slot == slot] if slot and level else []
-        if not match or len({_content(v) for v in match}) > 1:
-            c["status"] = "unresolvable"                 # stays unsafe: never reported as clean
-            return "unresolvable"
-        canon = match[0]
+        strong = c["strongest"]
+        rank = self.LEVEL
+        if strong is not None and rank[level] < rank[strong["level"]]:
+            return ""                                    # weaker than what's established: recorded, never applied
+        if err:
+            canon = None
+        else:
+            if content is not None:
+                match = [v for v in c["versions"] if v is not None and _content(v) == tuple(content)]
+            else:
+                match = [v for v in c["versions"] if v is not None and v.slot == slot]
+            if len({_content(v) for v in match}) != 1:
+                if strong is not None and strong["level"] == "final" and level == "final" and content is not None:
+                    c["fault"] = "a finalized answer proved content no delivered version has"
+                c["status"] = "unresolvable"             # doesn't identify exactly one delivered version: unsafe
+                return "unresolvable"
+            canon = match[0]
+        proved = None if canon is None else list(_content(canon))
+        if strong is not None and not self._agrees(strong, ev, proved):
+            if strong["level"] == "final" and level == "final":
+                c["fault"] = "finalized answers contradict each other"
+                c["status"] = "unresolvable"
+                return "unresolvable"
+            if strong["level"] == level:                 # two confirmed answers disagree: wait for finalized
+                c["status"] = "unresolvable"
+                return "unresolvable"
         applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
-        out = "kept"
-        if applied is None or _content(applied) != _content(canon) or applied.slot != canon.slot:
+        out = ""
+        if canon is None:
+            if applied is not None:
+                self._replace(k, None)
+                out = "retracted"
+            elif c["status"] != "retracted":
+                out = "retracted"
+        elif applied is None or _content(applied) != _content(canon) or applied.slot != canon.slot:
             self._replace(k, canon)
             out = "replaced"
+        elif c["status"] != level:
+            out = "kept"
         if self.unrepairable:
             c["status"] = "unresolvable"
             return "unresolvable"
-        c["status"], c["slot"] = level, slot
+        if strong is None or rank[level] > rank[strong["level"]] or (strong["method"] != "tx" and content is not None):
+            c["strongest"] = {**ev, "content": proved}
+        c["status"], c["slot"] = ("retracted" if canon is None else level), slot
         return out
+
+    @staticmethod
+    def _agrees(a: dict, b: dict, b_content: list | None) -> bool:
+        """Do two answers say the same thing: the same slot, both failed or both not, and (when both name the
+        content) the same content?"""
+        if a["slot"] != b["slot"] or bool(a["err"]) != bool(b["err"]):
+            return False
+        return a.get("content") is None or b_content is None or list(a["content"]) == list(b_content)
 
     def _early(self, w: str) -> None:
         """early_sold as the sum over early buyers of min(sold, bought early): the same in any arrival order."""

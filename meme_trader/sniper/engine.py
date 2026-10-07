@@ -50,6 +50,8 @@ DUST_SOL = 0.0005
 TOKEN_ACCOUNT_RENT = 0.00203928       # refundable SOL locked in each new token account (live)
 UNRESOLVED_ALERT_S = 600              # an order still unknown this long: tell the owner (nothing is released without proof)
 FORK_GIVE_UP_S = 600                               # a conflicting event the chain hasn't shown in this long
+FORK_EVIDENCE_KEPT = 5000                         # strongest chain answers kept per event (restarts, evicted coins)
+FORK_TX_PER_PASS = 32                             # transactions fetched and decoded per lookup pass (the rest: status only)
 CASH_TOLERANCE_SOL = 0.002            # ledger vs wallet SOL difference that's still just rounding/timing
 
 
@@ -228,6 +230,7 @@ class Engine:
         self._recovered_ctx: dict[str, dict] = {}          # mint -> safety context from a recovered order's intent
         self.fork_pending: dict[tuple, dict] = {}          # (signature, event index) -> {mint, since, stage}: ask chain
         self.fork_blocks: dict[str, str] = {}              # mint -> why its trade state isn't trusted (survives restarts)
+        self.fork_evidence: dict[tuple, dict] = {}         # (signature, event index) -> the strongest chain answer
         self._events: OrderedDict = OrderedDict()          # recent trade identities -> content hash (disposition)
         self._fork_busy, self._last_fork_check = False, 0.0
         self._ack_alerted = False
@@ -879,8 +882,8 @@ class Engine:
             self.fork_pending[k] = {"mint": s.mint, "since": self.now, "stage": "first"}
             self.stats["fork_conflicts"] += 1
         s.new_conflicts.clear()
-        for old, new in s.replacements:
-            if old is not None and old.trader in self.leaders.leaders:
+        for old, new in s.replacements:                   # (old None: a retracted event reinstated; new None:
+            if any(t is not None and t.trader in self.leaders.leaders for t in (old, new)):     # retracted)
                 self.leaders.replace(old, new)
         s.replacements.clear()
         if s.unsafe:
@@ -1603,7 +1606,8 @@ class Engine:
         if source != "callout" and s.mint not in self.audit:        # yardstick row for the gate audit
             self.audit[s.mint] = ["(bought)", self.now, fill.price, fill.price, fill.price, ""]
         if source not in ("callout", "manual") and self.feed.realtime:
-            self.lab.start(s.mint, s.symbol, "late" if source == "late" else "sniper", fill.price, self.now, self.p)
+            self.lab.start(s.mint, s.symbol, "late" if source == "late" else "sniper", fill.price, self.now, self.p,
+                           stake_sol=fill.sol)
             try:                                                     # the bot's call, on the record
                 self.ledger.call(s.mint, s.symbol, "bot", s.market_cap_sol * self.sol_price.usd, fill.price,
                                  self.sol_price.usd, thesis="; ".join(notes)[:280], source=source,
@@ -1967,19 +1971,58 @@ class Engine:
                 f.write(json.dumps(row) + "\n")
 
     def _on_reconcile(self, e: Reconcile) -> None:
-        """The chain's answer for a conflicting trade event (live: from `_reconcile_forks`; replays: as recorded)."""
+        """The chain's answer for a conflicting trade event (live: from `_reconcile_forks`; replays: as recorded).
+        A confirmed answer, failed or not, is provisional: checked again until finalized. The strongest evidence per
+        event is also kept in a registry that outlives the coin's state (restarts, evicted coins), so a later weaker
+        answer can't count for more there either, and contradicting finalized answers keep the coin blocked."""
         k = (e.signature, e.event_index)
-        if e.status != "confirmed" or e.err:              # final, failed or given up: no more lookups
+        if e.status != "confirmed":                       # finalized, or given up: no more lookups
             self.fork_pending.pop(k, None)
-        elif k in self.fork_pending:                      # confirmed: provisional - checked again until finalized
+        elif k in self.fork_pending:
             self.fork_pending[k].update(stage="final", next=self.now + 10)
+        content = None
+        if e.content:
+            try:
+                content = tuple(json.loads(e.content))
+            except (ValueError, TypeError):
+                content = None
         s = self.tokens.get(e.mint)
-        if s is None:
+        c = s.conflicts.get(k) if s is not None else None
+        if c is None:                                     # its history is gone (restart, eviction): only the registry
+            self._registry_evidence(e, k)
+            if s is not None:
+                self._fanout(s)
             return
-        r = s.resolve_conflict(k, e.slot, e.status, e.source, e.err)
+        r = s.resolve_conflict(k, e.slot, e.status, e.source, e.err, content)
         if r:
             self.stats["fork_" + r] += 1
+        if c.get("strongest"):
+            self.fork_evidence[k] = {"mint": e.mint, **c["strongest"], "fault": c.get("fault", "")}
+            self._trim_evidence()
+        if s.unrepairable:                                # the followed wallet's copy of it can't be corrected either
+            self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
         self._fanout(s)
+
+    def _registry_evidence(self, e: Reconcile, k: tuple) -> None:
+        """A chain answer for an event whose coin no longer holds its versions: nothing can be rebuilt, but the
+        registry's evidence still ranks it - and a finalized answer contradicting a finalized one blocks the coin."""
+        level = "final" if e.status == "finalized" else "confirmed" if e.status == "confirmed" else ""
+        self.leaders.unknown_if_counted(k, "a fork correction for this event can't be applied")
+        if not level:
+            return
+        old = self.fork_evidence.get(k)
+        new = {"mint": e.mint, "slot": e.slot, "level": level, "status": e.status, "source": e.source,
+               "err": e.err, "method": "tx" if e.content else "status", "content": None, "fault": ""}
+        if old is None or TokenState.LEVEL[level] > TokenState.LEVEL[old["level"]]:
+            self.fork_evidence[k] = new
+            self._trim_evidence()
+        elif level == old["level"] == "final" and (old["slot"] != e.slot or bool(old["err"]) != bool(e.err)):
+            old["fault"] = "finalized answers contradict each other"
+            self.fork_blocks[e.mint] = "fork conflict: the chain's finalized answers contradict each other"
+
+    def _trim_evidence(self) -> None:
+        while len(self.fork_evidence) > FORK_EVIDENCE_KEPT:
+            self.fork_evidence.pop(next(iter(self.fork_evidence)))
 
     def _fork_rpc(self) -> tuple[str, str]:
         """Where to ask about fork copies: the feed's own provider over HTTP (it delivered them, and RPC Fast is a flat
@@ -2006,6 +2049,40 @@ class Engine:
             raise RuntimeError(f"getSignatureStatuses: {d['error']}")
         return d["result"]["value"]
 
+    @classmethod
+    def _tx_content(cls, url: str, k: tuple, slot: int, commitment: str) -> tuple[str, str]:
+        """The event's content in the transaction itself, decoded by the feed's own parser (`parse_logs`: the event
+        index is the place among pump.fun's TradeEvents in the transaction's log order, not a delivery number), and
+        how that went: ("[...]", "decoded"), or ("", why) when it can't be established - an RPC error, not
+        returned, another slot, logs missing or truncated, no such event."""
+        from .feeds import SolanaTradeFeed
+        from .tracker import _content
+        try:
+            tx = cls._tx_lookup(url, k[0], commitment)
+        except Exception:
+            return "", "tx_errors"
+        meta = tx.get("meta") if isinstance(tx, dict) else None
+        if not isinstance(meta, dict) or tx.get("slot") != slot or not isinstance(meta.get("logMessages"), list):
+            return "", "tx_unknown"
+        evs = [t for t in SolanaTradeFeed.parse_logs({"signature": k[0], "err": meta.get("err"),
+                                                      "logs": meta["logMessages"]}, 0.0, slot)
+               if t.event_index == k[1]]
+        if len(evs) != 1:
+            return "", "tx_unknown"
+        return json.dumps(list(_content(evs[0]))), "tx_decoded"
+
+    @staticmethod
+    def _tx_lookup(url: str, sig: str, commitment: str) -> dict | None:
+        import httpx
+        r = httpx.post(url, timeout=10, json={"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
+                                              "params": [sig, {"commitment": commitment, "encoding": "json",
+                                                               "maxSupportedTransactionVersion": 0}]})
+        r.raise_for_status()
+        d = r.json()
+        if "error" in d:
+            raise RuntimeError(f"getTransaction: {d['error']}")
+        return d["result"]
+
     async def _reconcile_forks(self) -> None:
         """Ask the chain which slot each conflicting event's transaction landed in (getSignatureStatuses, up to 256
         a call). The answer becomes a recorded Reconcile event, applied like any other. Not found in FORK_GIVE_UP_S:
@@ -2024,14 +2101,20 @@ class Engine:
             self.stats["fork_lookups"] += 1
             src = f"getSignatureStatuses@{host}"
             now = self.feed.now()
+            fetched = 0
             for (k, info), st in zip(items, vals):
                 ok = isinstance(st, dict) and isinstance(st.get("slot"), int) and st["slot"] > 0 and \
                     st.get("confirmationStatus") in ("confirmed", "finalized") and "err" in st
-                if ok and st["err"] is not None:          # it landed, and FAILED: its trade never happened
-                    ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"], src,
-                                   err=json.dumps(st["err"])[:200])
-                elif ok and (st["confirmationStatus"] == "finalized" or info.get("stage") != "final"):
-                    ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"], src)
+                if ok and (st["confirmationStatus"] == "finalized" or info.get("stage") != "final"):
+                    err = json.dumps(st["err"])[:200] if st["err"] is not None else ""   # FAILED: never happened
+                    content = ""
+                    if not err and fetched < FORK_TX_PER_PASS:
+                        fetched += 1
+                        content, how = await asyncio.to_thread(self._tx_content, url, k, st["slot"],
+                                                               st["confirmationStatus"])
+                        self.stats["fork_" + how] += 1
+                    ev = Reconcile(now, info["mint"], k[0], k[1], st["slot"], st["confirmationStatus"],
+                                   src + ("+getTransaction" if content else ""), err=err, content=content)
                 elif now - info["since"] >= FORK_GIVE_UP_S:
                     why = "not finalized" if info.get("stage") == "final" else "not found"
                     ev = Reconcile(now, info["mint"], k[0], k[1], 0, why, src)
@@ -2272,7 +2355,9 @@ class Engine:
                  "booked_sigs": self.booked_sigs.to_json(), "account_id": self.book.account_id,
                  "forks": {"blocks": {**self.fork_blocks, **{m: s.unsafe for m, s in self.tokens.items() if s.unsafe}},
                            "pending": [[k[0], k[1], v["mint"], v["since"], v.get("stage", "first")]
-                                       for k, v in self.fork_pending.items()]},
+                                       for k, v in self.fork_pending.items()],
+                           "evidence": [[k[0], k[1], v] for k, v in self.fork_evidence.items()]},
+                 "leaders": self.leaders.to_json(),
                  "owner": self.outbox.owner if self.outbox is not None else None,
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:], "pulse": [list(r) for r in self.pulse]}
@@ -2403,6 +2488,13 @@ class Engine:
         for sig, ei, mint, since, stage in forks.get("pending") or []:
             self.fork_pending[(sig, int(ei))] = {"mint": mint, "since": since, "stage": stage}
             self.fork_blocks.setdefault(mint, "fork conflict unresolved (from before a restart)")
+        for sig, ei, ev in forks.get("evidence") or []:
+            if isinstance(ev, dict) and ev.get("level") in ("confirmed", "final"):
+                self.fork_evidence[(sig, int(ei))] = ev
+        try:
+            self.leaders.load_state(d.get("leaders"))      # followed wallets' bags and observed results carry over
+        except (KeyError, TypeError, ValueError) as ex:
+            self.say("error", f"followed wallets' ledger not restored ({ex!r}): their open bags start unknown")
         from .outbox import Receipts
         self.booked_sigs = Receipts.load(d.get("booked_sigs"))
         self._reconcile_outbox()

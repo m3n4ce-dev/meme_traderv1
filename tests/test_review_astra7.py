@@ -78,7 +78,8 @@ def test_new_content_after_resolution_reopens_and_asks_again():
     s.resolve_conflict(("S", 0), 101, "finalized")
     s.new_conflicts.clear()
     assert s.on_trade(tr(102, 14), 10) == "conflict"
-    assert s.unsafe and s.new_conflicts == [("S", 0)] and s.holders["W"] == 14     # provisional: the latest slot
+    assert s.unsafe and s.new_conflicts == [("S", 0)]
+    assert s.holders["W"] == 12                       # (8th review) the finalized version stays until verified again
 
 
 def test_a_failed_transaction_is_retracted_and_the_coin_stays_flagged():
@@ -170,7 +171,9 @@ def test_a_proven_replacement_and_a_retraction_correct_the_followed_wallets_bag(
         assert e.leaders.bag("W", M).tokens == pytest.approx(10)
         await e.handle(Reconcile(3, M, "S", 0, 100, "finalized", "test", err="failed"))
     asyncio.run(go())
-    assert e.leaders.bag("W", M).tokens == pytest.approx(0) and e.leaders.stats["W"].trades == 0
+    # (8th review) a finalized failure contradicting a finalized success is an integrity fault, not a retraction
+    assert e.leaders.bag("W", M).tokens == pytest.approx(10) and e.leaders.stats["W"].trades == 1
+    assert e.tokens[M].conflicts[("S", 0)]["fault"] and e.tokens[M].unsafe
 
 
 # --------------------------------------------------------------------------- the T9 account
@@ -204,7 +207,9 @@ def test_unmeasured_exits_hold_capacity_and_capital_then_are_written_off():
     assert p.attempted == 4 and p.cash == pytest.approx(9.0 - 1.0)
     assert p.try_enter(10 + HOLD_S + 10, "late", 0.1) == "max open"                # still retrying the exits
     p.settle(10 + DELAY_S + HOLD_S + RETRY_S)
-    assert p.trapped == 4 and p.cash == pytest.approx(8.0) and p.conservative == pytest.approx(4 * 0.25 * -1.012)
+    # (8th review) impaired at zero recovery plus fees, in cash and in the primary series alike
+    assert p.trapped == 4 and p.cash == pytest.approx(9.0 - 4 * 0.25 * 1.012)
+    assert p.conservative == pytest.approx(4 * 0.25 * -1.012) == sum(p.daily(1))
 
 
 def test_nothing_enters_that_couldnt_close_inside_the_window():
