@@ -7,7 +7,6 @@ import copy
 import json
 import subprocess
 import time
-from collections import deque
 
 import pytest
 

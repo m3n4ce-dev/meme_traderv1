@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import heapq
 import json
+import os
 import secrets
 import re
 import time
@@ -160,6 +161,10 @@ class Engine:
         TokenState.NON_ORGANIC = frozenset((self.p.get("market") or {}).get("non_organic_wallets") or [])
         self.feed = feed
         self.ex = executor
+        self.outbox = None                                 # live: signed orders on disk before sending (outbox.py)
+        if mode.startswith("live") and (persist is None or persist) and hasattr(executor, "outbox"):   # (persist's default)
+            from .outbox import Outbox
+            self.outbox = executor.outbox = Outbox(DATA / "orders.db")
         self.mode = mode
         self.desk = desk
         self.fee = self.p.execution.curve_fee_pct + self.p.execution.platform_fee_pct
@@ -211,6 +216,7 @@ class Engine:
                                                  default=str).encode()).hexdigest()[:10]
         self.order_tasks: set[asyncio.Task] = set()        # live orders run beside the feed, never in front of it
         self.unresolved: dict[str, dict] = {}              # signature -> sent order whose outcome isn't known yet
+        self.booked_sigs: deque = deque(maxlen=5000)       # signatures whose outcome is booked (saved with the book)
         self._last_resolve = 0.0
         self._resolving = False
         self._last_cash_check = 0.0
@@ -1320,11 +1326,18 @@ class Engine:
             traceback.print_exception(task.exception())
 
     async def _run_buy(self, s: TokenState, score, sol, notes, source, leader, then, meta=None) -> None:
+        from .outbox import ORDER_INTENT
+        tok = ORDER_INTENT.set({"side": "buy", "mint": s.mint, "sol": sol, "score": score, "notes": list(notes),
+                                "source": source, "leader": leader, "add": bool((meta or {}).get("add"))})
         try:
             fill = await self.ex.buy(s.mint, s.curve, sol,
                                      self.p.callouts.priority_fee_sol if source == "callout" else None)
         except Exception as e:                            # an executor bug must not leave cash reserved forever
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        finally:
+            ORDER_INTENT.reset(tok)
+        done = [x for x in (fill.attempts or []) if x != (fill.signature if fill.unknown else None)]
+        self.booked_sigs.extend(done)                     # booked with the save the outcome below makes
         if fill.unknown:                                  # sent, but did it land? keep the cash and the mint held
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "buy", "sol": sol, "score": score,
@@ -1333,10 +1346,12 @@ class Engine:
                                    fill.blockhash, fill.landed)
             self.say("error", f"buy {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - "
                               "its cash stays reserved until the chain says", s.mint)
+            self._outbox_booked(done)
             return
         self.book.reserved.pop(s.mint, None)
         self.pending.discard(s.mint)
         self._apply_buy(s, fill, score, notes, source, leader, meta)
+        self._outbox_booked(done)
         if fill.ok and then is not None:
             try:
                 await then()
@@ -1547,22 +1562,41 @@ class Engine:
         return list(urgent) if urgent and any(k in reason for k in URGENT_EXITS) else list(x.sell_slippage_steps)
 
     async def _run_sell(self, s: TokenState, pos: SniperPosition, tokens: float, reason: str, meta=None) -> None:
+        from .outbox import ORDER_INTENT
         steps = self._sell_steps(reason)
         kw = {"steps": steps} if steps != list(self.p.execution.sell_slippage_steps) else {}
+        tok = ORDER_INTENT.set({"side": "sell", "mint": s.mint, "tokens": tokens, "reason": reason})
         try:
             fill = await self.ex.sell(s.mint, s.curve, tokens,
                                       self.p.callouts.priority_fee_sol if pos.source == "callout" else None, **kw)
         except Exception as e:
             fill = SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        finally:
+            ORDER_INTENT.reset(tok)
+        done = [x for x in (fill.attempts or []) if x != (fill.signature if fill.unknown else None)]
+        self.booked_sigs.extend(done)
         if fill.unknown:              # sending a fresh sell now could sell twice: wait for the chain instead
             self._book_fees_lost(fill, s)
             self._track_unresolved(fill.signature, {"mint": s.mint, "side": "sell", "tokens": tokens, "reason": reason},
                                    fill.blockhash, fill.landed)
             self.say("error", f"sell {s.symbol}: sent ({fill.signature[:8]}…) but its outcome is unknown - no new "
                               "sell until the chain says", s.mint)
+            self._outbox_booked(done)
             return
         self.pending.discard(s.mint)
         self._apply_sell(s, pos, fill, reason, meta)
+        self._outbox_booked(done)
+
+    def _outbox_booked(self, sigs) -> None:
+        """Their outcome is in the saved state: done in the outbox too (a crash before this is harmless: the saved
+        state's booked_sigs settles them at the next start)."""
+        if self.outbox is not None and sigs:
+            self.save_state()
+            try:
+                self.outbox.mark(sigs, "booked")
+            except Exception as e:
+                self.say("error", f"outbox: couldn't mark {len(sigs)} order(s) booked ({type(e).__name__}); "
+                                  "the saved state still knows them")
 
     def _apply_sell(self, s: TokenState, pos: SniperPosition, fill: SniperFill, reason: str, meta=None) -> None:
         self._book_fees_lost(fill, s)
@@ -1618,11 +1652,13 @@ class Engine:
         if o.get("landed"):
             return "the chain showed this order landed: it can't be settled as not landed"
         del self.unresolved[sig]
+        self.booked_sigs.append(sig)
         if o["side"] == "buy":
             self.book.reserved.pop(o["mint"], None)
         self.pending.discard(o["mint"])
         self.say("info", f"{o['side']} {sig[:8]}… settled by the owner as not landed", o["mint"])
         self.save_state()
+        self._outbox_booked([sig])
         return ""
 
     async def _resolve_unresolved(self) -> None:
@@ -1639,6 +1675,13 @@ class Engine:
             self._resolving = False
 
     async def _resolve_each(self, resolve) -> None:
+        settled: list[str] = []
+        try:
+            await self._resolve_loop(resolve, settled)
+        finally:
+            self._outbox_booked(settled)
+
+    async def _resolve_loop(self, resolve, settled: list) -> None:
         for sig, o in list(self.unresolved.items()):
             mint = o["mint"]
             age = time.time() - o["sent_at"]
@@ -1661,6 +1704,8 @@ class Engine:
                     self.save_state()
                 continue
             del self.unresolved[sig]
+            self.booked_sigs.append(sig)
+            settled.append(sig)
             s = self.tokens.get(mint) or self.tokens.setdefault(mint, TokenState(mint, None, self.now))
             if o["side"] == "buy":
                 self.book.reserved.pop(mint, None)
@@ -1968,15 +2013,52 @@ class Engine:
                           "deposits": b.deposits[-200:], "equity_hist": list(b.equity_hist)},
                  "positions": {m: asdict(p) for m, p in self.positions.items()},
                  "tokens": tokens, "unresolved": self.unresolved, "orders": self.orders, "away": self.away,
+                 "booked_sigs": list(self.booked_sigs),
                  "defense": {"until": self.defense_until, "reason": self.defense_reason},
                  "called": sorted(self.callouts.called)[-2000:], "pulse": [list(r) for r in self.pulse]}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, default=str))
+        with tmp.open("w") as f:
+            f.write(json.dumps(state, default=str))
+            f.flush()
+            os.fsync(f.fileno())                  # on the disk, not just in the page cache, before it replaces the old
         tmp.replace(self.state_path)          # atomic: a crash mid-write never corrupts the state
+
+    def _reconcile_outbox(self) -> None:
+        """Signed orders the saved state never booked (the process died between signing and booking): each becomes
+        an unresolved order - its cash reserved, its coin's other orders paused - until the chain proves what happened.
+        Ones the state did book are just marked done."""
+        if self.outbox is None:
+            return
+        booked = set(self.booked_sigs)
+        done = []
+        for r in self.outbox.unbooked():
+            if r["sig"] in booked:
+                done.append(r["sig"])
+                continue
+            if r["sig"] in self.unresolved:
+                continue
+            it = r["intent"]
+            o = {"mint": r["mint"], "side": r["side"], "sent_at": r["created"], "blockhash": r["blockhash"],
+                 "landed": False, "from_outbox": True}
+            if r["side"] == "buy":
+                sol = float(it.get("sol") or it.get("amount") or 0.0)
+                o.update(sol=sol, score=it.get("score", 0), notes=list(it.get("notes") or []),
+                         source=it.get("source", "sniper"), leader=it.get("leader", ""), add=bool(it.get("add")))
+                self.book.reserved.setdefault(r["mint"], sol + self._order_overhead(o["source"]))
+            else:
+                o.update(tokens=float(it.get("tokens") or it.get("amount") or 0.0), reason=it.get("reason", "sell"))
+            self.unresolved[r["sig"]] = o
+            self.say("error", f"restart: a signed {r['side']} ({r['sig'][:8]}…) was never booked - held until the chain "
+                              "says what happened", r["mint"])
+        if done:
+            self.outbox.mark(done, "booked")
 
     async def restore_state(self) -> None:
         if not self.state_path.exists():
+            self._reconcile_outbox()                      # no saved book, but maybe signed orders
+            for o in self.unresolved.values():
+                self.pending.add(o["mint"])
             return
         d = json.loads(self.state_path.read_text())
         b = d["book"]
@@ -1999,6 +2081,8 @@ class Engine:
         cut = time.time() - 90 * 60                          # the Market Pulse chart keeps its last hour across a restart
         self.pulse.extend(r for r in d.get("pulse") or [] if isinstance(r, list) and len(r) == 6 and r[0] >= cut)
         self.unresolved = dict(d.get("unresolved") or {})
+        self.booked_sigs.extend(d.get("booked_sigs") or [])
+        self._reconcile_outbox()
         saved_tokens = d.get("tokens") or {}
         now = self.feed.now()
 

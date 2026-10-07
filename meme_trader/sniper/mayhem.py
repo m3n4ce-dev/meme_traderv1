@@ -30,13 +30,13 @@ def parse(data_b64: str, owner: str = PUMP_PROGRAM) -> bool | None:
     discriminator, and a flag byte that is 0 or 1. A recognized pre-upgrade layout (no flag yet: Mayhem didn't exist)
     is False. Anything else is None: unknown, never "safe" (a third review, 2026-10-06)."""
     try:
-        raw = base64.b64decode(data_b64)
+        raw = base64.b64decode(data_b64, validate=True)
     except ValueError:
         return None
     if owner != PUMP_PROGRAM or raw[:8] != DISCRIMINATOR:
         return None
-    if len(raw) <= MAYHEM_BYTE:
-        return False if len(raw) >= 49 else None        # the original layout (to `complete`) or with the creator
+    if len(raw) <= MAYHEM_BYTE:                       # only the two documented pre-Mayhem layouts: the original
+        return False if len(raw) in (49, LEGACY_LEN) else None   # (to `complete`) and with the creator; else unknown
     flag = raw[MAYHEM_BYTE]
     return bool(flag) if flag in (0, 1) else None
 
