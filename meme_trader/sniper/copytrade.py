@@ -47,6 +47,12 @@ class LeaderStats:
     copied_pnl: float = 0.0
     loss_streak: int = 0
     paused_reason: str = ""
+    unknown_bags: int = 0         # coins whose observed accounting isn't exact (opening inventory unknown, etc.)
+
+
+OBSERVED = ("trades", "closed", "wins", "realized_sol")      # the leader's own results: rebuilt from its events
+LEDGER_EVENTS = 256        # events kept per wallet x coin for exact corrections; older ones fold into its snapshot
+PAIR_IDLE_S = 3600         # a flat wallet x coin with no event for this long folds into the wallet's totals
 
 
 @dataclass
@@ -55,6 +61,21 @@ class _Bag:
     cost: float = 0.0
     pnl: float = 0.0
     last_buy_price: float = 0.0
+
+
+@dataclass
+class _Pair:
+    """One followed wallet's events on one coin, in chain order, so a correction is replayed exactly (an eighth
+    review, 2026-10-07: correcting a buy before a later sell isn't the same as adding the difference to what's left -
+    the sell's cost share, the realized profit, the closed bag and the win all change)."""
+    start: _Bag = field(default_factory=_Bag)          # the bag before `events` (what's folded in can't be corrected)
+    start_n: list = field(default_factory=lambda: [0, 0, 0, 0.0])   # trades, closed, wins, realized before `events`
+    start_unknown: str = ""
+    events: list = field(default_factory=list)         # [seq, trade or None (retracted / moved), slot]
+    n: list = field(default_factory=lambda: [0, 0, 0, 0.0])         # the same totals after `events`
+    unknown: str = ""                                  # why its accounting isn't exact: "" = it is
+    forced: str = ""                                   # (a correction that couldn't be applied)
+    last_ts: float = 0.0
 
 
 class LeaderBook:
@@ -66,10 +87,20 @@ class LeaderBook:
         self.stats: dict[str, LeaderStats] = defaultdict(LeaderStats)
         self.bags: dict[tuple[str, str], _Bag] = defaultdict(_Bag)
         self.recent_copies: dict[str, deque] = defaultdict(deque)
+        self.pairs: dict[tuple[str, str], _Pair] = {}
+        self.by_wallet: dict[str, dict[str, _Pair]] = defaultdict(dict)
+        self.base: dict[str, list] = {}               # wallet -> observed totals not in any pair (earlier runs, folded)
+        self.base_unknown: dict[str, int] = defaultdict(int)
+        self.where: dict[tuple, tuple] = {}           # event identity (signature, index) -> ((wallet, mint), seq)
+        self._seq = self._calls = 0
+        self._newest_ts = 0.0
         self.path = path
         if path and path.exists():
+            fields = LeaderStats.__dataclass_fields__
             for addr, st in json.loads(path.read_text()).items():
-                self.stats[addr] = LeaderStats(**st)
+                self.stats[addr] = LeaderStats(**{k: v for k, v in st.items() if k in fields})
+                self.base[addr] = [getattr(self.stats[addr], f) for f in OBSERVED]
+                self.base_unknown[addr] = self.stats[addr].unknown_bags
 
     def is_leader(self, wallet: str) -> bool:
         lead = self.leaders.get(wallet)
@@ -82,43 +113,198 @@ class LeaderBook:
     def bag(self, wallet: str, mint: str) -> _Bag:
         return self.bags[(wallet, mint)]
 
-    def on_trade(self, t: Trade) -> float:
-        """Update the leader's bag. For sells returns the fraction of their bag sold (0..1)."""
-        st = self.stats[t.trader]
-        st.trades += 1
-        b = self.bags[(t.trader, t.mint)]
+    # ---- the observed ledger -------------------------------------------------------------------------------------
+    @staticmethod
+    def _step(b: _Bag, n: list, t: Trade) -> tuple[float, str]:
+        """One event on a bag and its totals; (fraction of the bag sold, why the accounting became inexact or "")."""
+        n[0] += 1
         if t.side == "buy":
             b.tokens += t.tokens
             b.cost += t.sol
             b.last_buy_price = t.sol / t.tokens if t.tokens else 0.0
-            return 0.0
+            return 0.0, ""
         if b.tokens <= 0:
-            return 1.0
+            return 1.0, "a sell with no buy seen: its opening inventory is unknown"
+        why = "sold more than it was seen buying: its opening inventory is unknown" \
+            if t.tokens > b.tokens * (1 + 1e-9) else ""
         frac = min(t.tokens / b.tokens, 1.0)
         cost_part = b.cost * frac
+        proceeds = t.sol * (b.tokens / t.tokens) if why else t.sol     # only the tokens it was seen buying
         b.tokens *= 1 - frac
         b.cost -= cost_part
-        b.pnl += t.sol - cost_part
-        st.realized_sol += t.sol - cost_part
+        b.pnl += proceeds - cost_part
+        n[3] += proceeds - cost_part
         if b.tokens <= 1e-6:
-            st.closed += 1
-            st.wins += b.pnl > 0
-            del self.bags[(t.trader, t.mint)]
+            n[1] += 1
+            n[2] += b.pnl > 0
+            b.tokens = b.cost = b.pnl = b.last_buy_price = 0.0          # the round trip is over: a new bag next
+        return frac, why
+
+    def _pair(self, key: tuple[str, str]) -> _Pair:
+        p = self.pairs.get(key)
+        if p is None:
+            p = self.pairs[key] = self.by_wallet[key[0]][key[1]] = _Pair()
+        return p
+
+    def _rebuild(self, key: tuple[str, str]) -> dict:
+        """Replay the pair from its snapshot, in chain order: (slot, then arrival). Returns each event's sold fraction."""
+        p = self.pairs[key]
+        p.events.sort(key=lambda e: (e[2], e[0]))
+        b = _Bag(**asdict(p.start))
+        n, why, fr = list(p.start_n), p.start_unknown, {}
+        for seq, t, _ in p.events:
+            if t is not None:
+                fr[seq], w = self._step(b, n, t)
+                why = why or w
+        self.bags[key], p.n, p.unknown = b, n, p.forced or why
+        return fr
+
+    def _restat(self, wallet: str) -> None:
+        """The wallet's observed totals: what's not in a pair, plus each pair's - recomputed, never adjusted by deltas,
+        so a corrected history gives exactly the numbers a fresh replay of it would."""
+        st = self.stats[wallet]
+        tot = list(self.base.get(wallet, [0, 0, 0, 0.0]))
+        unknown = self.base_unknown.get(wallet, 0)
+        for p in self.by_wallet.get(wallet, {}).values():
+            for i in range(4):
+                tot[i] += p.n[i]
+            unknown += bool(p.unknown)
+        st.trades, st.closed, st.wins, st.realized_sol = tot
+        st.unknown_bags = unknown
+
+    def _insert(self, t: Trade) -> tuple[tuple, int]:
+        key = (t.trader, t.mint)
+        p = self._pair(key)
+        self._seq += 1
+        p.events.append([self._seq, t, t.slot])
+        p.last_ts = max(p.last_ts, t.ts)
+        if t.signature and t.event_index >= 0:
+            self.where[(t.signature, t.event_index)] = (key, self._seq)
+        return key, self._seq
+
+    def _fold(self, key: tuple[str, str]) -> None:
+        """Past LEDGER_EVENTS, the oldest events move into the snapshot (they can't be corrected after that)."""
+        p = self.pairs[key]
+        p.events.sort(key=lambda e: (e[2], e[0]))
+        while len(p.events) > LEDGER_EVENTS:
+            seq, t, _ = p.events.pop(0)
+            if t is not None:
+                _, w = self._step(p.start, p.start_n, t)
+                p.start_unknown = p.start_unknown or w
+                if t.signature and t.event_index >= 0 and self.where.get((t.signature, t.event_index), (0, 0))[1] == seq:
+                    del self.where[(t.signature, t.event_index)]
+
+    def _prune(self) -> None:
+        """A flat bag with no event for PAIR_IDLE_S folds into its wallet's totals (fork corrections come in minutes)."""
+        for key, p in list(self.pairs.items()):
+            if self.bags.get(key, _Bag()).tokens <= 1e-6 and p.last_ts < self._newest_ts - PAIR_IDLE_S:
+                tot = self.base.setdefault(key[0], [0, 0, 0, 0.0])
+                for i in range(4):
+                    tot[i] += p.n[i]
+                self.base_unknown[key[0]] += bool(p.unknown)
+                for seq, t, _ in p.events:
+                    if t is not None and self.where.get((t.signature, t.event_index), (0, 0))[1] == seq:
+                        del self.where[(t.signature, t.event_index)]
+                del self.pairs[key], self.by_wallet[key[0]][key[1]]
+                self.bags.pop(key, None)
+
+    def on_trade(self, t: Trade) -> float:
+        """Count one of the leader's trade events. For sells returns the fraction of their bag sold (0..1)."""
+        key = (t.trader, t.mint)
+        p = self._pair(key)
+        last = p.events[-1] if p.events else None
+        key, seq = self._insert(t)
+        if last is None or (t.slot, seq) >= (last[2], last[0]):      # in chain order: one more step
+            frac, why = self._step(self.bags[key], p.n, t)
+            p.unknown = p.unknown or why
+        else:                                                         # an earlier slot arrived late: replay
+            frac = self._rebuild(key)[seq]
+        if len(p.events) > LEDGER_EVENTS:
+            self._fold(key)
+        self._newest_ts = max(self._newest_ts, t.ts)
+        self._restat(t.trader)
+        self._calls += 1
+        if self._calls % 512 == 0:
+            self._prune()
         return frac
 
-    def replace(self, old: Trade, new: Trade | None) -> None:
-        """A fork repair: the version of a leader's trade already counted (`old`) was wrong - the chain kept `new`, or
-        none (it failed). Their bag is corrected by the difference, so later sell fractions use the real inventory."""
-        b = self.bags[(old.trader, old.mint)]
-        sign = 1 if old.side == "buy" else -1
-        b.tokens -= sign * old.tokens
-        b.cost -= old.sol if old.side == "buy" else 0.0
-        if new is None:
-            self.stats[old.trader].trades -= 1
-        else:
-            b.tokens += (1 if new.side == "buy" else -1) * new.tokens
-            b.cost += new.sol if new.side == "buy" else 0.0
-        b.tokens, b.cost = max(b.tokens, 0.0), max(b.cost, 0.0)
+    def replace(self, old: Trade | None, new: Trade | None) -> None:
+        """A fork correction from the coin's state machine: the version of an event already counted (`old`) wasn't
+        the chain's - it kept `new`, or none (the transaction failed); old None reinstates a retracted event. The
+        affected bags are replayed from their snapshots, so inventory, cost, realized profit, closed bags and wins
+        all match a fresh replay of the corrected history. An event already folded into a snapshot can't be: that
+        bag is marked unknown instead. (Our own copied trades and their fees are real and never touched here.)"""
+        t = old if old is not None else new
+        if t is None:
+            return
+        ident = (t.signature, t.event_index) if t.signature and t.event_index >= 0 else None
+        loc = self.where.get(ident) if ident else None
+        touched: set = set()
+        if loc is not None:
+            key, seq = loc
+            ev = next((e for e in self.pairs[key].events if e[0] == seq), None) if key in self.pairs else None
+            if new is not None and ev is not None and (new.trader, new.mint) == key:
+                ev[1], ev[2] = new, new.slot
+            elif ev is not None:
+                ev[1] = None                                  # retracted, or now another wallet's event
+                if new is not None and new.trader in self.leaders:
+                    touched.add(self._insert(new)[0])
+            touched.add(key)
+        elif old is not None and old.trader in self.leaders:  # counted, but no longer replayable
+            if (old.trader, old.mint) in self.pairs:
+                self.pairs[(old.trader, old.mint)].forced = "a fork correction came for an event it can't replay"
+                touched.add((old.trader, old.mint))
+            else:
+                self.base_unknown[old.trader] += 1
+                self._restat(old.trader)
+        elif new is not None and new.trader in self.leaders:  # not counted before (another wallet's, or retracted)
+            touched.add(self._insert(new)[0])
+        for key in touched:
+            self._rebuild(key)
+        for w in {k[0] for k in touched}:
+            self._restat(w)
+
+    def unknown_if_counted(self, ident: tuple, why: str) -> None:
+        """An event counted here whose correction can't be applied (its coin can't be rebuilt): mark its bag unknown."""
+        loc = self.where.get(ident)
+        if loc is not None and loc[0] in self.pairs:
+            self.pairs[loc[0]].forced = why
+            self._rebuild(loc[0])
+            self._restat(loc[0][0])
+
+    # ---- persistence across restarts (the engine's state file) --------------------------------------------------
+    def to_json(self) -> dict:
+        def tr(t):
+            return asdict(t) if t is not None else None
+        return {"seq": self._seq, "base": self.base, "base_unknown": dict(self.base_unknown),
+                "pairs": [{"wallet": k[0], "mint": k[1], "start": asdict(p.start), "start_n": p.start_n,
+                           "start_unknown": p.start_unknown, "forced": p.forced, "last_ts": p.last_ts,
+                           "events": [[seq, tr(t), slot] for seq, t, slot in p.events]}
+                          for k, p in self.pairs.items()]}
+
+    def load_state(self, d: dict | None) -> None:
+        """The observed ledger as saved with the engine's state: bags carry across a restart, and the observed totals
+        come from here (leaders.json still holds our copied results)."""
+        if not d:
+            return
+        self._seq = int(d.get("seq", 0))
+        self.base = {w: list(v) for w, v in (d.get("base") or {}).items()}
+        self.base_unknown = defaultdict(int, d.get("base_unknown") or {})
+        fields = Trade.__dataclass_fields__
+        for r in d.get("pairs") or []:
+            key = (r["wallet"], r["mint"])
+            p = self._pair(key)
+            p.start, p.start_n = _Bag(**r["start"]), list(r["start_n"])
+            p.start_unknown, p.forced, p.last_ts = r.get("start_unknown", ""), r.get("forced", ""), r.get("last_ts", 0.0)
+            for seq, t, slot in r.get("events") or []:
+                tt = Trade(**{k: v for k, v in t.items() if k in fields}) if t else None
+                p.events.append([seq, tt, slot])
+                if tt is not None and tt.signature and tt.event_index >= 0:
+                    self.where[(tt.signature, tt.event_index)] = (key, seq)
+            self._rebuild(key)
+            self._newest_ts = max(self._newest_ts, p.last_ts)
+        for w in set(self.base) | set(self.by_wallet):
+            self._restat(w)
 
     def copies_last_hour(self, wallet: str, now: float) -> int:
         q = self.recent_copies[wallet]

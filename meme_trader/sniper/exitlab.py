@@ -22,6 +22,14 @@ from .strategy import SniperPosition, evaluate_exit, evaluate_late_exit
 MAX_OPEN_S = 1800
 
 
+# the reviewer's take-profit experiment (2026-10-07): +10% NET of the whole position - what selling all of it now
+# would bring after the sell fee and both transactions' network costs, against what the buy cost with its fee and
+# network cost - not +10% on the price (that's about +5% net on the curve's fees; +10% net needs ~+15% on the price).
+# Otherwise the bot's own exits, unchanged. The trim variant sells a quarter there and lets the rest ride them.
+TP10 = {"all out at +10% net": {"_tp_net": 10}, "trim 25% at +10% net": {"_trim_net": (10, 0.25)}}
+TX_COST_SOL = 0.000005                              # a transaction's base fee; its priority fee comes from the config
+
+
 def _late_variants(L) -> dict[str, dict]:
     return {
         "as now": {},
@@ -34,6 +42,7 @@ def _late_variants(L) -> dict[str, dict]:
         # bank gains early, many small wins (Cupsy's style: "take your profit, stop hunting home runs")
         "bank half at +30%": {"_half": 30},
         "all out at +50%": {"_tp": 50},
+        **TP10,
     }
 
 
@@ -48,6 +57,7 @@ def _sniper_variants(x) -> dict[str, dict]:
         # a trader's "4 cuts" (2026-10-06): a quarter of the bag as the curve passes 25, 50 and 75%; the last quarter
         # rides the usual exits, which already sell everything when the creator sells
         "curve ladder 25/50/75%": {"_curve_ladder": (25, 50, 75)},
+        **TP10,
     }
 
 
@@ -98,7 +108,7 @@ class ExitLab:
         return set(self.open)
 
     def start(self, mint: str, symbol: str, kind: str, price: float, now: float, p, only: tuple | None = None,
-              extra: dict | None = None) -> None:
+              extra: dict | None = None, stake_sol: float = 0.25) -> None:
         """A bot entry at `price` (p: params.sniper). kind 'late' runs the graduation-play exits, else the sniper's.
         kind 'desk-pass': a graduation coin the AI desk turned down, followed with the bot's own exits ("as now")
         so Analytics can show what the desk's passes would have made. 'practice-buy' / 'practice-pass': a team vote
@@ -114,9 +124,10 @@ class ExitLab:
         base = SniperPosition(mint=mint, symbol=symbol, opened_at=now, entry_price=price, tokens=1 / price,
                               initial_tokens=1 / price, cost_sol=1.0, initial_cost_sol=1.0, score=0.0,
                               peak_price=price, exits=[], source=kind)
+        tx = (float(p.execution.get("priority_fee_sol", 0) or 0) + TX_COST_SOL) / max(stake_sol, 1e-9)
         self.open.setdefault(mint, []).extend(
             {"variant": name, "over": over, "late": late, "pos": replace(base, exits=[]), "proceeds": 0.0, "opened": now,
-             "symbol": symbol, "kind": kind, "extra": extra or {}, "land_at": now + over.get("_delay", 0)}
+             "symbol": symbol, "kind": kind, "extra": extra or {}, "land_at": now + over.get("_delay", 0), "tx": tx}
             for name, over in variants.items())
 
     def _rule(self, sh: dict, s, now: float, p):
@@ -137,6 +148,13 @@ class ExitLab:
             return None
         if "_tp" in over and gain >= over["_tp"]:
             return 1.0, f"take profit +{gain:.0f}%"
+        if "_tp_net" in over or "_trim_net" in over:
+            net = self.net_gain_pct(sh, s.curve.price)
+            if "_tp_net" in over and net >= over["_tp_net"]:
+                return 1.0, f"take +{net:.1f}% net"
+            if "_trim_net" in over and not sh.get("trim_done") and net >= over["_trim_net"][0]:
+                sh["trim_done"] = True                   # once; the rest runs on the bot's own exits
+                return over["_trim_net"][1], f"trim {over['_trim_net'][1]:.0%} at +{net:.1f}% net"
         if "_half" in over and not sh.get("half_done") and gain >= over["_half"]:
             sh["half_done"] = True                       # once; the rest runs on the normal exits
             return 0.5, f"half out at +{gain:.0f}%"
@@ -155,6 +173,14 @@ class ExitLab:
         if sh["late"]:
             return evaluate_late_exit(pos, s, now, Params({**p.late, **plain}), p.exit)
         return evaluate_exit(pos, s, now, Params({**p.exit, **plain}), self.fee)
+
+    def net_gain_pct(self, sh: dict, price: float) -> float:
+        """The whole position's net P&L % if the rest were sold now: proceeds so far plus the rest at `price` after the
+        sell fee, minus every transaction's network cost (the buy, any trims, this sell), against the buy's cost."""
+        tx, f = sh.get("tx", 0.0), self.fee / 100
+        txs = 2 + sh.get("sells", 0)
+        value = sh["proceeds"] + sh["pos"].tokens * price * (1 - f) - (txs - 1) * tx
+        return (value / (1.0 * (1 + f) + tx) - 1) * 100
 
     def tick(self, tokens: dict, now: float, p) -> None:
         for mint, shadows in list(self.open.items()):
@@ -188,6 +214,7 @@ class ExitLab:
                 sold = pos.tokens * min(max(frac, 0.0), 1.0)
                 sh["proceeds"] += sold * price * (1 - self.fee / 100)
                 pos.tokens -= sold
+                sh["sells"] = sh.get("sells", 0) + (frac < 1)
                 if frac < 1:
                     pos.initials_taken = True
                 if frac >= 1 or pos.tokens * price < 1e-6:
