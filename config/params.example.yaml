@@ -400,6 +400,9 @@ sniper:
 wallets:
   mode: poll                     # poll = discovery samples + GeckoTerminal (~3.5 GB/day, partial on the busiest pools)
                                  # stream = the whole PumpSwap stream, complete (~80 GB/day download)
+  stream_from: public            # stream mode's source: public = PublicNode (free; ~10.6 s behind the chain, measured
+                                 # 2026-10-07); feed = the bot's own feed endpoint (feed.ws_url / SOLANA_WS_URL) first,
+                                 # PublicNode as the fallback - on a paid flat-rate provider, ~1.5 s
   min_pool_age_days: 2           # record trades on pump.fun coins' PumpSwap pools at least this old (younger = ~90% of trades)
   min_liquidity_usd: 5000        # ...with at least this much liquidity
   keep_days: 10                  # stop polling a pool after this long without a trade (rediscovery restarts it)

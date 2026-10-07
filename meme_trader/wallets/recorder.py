@@ -26,6 +26,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -37,6 +38,19 @@ from .sources import RateLimiter, SourceError, ds_pairs, gt_ohlcv, gt_trades
 log = logging.getLogger("wallets")
 DATA = ROOT / "data" / "wallets"
 WS_URLS = ["wss://solana-rpc.publicnode.com"]     # not the bot's api.mainnet-beta: its per-IP data cap is the bot's
+FALLBACK_RETRY_S = 300                             # on a fallback stream, retry the first one this often
+
+
+def stream_urls(cfg, feed_ws: str = "") -> list[str]:
+    """Where the stream mode subscribes, in order: the first that connects is used, the next is the fallback.
+    `wallets.stream_from`: "public" (the default) - PublicNode, free, measured ~10.6 s behind the chain on
+    2026-10-07; "feed" - the bot's own feed endpoint first (params feed.ws_url, else SOLANA_WS_URL; here a paid
+    flat-rate provider, ~1.5 s), PublicNode as the fallback. URLs are never logged or recorded: only their hosts."""
+    if (cfg.get("stream_from") or "public") == "feed" and feed_ws.startswith(("wss://", "ws://")):
+        from ..redact import register
+        register(feed_ws)
+        return [feed_ws] + [u for u in WS_URLS if u != feed_ws]
+    return list(WS_URLS)
 GT_MAX_ROWS = 300
 
 
@@ -426,34 +440,47 @@ class Recorder:
             if not self.active:
                 await asyncio.sleep(5)
                 continue
-            try:
-                async with s.ws_connect(self.ws_urls[0], max_msg_size=0, heartbeat=20) as ws:
-                    await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
-                                        "params": [{"mentions": [AMM_PROGRAM]}, {"commitment": "confirmed"}]})
-                    async for msg in ws:
-                        if msg.type != aiohttp.WSMsgType.TEXT:
-                            break
-                        if not self.active:
-                            break                               # a pause started: close the stream
-                        self.stream_bytes[_day(time.time())] += len(msg.data)
-                        v = (json.loads(msg.data).get("params") or {}).get("result", {}).get("value")
-                        if not v or v.get("err"):
-                            continue
-                        now = time.time()
-                        for k, sw in enumerate(parse_logs(v.get("logs") or [])):
-                            rec = self.pools.get(sw.pool)
-                            if rec is None:
-                                rec = self.pools[sw.pool] = {"first_seen": now, "meta": None, "meta_tries": 0, "meta_at": 0}
-                            rec["last_seen"] = now
-                            row = self.swap_row(sw, v.get("signature", ""), k, rx=now)
-                            if row:
-                                rec["last_trade"] = row["t"]
-                                rec["polls"] = rec.get("polls") or 1          # counts as covered for candles/meta
-                                self.buf.append(row)
-                                self.st["captured"] += 1
-            except (aiohttp.ClientError, OSError, ValueError) as e:
-                self._err("stream", e)
+            for i, url in enumerate(self.ws_urls):     # the first that connects; the rest are fallbacks
+                host = urlparse(url).hostname or ""
+                try:
+                    if await self._stream_from(s, url, host, fallback=i > 0):
+                        break
+                except (aiohttp.ClientError, OSError, ValueError) as e:
+                    self._err(f"stream {host}", e)
             await asyncio.sleep(1 if not self.active else 5)
+
+    async def _stream_from(self, s: aiohttp.ClientSession, url: str, host: str, fallback: bool) -> bool:
+        """One subscription until it ends: True when it ended on purpose (a pause, or a fallback's turn to retry the
+        first endpoint), so the caller starts over from the first."""
+        async with s.ws_connect(url, max_msg_size=0, heartbeat=20) as ws:
+            await ws.send_json({"jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                                "params": [{"mentions": [AMM_PROGRAM]}, {"commitment": "confirmed"}]})
+            self.st["stream_host"], self.st["stream_fallback"] = host, fallback
+            since = time.time()
+            async for msg in ws:
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    break
+                if not self.active:
+                    return True                         # a pause started: close the stream
+                if fallback and time.time() - since > FALLBACK_RETRY_S:
+                    return True                         # back to the first endpoint
+                self.stream_bytes[_day(time.time())] += len(msg.data)
+                v = (json.loads(msg.data).get("params") or {}).get("result", {}).get("value")
+                if not v or v.get("err"):
+                    continue
+                now = time.time()
+                for k, sw in enumerate(parse_logs(v.get("logs") or [])):
+                    rec = self.pools.get(sw.pool)
+                    if rec is None:
+                        rec = self.pools[sw.pool] = {"first_seen": now, "meta": None, "meta_tries": 0, "meta_at": 0}
+                    rec["last_seen"] = now
+                    row = self.swap_row(sw, v.get("signature", ""), k, rx=now)
+                    if row:
+                        rec["last_trade"] = row["t"]
+                        rec["polls"] = rec.get("polls") or 1          # counts as covered for candles/meta
+                        self.buf.append(row)
+                        self.st["captured"] += 1
+        return False
 
     async def run(self) -> None:
         log.info("wallet recorder (%s mode): %d pools known, data in %s", self.cfg.mode, len(self.pools), self.dir)

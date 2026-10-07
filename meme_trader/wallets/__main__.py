@@ -12,10 +12,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from pathlib import Path
 import logging
+import os
 import sys
 import time
+from pathlib import Path
 
 from .. import config
 from . import study
@@ -65,8 +66,11 @@ def main(argv=None) -> None:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
         from ..redact import install
         install()
-        cfg = config.load().wallets
-        asyncio.run(Recorder(cfg).run())
+        params = config.load()
+        cfg = params.wallets
+        from .recorder import stream_urls
+        feed_ws = str((params.get("feed") or {}).get("ws_url") or os.environ.get("SOLANA_WS_URL") or "")
+        asyncio.run(Recorder(cfg, ws_urls=stream_urls(cfg, feed_ws)).run())
         return
     if a.cmd == "status":
         _status()

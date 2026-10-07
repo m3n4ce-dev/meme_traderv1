@@ -591,6 +591,8 @@ def main() -> None:
     lr.add_argument("id")
     sub.add_parser("mcap-backfill", help="market caps in/out for trades closed before they were recorded (from the feed files)")
     sub.add_parser("kols", help="fetch kolscan.io's KOL wallet list once (data/kols.json): the live charts name them")
+    q1 = sub.add_parser("q1-report", help="the price watcher's frozen qualification window (Q1): coverage and verdict")
+    q1.add_argument("--json", help="also write the full report here")
     ed = sub.add_parser("edge", help="is each strategy's edge real? margin of error, big-winner dependence, day by day")
     ed.add_argument("--days", type=int, default=14, help="the last N days of trade files (default 14)")
     ed.add_argument("--mode", default="paper", help="paper | live | paper-synthetic (never mixed; default paper)")
@@ -638,6 +640,25 @@ def main() -> None:
 
         d, err = asyncio.run(refresh(DATA / "kols.json"))
         print(err or f"{len(d['kols'])} KOL wallets saved to data/kols.json ({len(d.get('board', []))} leaderboard rows)")
+        return
+    if args.cmd == "q1-report":                    # reads the quote book only (read-only)
+        import json
+
+        from .q1 import report
+        if not (DATA / "quotes.db").exists():
+            print(f"no quote book at {DATA / 'quotes.db'} yet (the price watcher writes it)")
+            return
+        r = report(DATA / "quotes.db")
+        w = r["window"]
+        print(f"Q1 {w['start_utc']} + {w['days']} days: {r['status']} ({w['jobs']} jobs, {w['pending_jobs']} pending); "
+              f"verdict {r['verdict']}; guards met {r['guards']['met']} (pools {r['guards']['pools']}, pool-days "
+              f"{r['guards']['pool_days']}, short cells {len(r['guards']['exit_cells_short'])})")
+        for k, c in r["cells"].items():
+            a, qd = c["available_eventual"], c["qualified_eventual"]
+            print(f"  {k:32} n {c['n']:4}  available {a['rate']} (clustered >= {a.get('clustered_lower')})  "
+                  f"qualified {qd['rate']} (clustered >= {qd.get('clustered_lower')})")
+        if args.json:
+            Path(args.json).write_text(json.dumps(r, indent=1))
         return
     if args.cmd == "edge":                         # reads recorded trades only
         from .edge import as_text, report
