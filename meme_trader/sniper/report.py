@@ -253,11 +253,12 @@ def load_trades(data_dir: Path, days: int | None = None, mode: str | None = None
     files = sorted(data_dir.glob("trades-*.jsonl"))
     if days:
         files = files[-days:]
+    from .pnl import upgrade
     rows = []
     for p in files:
         for line in p.read_text().splitlines():
             try:
-                rows.append(json.loads(line))
+                rows.append(upgrade(json.loads(line)))
             except ValueError:
                 continue
     if mode and mode != "all":

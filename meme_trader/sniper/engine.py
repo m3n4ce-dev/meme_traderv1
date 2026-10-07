@@ -24,12 +24,14 @@ from pathlib import Path
 
 from ..config import EXAMPLE, ROOT, ConfigError, example_help, validate_sniper
 from ..journal import DATA, record
+from .pnl import SCHEMA as PNL_SCHEMA
+from .pnl import upgrade_all as upgrade_pnl
 from .callouts import Callout, CalloutBook, compose, eligible, is_red_flag, post_telegram
 from .calls import CallLedger, LedgerError
 from .exitlab import ExitLab
 from .copytrade import LeaderBook
 from .curve import Curve
-from .events import Event, Funding, Health, Launch, Metadata, Migration, Social, Tick, Trade, dumps
+from .events import Event, Funding, Health, Launch, Metadata, Migration, Reconcile, Social, Tick, Trade, dumps
 from .execution import SniperFill
 from .features import extract
 from .funding import FundingResolver, cluster_report, cohort
@@ -47,6 +49,7 @@ RIDE_DEFAULTS = {"take_x": 2.0, "take_frac": 0.5, "trail_pct": 30.0, "trail_arm_
 DUST_SOL = 0.0005
 TOKEN_ACCOUNT_RENT = 0.00203928       # refundable SOL locked in each new token account (live)
 UNRESOLVED_ALERT_S = 600              # an order still unknown this long: tell the owner (nothing is released without proof)
+FORK_GIVE_UP_S = 600                               # a conflicting event the chain hasn't shown in this long
 CASH_TOLERANCE_SOL = 0.002            # ledger vs wallet SOL difference that's still just rounding/timing
 
 
@@ -221,6 +224,8 @@ class Engine:
         self.booked_sigs = Receipts()                      # booking receipts, pinned until the outbox confirms (outbox.py)
         self.running_orders: Counter = Counter()           # mint -> live orders being executed right now
         self._recovered_ctx: dict[str, dict] = {}          # mint -> safety context from a recovered order's intent
+        self.fork_pending: dict[tuple, dict] = {}          # (signature, event index) -> {mint, since}: ask the chain
+        self._fork_busy, self._last_fork_check = False, 0.0
         self._ack_alerted = False
         self._last_resolve = 0.0
         self._resolving = False
@@ -469,6 +474,10 @@ class Engine:
             why = self._mayhem_block(self.tokens.get(mint))
             if why:
                 return why
+        if source != "manual":                            # its trade history has an unproven fork version in it
+            s = self.tokens.get(mint)
+            if s is not None and s.unsafe:
+                return s.unsafe
         if source not in ("callout", "manual"):           # your own trades don't take the bot's seats
             trading = sum(1 for p in self.positions.values() if p.source != "callout")
             in_flight = len(self.book.reserved.keys() - set(self.positions) - {mint})
@@ -748,6 +757,8 @@ class Engine:
                 await self._evaluate(s)
         elif isinstance(e, Social):
             await self._on_social(e)
+        elif isinstance(e, Reconcile):
+            self._on_reconcile(e)
         elif isinstance(e, Health):
             if not self.feed.realtime:                  # replay: act like the live bot did at this moment
                 self.recorded_degraded = e.degraded
@@ -832,6 +843,11 @@ class Engine:
                 s.decided, s.late_tried = "seen through a KOL's trade", True
             await self._watch(e.mint)
         s.on_trade(e, self.p.entry.bundle_window_s, self.p.entry.sniper_window_s)
+        if s.new_conflicts:                               # a fork: two different versions of one trade event
+            for k in s.new_conflicts:
+                self.fork_pending.setdefault(k, {"mint": s.mint, "since": self.now})
+                self.stats["fork_conflicts"] += 1
+            s.new_conflicts.clear()
         kw = self._known_wallets().get(e.trader)        # a KOL or a study wallet: the Charts tab's tracker
         if kw:
             self._note_known(e, s, *kw)
@@ -1821,7 +1837,8 @@ class Engine:
         if pos.cost_sol > 0:                       # unsold remainder (dust, gone from wallet) is written off -
             self.book.day_pnl -= pos.cost_sol      # once, and today, so the daily loss limit sees all of it
             pos.cost_sol = 0.0
-        pnl = pos.proceeds_sol - pos.initial_cost_sol
+        gross = pos.proceeds_sol - pos.initial_cost_sol
+        pnl = gross - pos.failed_fees_sol          # net: failed transactions' fees already left cash (pnl.py)
         usd = self.sol_price.usd
         mc_in = self._mc_at(s, pos.entry_price)
         mc_out = s.market_cap_sol if s.price_known else None
@@ -1829,7 +1846,8 @@ class Engine:
             "entry_mcap_sol": round(mc_in, 2) if mc_in else None, "exit_mcap_sol": round(mc_out, 2) if mc_out else None,
             "entry_mcap_usd": round(mc_in * usd) if mc_in and usd else None, "exit_mcap_usd": round(mc_out * usd) if mc_out and usd else None,
             "mint": pos.mint, "symbol": pos.symbol, "opened": pos.opened_at, "closed": self.now,
-            "cost": pos.initial_cost_sol, "proceeds": pos.proceeds_sol, "pnl": pnl,
+            "cost": pos.initial_cost_sol, "proceeds": pos.proceeds_sol, "pnl": pnl, "gross_pnl": gross,
+            "pnl_schema": PNL_SCHEMA,
             "pnl_pct": pnl / max(pos.initial_cost_sol, 1e-12) * 100, "peak_gain_pct": pos.gain_pct(pos.peak_price),
             "score": pos.score, "initials": pos.initials_taken, "exit": pos.exits[-1][1] if pos.exits else "",
             "source": pos.source, "desk": pos.desk, "p": pos.p,
@@ -1865,7 +1883,51 @@ class Engine:
             with (DATA / f"trades-{time.strftime('%Y-%m-%d', time.gmtime(row['closed']))}.jsonl").open("a") as f:
                 f.write(json.dumps(row) + "\n")
 
+    def _on_reconcile(self, e: Reconcile) -> None:
+        """The chain's answer for a conflicting trade event (live: from `_reconcile_forks`; replays: as recorded)."""
+        self.fork_pending.pop((e.signature, e.event_index), None)
+        s = self.tokens.get(e.mint)
+        if s is None:
+            return
+        r = s.resolve_conflict((e.signature, e.event_index), e.slot, e.status, e.source)
+        if r:
+            self.stats["fork_" + r] += 1
+
+    async def _reconcile_forks(self) -> None:
+        """Ask the chain which slot each conflicting event's transaction landed in (getSignatureStatuses, up to 256
+        a call). The answer becomes a recorded Reconcile event, applied like any other. Not found in FORK_GIVE_UP_S:
+        recorded as unresolvable - the coin stays flagged, never reported clean."""
+        self._fork_busy = True
+        try:
+            from urllib.parse import urlparse
+
+            from ..wallet import RPC_URL, rpc
+            items = list(self.fork_pending.items())[:256]
+            try:
+                res = await asyncio.to_thread(rpc, "getSignatureStatuses",
+                                              [[k[0] for k, _ in items], {"searchTransactionHistory": True}])
+                vals = res["value"]
+            except Exception:
+                self.stats["fork_lookup_errors"] += 1
+                return
+            src = f"getSignatureStatuses@{urlparse(RPC_URL).hostname or ''}"
+            now = self.feed.now()
+            for (k, info), st in zip(items, vals):
+                if st and st.get("slot") and st.get("confirmationStatus") in ("confirmed", "finalized"):
+                    ev = Reconcile(now, info["mint"], k[0], k[1], int(st["slot"]), st["confirmationStatus"], src)
+                elif now - info["since"] >= FORK_GIVE_UP_S:
+                    ev = Reconcile(now, info["mint"], k[0], k[1], 0, "not found", src)
+                else:
+                    continue
+                await self.handle(ev)
+        finally:
+            self._fork_busy = False
+
     async def _tick(self) -> None:
+        if self.fork_pending and self.feed.realtime and self.persist and not self._fork_busy \
+                and self.now - self._last_fork_check >= 1:     # a flagged coin waits for this: ask every second
+            self._last_fork_check = self.now
+            asyncio.ensure_future(self._reconcile_forks())
         if self.deferred:
             await self._settle_deferred()
         if self.now - self._lab_check >= 15:
@@ -2188,7 +2250,8 @@ class Engine:
         self._check_owner(d)
         b = d["book"]
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
-        self.book.day_pnl, self.book.halted, self.book.closed = b["day_pnl"], b["halted"], b["closed"]
+        self.book.day_pnl, self.book.halted = b["day_pnl"], b["halted"]
+        self.book.closed = upgrade_pnl(b["closed"])              # rows from before net P&L: upgraded (pnl.py)
         from .mcapfill import apply as fill_mcaps
         fill_mcaps(self.book.closed, DATA, self.sol_price.usd)          # market caps for trades from before they were logged
         # cash stays reserved only for buys that are still unresolved; anything else was in flight when the

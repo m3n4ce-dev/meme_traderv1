@@ -8,6 +8,17 @@ from typing import ClassVar
 from .curve import FINAL_V_TOKENS, TOTAL_SUPPLY, Curve
 from .events import Launch, Social, Trade
 
+LEDGER_MAX = 3000      # trades kept per coin to rebuild it after a fork repair; past this a repair can't be exact
+TRADE_FIELDS = ("curve", "holders", "buyers", "sellers", "early_bought", "early_sold", "snipers", "volume_sol",
+                "dev_sold", "buys", "sells", "trades", "peak_price", "last_trade_ts", "migrated", "price_known",
+                "non_organic_trades", "curve_slot", "slot_moves", "slot_start", "net", "sold_by", "early_c")
+
+
+def _content(t: Trade) -> tuple:
+    """What a trade event says, apart from where it landed: two deliveries with the same content are one event."""
+    return (t.trader, t.side, round(t.sol, 9), round(t.tokens, 6), round(t.v_sol, 9), round(t.v_tokens, 6),
+            t.new_balance, t.pool, t.mcap_sol)
+
 # pump.fun's Mayhem-mode agent: a Mayhem token mints 2B, half of it to this wallet, which then trades it
 MAYHEM_AGENT = "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s"
 MAYHEM_SUPPLY = 2 * TOTAL_SUPPLY
@@ -60,8 +71,25 @@ class TokenState:
     net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
     sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
     early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
-    seen: dict = field(default_factory=dict)         # recent trade identities (signature, event index)
+    seen: dict = field(default_factory=dict)         # trade identity (signature, event index) -> its content
     partial: bool = False                            # restored after a gap: other wallets' balances aren't known
+    # fork repair (a sixth review, 2026-10-07): the trades applied, in arrival order, so the coin can be rebuilt when
+    # the chain shows a different version of one of them was the real one
+    ledger: list = field(default_factory=list)       # (trade, bundle_window_s, sniper_window_s)
+    ledger_at: dict = field(default_factory=dict)    # identity -> index in ledger
+    ledger_full: bool = False                        # past LEDGER_MAX: a repair can't replay it exactly
+    conflicts: dict = field(default_factory=dict)    # identity -> {"versions": [Trade], "status": ..., ...}
+    new_conflicts: list = field(default_factory=list)   # identities the engine hasn't asked the chain about yet
+    unrepairable: bool = False                       # a conflict it couldn't rebuild from (restored coin, full ledger)
+
+    @property
+    def unsafe(self) -> str:
+        """Why this coin's trade-derived state can't be trusted for a new automated entry, or ""."""
+        if self.unrepairable:
+            return "fork conflict: state can't be rebuilt"
+        if any(c["status"] != "resolved" for c in self.conflicts.values()):
+            return "fork conflict unresolved"
+        return ""
 
     @property
     def created_ts(self) -> float:
@@ -88,7 +116,10 @@ class TokenState:
         return self.curve.price * self.supply
 
     # ---- updates ------------------------------------------------------------
+    _launched: bool = False
+
     def on_launch(self, e: Launch) -> None:
+        self._launched = True
         self.curve = Curve(e.v_sol, e.v_tokens)
         self.price_known = True
         self.peak_price = self.curve.price
@@ -127,18 +158,79 @@ class TokenState:
             self.curve = Curve(self.slot_start[1], self.slot_start[0])
 
     def _duplicate(self, t: Trade) -> bool:
-        """The same trade EVENT delivered twice (a reconnect can replay it): counted once. Its identity is the
-        transaction's signature and the event's place in it, not its content: one transaction can hold two identical
-        buys. Without an event index (older recordings) nothing is dropped - uniqueness isn't invented."""
+        """The same trade EVENT delivered again: its identity is the transaction's signature and the event's place in
+        it, not its content (one transaction can hold two identical buys). Without an event index (older recordings)
+        nothing is dropped - uniqueness isn't invented.
+
+        Delivered again with the SAME content (a reconnect, or the same execution in a fork's next slot): counted once.
+        With DIFFERENT content, it's a fork: the transaction executed in a block that didn't survive and again in one
+        that did, and only the chain knows which landed. The coin is flagged (no new automated entry), the engine asks
+        the chain (`resolve_conflict`), and meanwhile it's rebuilt provisionally with the later slot's version - the
+        one that landed in all 9 of 9 cases checked on 10-07. Never final without the chain's answer."""
         if not t.signature or t.event_index < 0:
             return False
         k = (t.signature, t.event_index)
-        if k in self.seen:
+        if k not in self.seen:
+            self.seen[k] = _content(t)
+            if len(self.seen) > 4096:
+                self.seen.pop(next(iter(self.seen)))
+            return False
+        if self.seen[k] == _content(t):
             return True
-        self.seen[k] = None
-        if len(self.seen) > 256:
-            self.seen.pop(next(iter(self.seen)))
-        return False
+        c = self.conflicts.get(k)
+        if c is None:
+            first = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
+            c = self.conflicts[k] = {"versions": [first] if first is not None else [], "status": "unresolved"}
+            self.new_conflicts.append(k)
+        if any(_content(v) == _content(t) for v in c["versions"]):
+            return True
+        c["versions"].append(t)
+        applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
+        if c["status"] == "unresolved" and applied is not None and t.slot > applied.slot:
+            self._replace(k, t)                         # provisional: the later slot's version
+        return True
+
+    def _replace(self, k: tuple, t: Trade) -> None:
+        """Rebuild the coin's trade-derived state with `t` in place of the version applied for identity k."""
+        if self.partial or self.ledger_full or k not in self.ledger_at:
+            self.unrepairable = True                     # (restored mid-life, or too long to replay exactly)
+            return
+        i = self.ledger_at[k]
+        _, bw, sw = self.ledger[i]
+        self.ledger[i] = (t, bw, sw)
+        self.seen[k] = _content(t)
+        fresh = TokenState(self.mint, self.launch, self.first_seen)
+        if self.launch is not None and self._launched:
+            fresh.on_launch(self.launch)
+        for tr, b, s in self.ledger:
+            fresh._apply(tr, b, s)
+        for name in TRADE_FIELDS:
+            setattr(self, name, getattr(fresh, name))
+        self.mayhem = self.mayhem or fresh.mayhem
+
+    def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "") -> str:
+        """The chain's answer for a conflicting event: the slot its transaction landed in. The version delivered from
+        that slot becomes the applied one (the coin rebuilt if it wasn't), and the conflict is resolved. Idempotent.
+        Returns "kept", "replaced", "unresolvable" or "" (nothing to do)."""
+        c = self.conflicts.get(k)
+        if c is None or c["status"] == "resolved":
+            return ""
+        c.update(evidence={"slot": slot, "status": status, "source": source})
+        match = [v for v in c["versions"] if v is not None and v.slot == slot] if slot else []
+        if not match:
+            c["status"] = "unresolvable"                 # stays unsafe: never reported as clean
+            return "unresolvable"
+        canon = match[-1]
+        applied = self.ledger[self.ledger_at[k]][0] if k in self.ledger_at else None
+        out = "kept"
+        if applied is None or _content(applied) != _content(canon) or applied.slot != canon.slot:
+            self._replace(k, canon)
+            out = "replaced"
+        if self.unrepairable:
+            c["status"] = "unresolvable"
+            return "unresolvable"
+        c["status"] = "resolved"
+        return out
 
     def _early(self, w: str) -> None:
         """early_sold as the sum over early buyers of min(sold, bought early): the same in any arrival order."""
@@ -149,6 +241,15 @@ class TokenState:
     def on_trade(self, t: Trade, bundle_window_s: float, sniper_window_s: float = 10.0) -> None:
         if self._duplicate(t):
             return
+        if len(self.ledger) < LEDGER_MAX:
+            if t.signature and t.event_index >= 0:
+                self.ledger_at[(t.signature, t.event_index)] = len(self.ledger)
+            self.ledger.append((t, bundle_window_s, sniper_window_s))
+        else:
+            self.ledger_full = True
+        self._apply(t, bundle_window_s, sniper_window_s)
+
+    def _apply(self, t: Trade, bundle_window_s: float, sniper_window_s: float) -> None:
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
             self._apply_reserves(t)
             self.price_known = True
