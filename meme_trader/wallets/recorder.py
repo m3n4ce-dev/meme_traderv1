@@ -104,7 +104,8 @@ class Recorder:
 
     # ------------------------------------------------------------------ pool bookkeeping
     def _err(self, where: str, e) -> None:
-        msg = f"{datetime.now(timezone.utc):%H:%M:%S} {where}: {str(e)[:160]}"
+        from ..redact import describe
+        msg = f"{datetime.now(timezone.utc):%H:%M:%S} {where}: {describe(e)}"     # (never an HTTP error's URL)
         self.errors.append(msg)
         log.warning(msg)
 
@@ -406,7 +407,9 @@ class Recorder:
                 self._err("housekeeping", e)
 
     # ------------------------------------------------------------------ mode: stream
-    def swap_row(self, sw, sig: str, k: int) -> dict | None:
+    def swap_row(self, sw, sig: str, k: int, rx: float | None = None) -> dict | None:
+        """One recorded swap. `t` is its chain time; `rx` when this recorder RECEIVED it (wall clock), so a reader's
+        lag splits into the chain-to-receipt and receipt-to-read parts (an eleventh review)."""
         rec = self.pools.get(sw.pool)
         if not rec or not self.eligible(rec, time.time()) or sw.base <= 0 or sw.pool_base <= sw.pool_quote:
             return None                                  # not in the universe, or a pool with SOL as its base
@@ -415,7 +418,7 @@ class Recorder:
         return {"id": f"ws_{sig}_{k}", "t": float(sw.ts), "pool": sw.pool, "mint": m.get("mint"), "wallet": sw.user,
                 "side": sw.side, "sol": sol, "tokens": tokens, "px": sol / tokens,
                 "usd": round(sol * self.sol_usd, 2) if self.sol_usd else 0.0, "sig": sig,
-                "sym": m.get("symbol")}
+                "sym": m.get("symbol"), **({"rx": round(rx, 3)} if rx is not None else {})}
 
     async def stream_loop(self, s: aiohttp.ClientSession) -> None:
         """Every swap, all the time (~0.9 MB/s). Discovery is the same stream."""
@@ -442,7 +445,7 @@ class Recorder:
                             if rec is None:
                                 rec = self.pools[sw.pool] = {"first_seen": now, "meta": None, "meta_tries": 0, "meta_at": 0}
                             rec["last_seen"] = now
-                            row = self.swap_row(sw, v.get("signature", ""), k)
+                            row = self.swap_row(sw, v.get("signature", ""), k, rx=now)
                             if row:
                                 rec["last_trade"] = row["t"]
                                 rec["polls"] = rec.get("polls") or 1          # counts as covered for candles/meta

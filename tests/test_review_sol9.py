@@ -75,6 +75,12 @@ def mark(price):
     return SimpleNamespace(price_known=True, curve=SimpleNamespace(price=price, progress=0.5))
 
 
+def stamped(m, at):
+    """The coin's accepted price received at `at` (its provenance: an eleventh review's after-exit freshness)."""
+    m.mark = {"at": at, "seq": at, "chain_ts": at}
+    return m
+
+
 # --------------------------------------------------------------------------- R9-1 / R9-2: one cash ledger in the lab
 def reconciles(row):
     return row["net"] == pytest.approx(sum(x["sol"] for x in row["cash"]) - 1, abs=1e-8) and \
@@ -150,10 +156,10 @@ def test_a_late_landing_bot_shadow_doesnt_buy_again_and_failed_exits_eventually_
 def test_the_price_after_an_early_exit_is_followed_to_the_thirty_minute_mark(tmp_path):
     lab = ExitLab(tmp_path / "lab.jsonl", 1.75)
     lab.start(M, "T", "late", 1.0, 0, P.sniper, only=("all out at +10% net",), stake_sol=0.25)
-    lab.tick({M: mark(1.2)}, 5, P.sniper)
+    lab.tick({M: stamped(mark(1.2), 5)}, 5, P.sniper)
     assert lab.done and M in lab.mints()                      # still followed after the exit
-    lab.tick({M: mark(2.4)}, 600, P.sniper)
-    lab.tick({M: mark(1.8)}, 1801, P.sniper)
+    lab.tick({M: stamped(mark(2.4), 600)}, 600, P.sniper)
+    lab.tick({M: stamped(mark(1.8), 1801)}, 1801, P.sniper)
     after = [json.loads(x) for x in (tmp_path / "lab.jsonl").read_text().splitlines() if "after_exit" in x]
     a = after[0]
     assert a["peak_after_pct"] == pytest.approx(100)                       # in the window

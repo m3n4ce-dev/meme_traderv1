@@ -386,6 +386,8 @@ class Engine:
 
     # ------------------------------------------------------------------ helpers
     def say(self, level: str, text: str, mint: str = "", **fields) -> None:
+        from ..redact import redact
+        text = redact(text)                              # an error's text can carry a keyed URL (an eleventh review)
         self.log.append({"ts": self.now, "level": level, "text": text, "mint": mint})
         if self.feed.realtime:
             self.notifier.push(level, text, self.mode)
@@ -2133,6 +2135,8 @@ class Engine:
             url = "http://" + ws[len("ws://"):]
         else:
             from ..wallet import RPC_URL as url
+        from ..redact import register
+        register(url)                                    # its key, wherever an error text might carry it
         return url, urlparse(url).hostname or ""
 
     @staticmethod
@@ -2427,7 +2431,7 @@ class Engine:
             return
         stale = [m for m, p in self.positions.items()
                  if m in self.tokens and (not self.tokens[m].price_known or self.tokens[m].migrated
-                                          or self.now - self.tokens[m].last_trade_ts > 90)]
+                                          or self.now - (self.tokens[m].price_at or -1e18) > 90)]
         if not stale:
             return
         self._last_price_fallback = self.now
@@ -2451,14 +2455,12 @@ class Engine:
             if px <= 0 or s is None:
                 continue
             if pair.get("dexId") == "pumpfun":                   # still on the curve: exact reserves from k
-                s.curve = Curve((k * px) ** 0.5, (k / px) ** 0.5)
+                curve, migrated = Curve((k * px) ** 0.5, (k / px) ** 0.5), False
             else:                                               # graduated: price only
-                s.migrated = True
-                s.curve = Curve(px * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
-            s.price_known = True
-            s.peak_price = max(s.peak_price, px)
-            s.last_trade_ts = self.now
-            done.add(m)
+                curve, migrated = Curve(px * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True), True
+            # never over a fresher chain-ordered price (an eleventh review); not a trade, so last_trade_ts stays
+            if s.external_price(curve, migrated, self.now):
+                done.add(m)
         return done
 
     # ------------------------------------------------------------------ persistence (live, and the real-feed paper bot)
