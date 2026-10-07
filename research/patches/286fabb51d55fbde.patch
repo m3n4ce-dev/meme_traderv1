@@ -1,0 +1,58 @@
+diff --git a/meme_trader/sniper/engine.py b/meme_trader/sniper/engine.py
+index dba6b08..ad64d74 100644
+--- a/meme_trader/sniper/engine.py
++++ b/meme_trader/sniper/engine.py
+@@ -272,6 +272,7 @@ class Engine:
+         self._mayhem_q: deque = deque()                     # coins whose curve account is to be read for Mayhem mode
+         self._mayhem_busy: dict[str, int] = {}              # mint -> failed reads so far (in the queue or reading)
+         self._mayhem_next = 0.0
++        self.mayhem_reads = {"day": "", "read": 0, "mayhem": 0, "failed": 0}   # today's curve reads (HQ)
+         self._last_x_scan = 0.0
+         # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
+         from .gradlog import GradLog
+@@ -503,9 +504,13 @@ class Engine:
+ 
+         async def read():
+             from .mayhem import lookup
++            day = time.strftime("%Y-%m-%d", time.gmtime())
++            if self.mayhem_reads["day"] != day:
++                self.mayhem_reads = {"day": day, "read": 0, "mayhem": 0, "failed": 0}
+             try:
+                 yes = await asyncio.to_thread(lookup, mint)
+             except Exception:
++                self.mayhem_reads["failed"] += 1
+                 n = self._mayhem_busy.get(mint, 0) + 1
+                 if n < 3:
+                     self._mayhem_busy[mint] = n
+@@ -514,6 +519,8 @@ class Engine:
+                     self._mayhem_busy.pop(mint, None)
+                 return
+             self._mayhem_busy.pop(mint, None)
++            self.mayhem_reads["read"] += 1
++            self.mayhem_reads["mayhem"] += bool(yes)
+             s = self.tokens.get(mint)
+             if s is not None:
+                 s.mayhem_checked = True
+@@ -2288,7 +2295,8 @@ class Engine:
+         day = time.strftime("%Y-%m-%d", time.gmtime())
+         return {"x_reads_today": self._x_day[1] if self._x_day[0] == day else 0,
+                 "x_per_day": int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)),
+-                "x_links_cached": len(self._x_cache), "graduated": self.gradlog.view() if self.gradlog else None}
++                "x_links_cached": len(self._x_cache), "graduated": self.gradlog.view() if self.gradlog else None,
++                "mayhem_reads": {**self.mayhem_reads, "queued": len(self._mayhem_q)}}
+ 
+     def narrative_context(self, s) -> dict:
+         """What the narrative persona reads on top of the snapshot: the coin's own story (its description and the
+diff --git a/meme_trader/ui/static/index.html b/meme_trader/ui/static/index.html
+index d9b4572..568e4c0 100644
+--- a/meme_trader/ui/static/index.html
++++ b/meme_trader/ui/static/index.html
+@@ -2463,7 +2463,7 @@ async function loadHQ() {
+      d.xchain ? `${d.xchain.active ? "paper, scanning" : "off"}${d.xchain.note ? " · " + esc(d.xchain.note) : ""} · ${d.xchain.open} open · today ${d.xchain.today.trades} trades ${usdS(d.xchain.today.pnl_usd)} · real-money checklist ${d.xchain.ready}${d.xchain.last_scan_s != null ? ` · scanned ${dur(d.xchain.last_scan_s)} ago` : ""}` : "–"],
+     ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""}${d.desk.vote_s ? ` · votes take ${d.desk.vote_s.median} s (slowest 10%: ${d.desk.vote_s.p90} s, ${d.desk.vote_s.n} votes)` : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
+     ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
+-    ["Data collection", d.intel ? true : null, d.intel ? `X links: ${d.intel.x_reads_today} of ${d.intel.x_per_day} reads today (${d.intel.x_links_cached} posts and accounts cached)${d.intel.graduated ? ` · graduated coins: ${d.intel.graduated.logged_today} logged today, ${d.intel.graduated.queued} waiting${d.intel.graduated.failed_today ? `, ${d.intel.graduated.failed_today} without a pool` : ""}` : ""}` : "–"],
++    ["Data collection", d.intel ? true : null, d.intel ? `X links: ${d.intel.x_reads_today} of ${d.intel.x_per_day} reads today (${d.intel.x_links_cached} posts and accounts cached)${d.intel.graduated ? ` · graduated coins: ${d.intel.graduated.logged_today} logged today, ${d.intel.graduated.queued} waiting${d.intel.graduated.failed_today ? `, ${d.intel.graduated.failed_today} without a pool` : ""}` : ""}${d.intel.mayhem_reads ? ` · Mayhem checked on-chain: ${d.intel.mayhem_reads.read} coins today, ${d.intel.mayhem_reads.mayhem} were Mayhem${d.intel.mayhem_reads.failed ? `, ${d.intel.mayhem_reads.failed} reads failed` : ""}` : ""}` : "–"],
+     ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
+   $("hq-body").innerHTML = `<div class="hq-svcs">${svc}</div><div class="hq-rows">${rows.map(([k, ok, v]) => `<div>${dot(ok)}<b>${k}</b><span class="note">${v}</span></div>`).join("")}</div>`;
+ }
