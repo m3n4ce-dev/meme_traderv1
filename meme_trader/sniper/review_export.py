@@ -374,11 +374,15 @@ class Export:
             self.unavailable.append(("day_quality.csv: per-day feed statistics", "run with --scan-feeds"))
         self.unavailable.append(("day_quality.csv: eligible universe size, reordered counts",
                                  "not recorded per day; reordering is only measured live (FeedQuality)."))
-        self.findings.append("Repeated trade events (see day_quality.csv `repeat_*`): on 10-07, with the paid feed at "
-                             "processed commitment, ~4% of trade events arrive a second time in another slot - fork "
-                             "copies; ~1% with different amounts. The engine drops the second copy, so for those it keeps "
-                             "whichever arrived first, which may be the abandoned fork's. Before 10-07 (no event index) "
-                             "repeats were mostly same-slot transport duplicates (~0.3% of trades) that replays count twice.")
+        self.findings.append("Repeated trade events (see day_quality.csv `repeat_*`): on 10-07 the paid feed - "
+                             "subscribed at `confirmed` commitment - delivered ~4% of trade events a second time in the "
+                             "next slot, ~1% with different amounts: the first copy came from a block that didn't "
+                             "survive. Checked on chain: of 9 such transactions found, all 9 landed in the later slot, "
+                             "and the later copy's amounts matched in 7. Every sampled trade (1,200, repeated or not) "
+                             "exists on chain: no phantom trades. The engine drops the second copy, so for those ~1% it "
+                             "keeps the abandoned block's amounts until the coin's next trade. Before 10-07 (no event "
+                             "index) repeats were mostly same-slot transport duplicates (~0.3% of trades) that replays "
+                             "count twice.")
 
 
 def scan_feed(p: Path) -> dict:
@@ -411,7 +415,8 @@ def scan_feed(p: Path) -> dict:
                 if c:
                     lags.append(ts - c)
                 # a repeat: the same event seen again - by signature and event index, or (before indexes, 10-07)
-                # by signature, trader, side and size. In another slot it's a fork copy (processed commitment)
+                # by signature, trader, side and size. In another slot it's a fork copy: the first came from a block
+                # that didn't survive (seen on the paid feed even at confirmed commitment, 10-07)
                 ei = r.get("event_index")
                 if isinstance(ei, int) and ei >= 0:
                     indexed += 1
