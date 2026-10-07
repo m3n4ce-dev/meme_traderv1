@@ -11,7 +11,8 @@ from .events import Launch, Social, Trade
 LEDGER_MAX = 3000      # trades kept per coin to rebuild it after a fork repair; past this a repair can't be exact
 TRADE_FIELDS = ("curve", "holders", "buyers", "sellers", "early_bought", "early_sold", "snipers", "volume_sol",
                 "dev_sold", "buys", "sells", "trades", "peak_price", "last_trade_ts", "migrated", "price_known",
-                "non_organic_trades", "curve_slot", "slot_moves", "slot_start", "net", "sold_by", "early_c")
+                "non_organic_trades", "curve_slot", "slot_moves", "slot_start", "net", "sold_by", "early_c",
+                "mark", "mark_slot", "mark_seq", "price_ambiguous", "marks_refused")
 
 
 def _content(t: Trade) -> tuple:
@@ -68,6 +69,16 @@ class TokenState:
     curve_slot: int = 0           # the slot of the newest reserves applied to `curve`
     slot_moves: list = field(default_factory=list)   # that slot's trades: (tokens before, tokens after, sol after)
     slot_start: tuple | None = None                  # (v_tokens, v_sol) before that slot's first trade
+    # the ACCEPTED price's provenance and ordering clock (an eleventh review): every source - the curve's reserves, a
+    # graduated pool's market cap, DexScreener - sets the price only through it, so a delayed older event never rolls
+    # it back. `mark`: {src, slot, signature, event_index, chain_ts, at (when we received it), seq (an observation id:
+    # +1 each time a price is accepted - a re-read of the same accepted price is not a new observation)}
+    mark: dict = field(default_factory=dict)
+    mark_slot: int = 0            # the newest slot any accepted price came from (0: none with a chain order yet)
+    mark_seq: int = 0
+    price_ambiguous: bool = False   # this slot's transactions disagree and their order is unknown: the mark stays,
+                                    # flagged, until a later slot settles it (no canonical order is invented)
+    marks_refused: int = 0        # priced events refused as the mark: older than it (their other facts still count)
     net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
     sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
     early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
@@ -139,16 +150,66 @@ class TokenState:
     # ---- updates ------------------------------------------------------------
     _launched: bool = False
 
+    def _accept(self, src: str, t: Trade | None = None, at: float | None = None) -> None:
+        """The price just set is the accepted mark: record where it came from and when we had it."""
+        self.mark_seq += 1
+        slot = t.slot if t is not None else 0
+        self.mark = {"src": src, "slot": slot, "signature": t.signature if t is not None else "",
+                     "event_index": t.event_index if t is not None else -1,
+                     "chain_ts": (t.chain_ts or None) if t is not None else None,
+                     "at": t.ts if t is not None else at, "seq": self.mark_seq}
+        self.mark_slot = max(self.mark_slot, slot)
+
+    @property
+    def price_at(self) -> float | None:
+        """When we received the accepted price (None: no provenance) - the price's age, not the last read's."""
+        return self.mark.get("at") if self.price_known else None
+
+    def _amm_in_order(self, t: Trade) -> bool:
+        """Whether a graduated-pool trade may set the price: chain order (slot, then the event's place within its
+        own transaction). An older slot never does. In the accepted mark's slot: a later event of the same transaction
+        does; the pool's first trades after the curve's last do (the pool opens after the curve closes); another
+        transaction's - order unknown - doesn't, and if it disagrees the price is flagged ambiguous."""
+        if not t.slot or t.slot > self.mark_slot:        # no chain order known (synthetic, old recordings), or newer
+            return True
+        if t.slot < self.mark_slot:
+            return False
+        m = self.mark
+        if m.get("src") != "amm" or m.get("slot") != t.slot:     # the curve's last slot (the pool opens after it),
+            return True                                          # or the mark has since come from outside the feed
+        if t.signature and t.signature == m.get("signature"):
+            return t.event_index > m.get("event_index", -1)
+        if abs(t.mcap_sol / self.supply - self.curve.price) > 1e-15 * max(1.0, self.curve.price):
+            self.price_ambiguous = True
+        return False
+
+    def external_price(self, curve: Curve, migrated: bool, at: float, src: str = "dexscreener",
+                       max_age_s: float = 90) -> bool:
+        """A price from outside the feed (no chain order, e.g. DexScreener's): it sets the mark only if there's no
+        price, the mark is external too, or the chain-ordered mark is older than max_age_s - never over a fresher
+        chain price. True when the coin has a price at least this fresh (set now, or already fresher)."""
+        if self.price_known and self.mark.get("slot") and at - (self.mark.get("at") or -1e18) <= max_age_s:
+            return True
+        if migrated:
+            self.migrated = True
+        self.curve = curve
+        self.price_known = True
+        self.peak_price = max(self.peak_price, curve.price)
+        self.price_ambiguous = False
+        self._accept(src, at=at)
+        return True
+
     def on_launch(self, e: Launch) -> None:
         self._launched = True
         self.curve = Curve(e.v_sol, e.v_tokens)
         self.price_known = True
+        self._accept("launch", at=e.ts)
         self.peak_price = self.curve.price
         if e.dev_buy_tokens > 0:
             self.holders[e.creator] = self.net[e.creator] = e.dev_buy_tokens
             self.buyers.add(e.creator)
 
-    def _apply_reserves(self, t: Trade) -> None:
+    def _apply_reserves(self, t: Trade) -> bool:
         """The curve after `t`, in chain order, not arrival order: some endpoints deliver trades late or out of order
         (RPC Fast, 2026-10-06: ~5% within their slot). A trade from an older slot doesn't move the price back. Within a
         slot, each trade is a step from the reserves before it to the reserves after; in chain order the steps form one
@@ -157,9 +218,9 @@ class TokenState:
         state stays; a slot whose steps return to where it started ends there."""
         if not t.slot:                                   # no chain order known (synthetic, old recordings): arrival
             self.curve = Curve(t.v_sol, t.v_tokens)
-            return
+            return True
         if t.slot < self.curve_slot:
-            return
+            return False
         if t.slot > self.curve_slot:
             self.slot_start = (self.curve.v_tokens, self.curve.v_sol) if self.price_known else None
             self.curve_slot, self.slot_moves = t.slot, []
@@ -175,8 +236,14 @@ class TokenState:
         if len(ends) == 1:
             vt, vs = at[ends[0]]
             self.curve = Curve(vs, vt)
-        elif not ends and self.slot_start:               # a closed loop: the slot ends where it began
+            self.price_ambiguous = False
+            return True
+        if not ends and self.slot_start:                 # a closed loop: the slot ends where it began
             self.curve = Curve(self.slot_start[1], self.slot_start[0])
+            self.price_ambiguous = False
+            return True
+        self.price_ambiguous = True                      # several possible ends while a step is missing: unsettled
+        return False
 
     def _disposition(self, t: Trade) -> str:
         """The same trade EVENT delivered again: its identity is the transaction's signature and the event's place in
@@ -232,9 +299,13 @@ class TokenState:
         for tr, b, s in self.ledger:
             if tr is not None:
                 fresh._apply(tr, b, s)
+        seq = self.mark_seq
         for name in TRADE_FIELDS:
             setattr(self, name, getattr(fresh, name))
         self.mayhem = self.mayhem or fresh.mayhem
+        self.mark_seq = seq + 1                          # the repaired price is a new observation: ids never repeat
+        if self.mark:
+            self.mark = {**self.mark, "seq": self.mark_seq}
 
     def resolve_conflict(self, k: tuple, slot: int, status: str = "", source: str = "", err: str = "",
                          content: tuple | None = None, method: str = "") -> str:
@@ -353,15 +424,26 @@ class TokenState:
 
     def _apply(self, t: Trade, bundle_window_s: float, sniper_window_s: float) -> None:
         if t.pool == "pump" and t.v_sol > 0 and t.v_tokens > 0:
-            self._apply_reserves(t)
-            self.price_known = True
+            if self.mark.get("src") == "amm" and t.slot and t.slot <= self.mark_slot:
+                self.marks_refused += 1                  # a late curve event after the pool's price: facts only
+            elif self._apply_reserves(t):
+                self.price_known = True
+                self._accept("curve", t)
+            else:
+                self.marks_refused += t.slot < self.curve_slot
+                self.price_known = self.price_known or not t.slot
         elif t.pool != "pump" and t.mcap_sol > 0:
             # graduated (PumpSwap etc.): no curve reserves in the event, so price it from market cap on a
             # curve parked at its end state. Its depth roughly matches the migrated pool's.
             self.migrated = True
-            price = t.mcap_sol / self.supply
-            self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
-            self.price_known = True
+            if self._amm_in_order(t):
+                price = t.mcap_sol / self.supply
+                self.curve = Curve(price * FINAL_V_TOKENS, FINAL_V_TOKENS, amm=True)
+                self.price_known = True
+                self.price_ambiguous = False
+                self._accept("amm", t)
+            else:
+                self.marks_refused += t.slot < self.mark_slot
         price = self.curve.price
         self.peak_price = max(self.peak_price, price)
         self.last_trade_ts = t.ts
