@@ -22,7 +22,7 @@ Go in this order. Each stage works before the next one is added. **Don't skip pa
 
 Manual version:
 ```bash
-git clone https://github.com/m4n3ce/meme_traderv1.git
+git clone https://github.com/m3n4ce-dev/meme_traderv1.git
 cd meme_traderv1
 python3 -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt

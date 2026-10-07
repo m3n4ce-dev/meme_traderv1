@@ -146,7 +146,7 @@ exit.
 
 ## 6. What we can give a reviewer
 
-- **Public:** the repo (`m4n3ce/meme_traderv1`, public, GPL-3.0, paper-first), the build log, and the tests (424 pass).
+- **Public:** the repo (`m3n4ce-dev/meme_traderv1`, public, GPL-3.0, paper-first), the build log, and the tests (424 pass).
   The research scripts for T1–T9 live in the builder's scratch space; we can add any of them to the repo.
 - **Private, on the owner's machine (shareable on request, as summaries or samples):**
   - the recordings (4 days, ~1.4 GB gz) and the PumpSwap trades (3 days);
