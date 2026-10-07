@@ -538,15 +538,18 @@ class Export:
             self.unavailable.append(("day_quality.csv: per-day feed statistics", "run with --scan-feeds"))
         self.unavailable.append(("day_quality.csv: eligible universe size, reordered counts",
                                  "not recorded per day; reordering is only measured live (FeedQuality)."))
-        self.findings.append("Repeated trade events (see day_quality.csv `repeat_*`): on 10-07 the paid feed - "
-                             "subscribed at `confirmed` commitment - delivered ~4% of trade events a second time in the "
-                             "next slot, ~1% with different amounts: the first copy came from a block that didn't "
-                             "survive. Checked on chain: of 9 such transactions found, all 9 landed in the later slot, "
-                             "and the later copy's amounts matched in 7. Every sampled trade (1,200, repeated or not) "
-                             "exists on chain: no phantom trades. The engine drops the second copy, so for those ~1% it "
-                             "keeps the abandoned block's amounts until the coin's next trade. Before 10-07 (no event "
-                             "index) repeats were mostly same-slot transport duplicates (~0.3% of trades) that replays "
-                             "count twice.")
+        self.findings.append("Repeated trade events (see day_quality.csv `repeat_*` and evidence/evidence_fork_packet_*): "
+                             "the paid feed, subscribed at `confirmed`, delivers ~2.8% of trade events twice with the "
+                             "same content and ~0.84% twice with DIFFERENT content - always two copies from consecutive "
+                             "slots, ~0.2 s apart. Checked on chain (10-07, a deterministic sample of 200, fetched at "
+                             "`finalized` from the paid provider and independently from the public endpoint): in "
+                             "200/200 the transaction is in the later slot with exactly the second copy's content, and "
+                             "200 events delivered once all match the chain. (An earlier sample of 9, before event "
+                             "indexes, read 7 of 9 matching; it can't be re-identified.) Since the eighth review the "
+                             "engine treats differing copies as one fork-conflicted event: automated entries wait for "
+                             "the chain's answer, verified against the decoded transaction, and the surviving version "
+                             "is kept. Before 10-07 (no event index) repeats were mostly same-slot transport "
+                             "duplicates (~0.3% of trades) that replays count twice.")
 
 
 def scan_feed(p: Path) -> dict:

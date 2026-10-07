@@ -189,6 +189,7 @@ def test_a_lookup_pass_records_the_decoded_content_and_matches_by_it(make, monke
     c = s.conflicts[K]
     assert c["status"] == "final" and c["strongest"]["method"] == "tx" and s.holders["W"] == 10
     assert "getTransaction" in c["strongest"]["source"] and e.stats["fork_tx_decoded"] == 1
+    assert e.intel_view()["forks"]["tx_decoded"] == 1                           # (shown in HQ's data collection)
 
 
 # --------------------------------------------------------------------------- R8-B: followed wallets, replayed
