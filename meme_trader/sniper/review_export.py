@@ -397,6 +397,23 @@ class Export:
             (self.out / "research_as_run.json").write_text(json.dumps(listing, indent=1))
             self._note("research_as_run/", files=len(listing))
 
+    def t9_rerun(self) -> None:
+        """The corrected T9 replay (t9_replay_v2.py): its whole summary, and every trade of the +40% rule family with
+        status, entry/exit times and prices, episode and coverage reason."""
+        src = self.data / "research" / "exploratory" / "t9_replay_v2"
+        if not (src / "t9_replay_v2.json").exists():
+            self.unavailable.append(("t9_replay_v2_*", "the corrected T9 replay hasn't been run on this machine"))
+            return
+        self.inputs += [src / "t9_replay_v2.json", src / "t9_replay_v2_trades.jsonl"]
+        shutil.copy2(src / "t9_replay_v2.json", self.out / "t9_replay_v2_summary.json")
+        n = 0
+        with open(src / "t9_replay_v2_trades.jsonl") as f, open(self.out / "t9_replay_v2_trades_40pct.jsonl", "w") as g:
+            for line in f:
+                if '"rule": "momentum: +40%' in line:
+                    g.write(line)
+                    n += 1
+        self._note("t9_replay_v2_trades_40pct.jsonl", rows=n)
+
     def models(self) -> None:
         d = self.out / "models"
         d.mkdir(exist_ok=True)
@@ -615,11 +632,12 @@ def run(data: Path, out: Path, scan_feeds: bool = False, root: Path = ROOT, owne
         reg = ROOT / "research" / "registrations"
     if reg.exists():
         shutil.copytree(reg, out / "registrations")
-    for name in ("power_t9.out", "power_t9.json"):
+    for name in ("power_t9.out", "power_t9.json", "power_t9_e1.out", "power_t9_e1.json"):
         if (data / "research" / name).exists():
             (out / "registrations").mkdir(exist_ok=True)
             shutil.copy2(data / "research" / name, out / "registrations" / name)
     ex.as_run()
+    ex.t9_rerun()
     for p in sorted((data / "research").glob("BUILDER_REPLY*.md")):   # the builder's reply to the review
         shutil.copy2(p, out / p.name)
     if config is not None:
@@ -695,6 +713,9 @@ def readme(man: dict) -> str:
                               "the current account's cash against it",
         "day_quality.csv": "each UTC day: feed span, gaps, lag percentiles, feed health, duplicates, trades by "
                            "interval, revival follows (days with no trades included)",
+        "t9_replay_v2_summary.json": "the corrected T9 replay: every rule x exit x delay x cost with coverage, status "
+                                     "counts, episode concentration, leave-one-day-out and unmeasured-trade bounds; "
+                                     "`t9_replay_v2_trades_40pct.jsonl` has each +40%-rule trade",
         "models/": "the deployed logistic and tree models (weights, features, feature version, training info)",
     }
     for k, v in desc.items():
