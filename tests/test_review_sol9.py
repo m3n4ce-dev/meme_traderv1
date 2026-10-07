@@ -155,7 +155,10 @@ def test_the_price_after_an_early_exit_is_followed_to_the_thirty_minute_mark(tmp
     lab.tick({M: mark(2.4)}, 600, P.sniper)
     lab.tick({M: mark(1.8)}, 1801, P.sniper)
     after = [json.loads(x) for x in (tmp_path / "lab.jsonl").read_text().splitlines() if "after_exit" in x]
-    assert after and after[0]["peak_after_pct"] == pytest.approx(100) and after[0]["end_after_pct"] == pytest.approx(50)
+    a = after[0]
+    assert a["peak_after_pct"] == pytest.approx(100)                       # in the window
+    assert a["end_after_pct"] is None and "stale" in a["missing_reason"]   # (10th review) last price 1200 s old
+    assert a["after_horizon"]["pct"] == pytest.approx(50) and a["after_horizon"]["delay_s"] == 1
     assert ExitLab(tmp_path / "lab.jsonl", 1.75).done == [r for r in lab.done]     # reload: close rows only
 
 

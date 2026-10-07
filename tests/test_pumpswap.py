@@ -10,8 +10,8 @@ from meme_trader.sniper import pumpswap as ps
 
 FIX = Path(__file__).parent / "fixtures" / "pumpswap"
 G = json.loads((FIX / "pumpswap-sdk-1.20.0-golden.json").read_text())
-API = {"buyBaseInput": ps.buy_base_input, "buyQuoteInput": ps.buy_quote_input,
-       "sellBaseInput": ps.sell_base_input, "sellQuoteInput": ps.sell_quote_input}
+API = {"buyBaseInput": ps.raw_buy_base_input, "buyQuoteInput": ps.raw_buy_quote_input,     # (SDK parity: raw)
+       "sellBaseInput": ps.raw_sell_base_input, "sellQuoteInput": ps.raw_sell_quote_input}
 
 
 def configs(case):
