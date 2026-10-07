@@ -25,7 +25,7 @@ from pathlib import Path
 
 from .curve import Curve
 from .events import Funding, Launch, Metadata, Migration, Trade
-from .features import FEATURES, extract
+from .features import FEATURE_VERSION, FEATURES, extract
 from .funding import cluster_report, cohort
 from .tracker import TokenState
 
@@ -230,12 +230,14 @@ class LogisticModel:
         return [(k, round(c, 3)) for k, c in contrib[:top]]
 
     def to_dict(self) -> dict:
-        return {"features": self.features, "mean": self.mean, "std": self.std, "w": self.w, "b": self.b,
-                "temp": self.temp, "info": self.info}
+        return {"features": self.features, "feature_version": FEATURE_VERSION, "mean": self.mean, "std": self.std,
+                "w": self.w, "b": self.b, "temp": self.temp, "info": self.info}
 
     @classmethod
     def from_dict(cls, d: dict) -> "LogisticModel":
-        return cls(d["features"], d["mean"], d["std"], d["w"], d["b"], d.get("info"), d.get("temp", 1.0))
+        m = cls(d["features"], d["mean"], d["std"], d["w"], d["b"], d.get("info"), d.get("temp", 1.0))
+        m.feature_version = d.get("feature_version", 1)   # files from before versions: the original definitions
+        return m
 
     def save(self, path: str | Path) -> None:
         path = Path(path)
@@ -251,7 +253,8 @@ class LogisticModel:
             m = cls.from_dict(json.loads(path.read_text()))
         except (ValueError, KeyError):
             return None
-        return m if m.features == FEATURES else None     # stale model from an older feature set: ignore
+        ok = m.features == FEATURES and m.feature_version == FEATURE_VERSION
+        return m if ok else None                         # stale model from an older feature set or definition: ignore
 
 
 class TreeModel:
@@ -300,7 +303,8 @@ class TreeModel:
         return _sigmoid(self.raw_row([feats.get(k, 0.0) for k in self.features]))
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "features": self.features, "trees": self.trees, "info": self.info}
+        return {"kind": self.kind, "features": self.features, "feature_version": FEATURE_VERSION, "trees": self.trees,
+                "info": self.info}
 
     def save(self, path: str | Path) -> None:
         path = Path(path)
@@ -315,7 +319,8 @@ class TreeModel:
             m = cls(d["features"], d["trees"], d.get("info"))
         except (OSError, ValueError, KeyError):
             return None
-        return m if d.get("kind") == cls.kind and m.features == FEATURES else None
+        ok = d.get("kind") == cls.kind and m.features == FEATURES and d.get("feature_version", 1) == FEATURE_VERSION
+        return m if ok else None
 
 
 def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict | None = None) -> tuple[TreeModel, dict]:
@@ -352,7 +357,8 @@ def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict
     ts = [e.ts for e in events]
     src = source or {}
     final.info = {
-        "kind": "trees", "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
+        "kind": "trees", "feature_version": FEATURE_VERSION,
+        "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
         "files": [Path(f).name for f in src.get("files", [])],
         "data_start_ts": min(ts) if ts else None, "data_end_ts": max(ts) if ts else None, "embargo_s": embargo,
         "trained_at": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
@@ -439,6 +445,7 @@ def train(events, params, train_frac: float = 0.7, log=print, source: dict | Non
     ts = [e.ts for e in events]
     src = source or {}
     final.info = {
+        "feature_version": FEATURE_VERSION,
         "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
         "files": [Path(f).name for f in src.get("files", [])],
         "data_start_ts": min(ts) if ts else None, "data_end_ts": max(ts) if ts else None,
