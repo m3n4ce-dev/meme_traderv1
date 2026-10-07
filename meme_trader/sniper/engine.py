@@ -272,7 +272,8 @@ class Engine:
         self._mayhem_q: deque = deque()                     # coins whose curve account is to be read for Mayhem mode
         self._mayhem_busy: dict[str, int] = {}              # mint -> failed reads so far (in the queue or reading)
         self._mayhem_next = 0.0
-        self.mayhem_reads = {"day": "", "read": 0, "mayhem": 0, "failed": 0}   # today's curve reads (HQ)
+        self.mayhem_reads = {"day": "", "read": 0, "mayhem": 0, "failed": 0, "unknown": 0}   # today's curve reads (HQ)
+        self._mayhem_due: dict[str, float] = {}             # mint -> not before (a retry's backoff)
         self._last_x_scan = 0.0
         # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
         from .gradlog import GradLog
@@ -501,24 +502,34 @@ class Engine:
             return
         self._mayhem_next = time.time() + 0.25
         mint = self._mayhem_q.popleft()
+        if time.time() < self._mayhem_due.get(mint, 0.0):  # backing off: back of the line
+            self._mayhem_q.append(mint)
+            return
 
         async def read():
             from .mayhem import lookup
             day = time.strftime("%Y-%m-%d", time.gmtime())
             if self.mayhem_reads["day"] != day:
-                self.mayhem_reads = {"day": day, "read": 0, "mayhem": 0, "failed": 0}
+                self.mayhem_reads = {"day": day, "read": 0, "mayhem": 0, "failed": 0, "unknown": 0}
             try:
                 yes = await asyncio.to_thread(lookup, mint)
             except Exception:
-                self.mayhem_reads["failed"] += 1
+                yes, failed = None, True
+            else:
+                failed = False
+            if yes is None:                              # an RPC error, no account, or not a recognizable curve:
+                self.mayhem_reads["failed" if failed else "unknown"] += 1      # still unknown, never "safe"
                 n = self._mayhem_busy.get(mint, 0) + 1
-                if n < 3:
+                if n < 3:                                # retried twice, 20 s then 40 s later
                     self._mayhem_busy[mint] = n
+                    self._mayhem_due[mint] = time.time() + 20 * n
                     self._mayhem_q.append(mint)
                 else:
                     self._mayhem_busy.pop(mint, None)
+                    self._mayhem_due.pop(mint, None)
                 return
             self._mayhem_busy.pop(mint, None)
+            self._mayhem_due.pop(mint, None)
             self.mayhem_reads["read"] += 1
             self.mayhem_reads["mayhem"] += bool(yes)
             s = self.tokens.get(mint)
@@ -1995,9 +2006,12 @@ class Engine:
             ctx = saved_tokens.get(m) or {}
             launch = Launch(**ctx["launch"]) if ctx.get("launch") else None
             s = self.tokens[m] = TokenState(m, launch, now)    # price unknown until its next trade
-            if launch is not None and launch.dev_buy_tokens > 0:
-                s.holders[launch.creator] = launch.dev_buy_tokens
             s.dev_sold = ctx.get("dev_sold", 0.0)
+            if launch is not None and launch.dev_buy_tokens > 0:   # the one balance known across the gap
+                s.net[launch.creator] = launch.dev_buy_tokens - s.dev_sold
+                if s.net[launch.creator] > 0:
+                    s.holders[launch.creator] = s.net[launch.creator]
+            s.partial = True                             # other wallets' balances from before the restart are unknown
             s.decided = "entered"
             return s
         for m, pd in d["positions"].items():

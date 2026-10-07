@@ -186,6 +186,8 @@ def manifest(files: list | None = None) -> dict:
             pass
     pkgs = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"])
     out["packages"] = hashlib.sha256("\n".join(pkgs).encode()).hexdigest()[:16]
+    out["package_list"] = pkgs
+    out["code_identity"] = out["code_revision"].replace("+dirty", "") + (f"+patch:{out['patch']}" if out.get("patch") else "")
     out["models"] = {}
     for name in ("model.json", "model-trees.json"):
         f = ROOT / "data" / name
@@ -195,17 +197,42 @@ def manifest(files: list | None = None) -> dict:
     for f in files or []:
         f = Path(f)
         try:
-            size = f.stat().st_size
-            with f.open("rb") as fh:
-                head = fh.read(1 << 20)
-                fh.seek(max(0, size - (1 << 20)))
-                tail = fh.read(1 << 20)
-            ins[f.name] = {"bytes": size, "sha_ends": hashlib.sha256(head + tail).hexdigest()[:16]}
+            ins[f.name] = {"bytes": f.stat().st_size, "sha256": file_digest(f),
+                           "sealed": f.suffix == ".gz"}          # a .jsonl is today's, still growing
         except OSError:
             ins[f.name] = {"bytes": None}
     if ins:
         out["inputs"] = ins
     return out
+
+
+def file_digest(f: Path) -> str:
+    """The whole file's sha256 (a third review, 2026-10-06: first+last MB missed edits in the middle), read in 8 MB
+    chunks and cached by path, size and mtime, so a sealed recording is hashed once."""
+    import hashlib
+
+    from ..config import ROOT
+
+    st = f.stat()
+    key = f"{f.resolve()}|{st.st_size}|{st.st_mtime_ns}"
+    cache_path = ROOT / "research" / "digests.json"
+    try:
+        cache = json.loads(cache_path.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    if key in cache:
+        return cache[key]
+    h = hashlib.sha256()
+    with f.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8 << 20), b""):
+            h.update(chunk)
+    cache[key] = h.hexdigest()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, indent=0))
+    except OSError:
+        pass
+    return cache[key]
 
 
 def write_lock(pol: dict, at: str, h: str) -> None:
@@ -217,15 +244,27 @@ def write_lock(pol: dict, at: str, h: str) -> None:
 
 
 def code_note(pol: dict) -> dict:
-    """The code at the freeze against the code now. Policies frozen before revisions were recorded say so: a new
-    version records it; an old holdout isn't rewritten after the fact."""
+    """The code at the freeze against the code now, as an executable identity: commit plus the exact uncommitted
+    patch (two different dirty trees on one commit are different code). Packages and model files are compared too.
+    Policies frozen before identities were recorded say so; an old holdout isn't rewritten after the fact."""
     try:
-        frozen = json.loads(lock_path(pol).read_text()).get("code_revision")
+        lock = json.loads(lock_path(pol).read_text())
     except (OSError, ValueError):
-        frozen = None
-    now = code_revision()
-    return {"code_revision": now, "code_at_freeze": frozen or "not recorded (frozen before revisions were kept)",
-            "code_changed_since_freeze": (frozen != now) if frozen else None}
+        lock = {}
+    fm = lock.get("manifest") or {}
+    frozen = fm.get("code_identity")
+    if not frozen and lock.get("code_revision"):    # a freeze from before identities: rebuild it from what it kept
+        rev = lock["code_revision"]
+        frozen = rev.replace("+dirty", "") + (f"+patch:{fm['patch']}" if fm.get("patch") else ("+dirty" if "+dirty" in rev else ""))
+    now_m = manifest()
+    now = now_m["code_identity"]
+    out = {"code_revision": now, "code_at_freeze": frozen or "not recorded (frozen before revisions were kept)",
+           "code_changed_since_freeze": (frozen != now) if frozen else None}
+    if fm:
+        out["environment_changed_since_freeze"] = {
+            "packages": fm.get("packages") != now_m.get("packages"),
+            "models": fm.get("models") != now_m.get("models")}
+    return out
 
 
 def frozen_ts(pol: dict) -> float | None:
@@ -694,8 +733,12 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
         rep["verdict_on_frozen_code"] = None
         rep["verdict"] = f"INVALID (code changed since the freeze: {rep['code_at_freeze']} -> {rep['code_revision']}); " \
                          f"exploratory {rep['verdict']} on today's code"
-    elif rep.get("code_changed_since_freeze") is None:
+    elif rep.get("code_changed_since_freeze") is None:          # no unqualified PASS without provenance
         rep["provenance"] = "the code at the freeze wasn't recorded: this verdict can't prove it ran the frozen code"
+        rep["verdict"] = f"{rep['verdict']} (provenance unverified)"
+    env = rep.get("environment_changed_since_freeze") or {}
+    if any(env.values()):
+        rep["verdict"] = f"{rep['verdict']} (changed since the freeze: {', '.join(k for k, v in env.items() if v)})"
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_text(json.dumps(rep, indent=1, default=str))
     log_experiment({"kind": "final", "policy": pol["name"], "hash": rep["hash"], "verdict": rep["verdict"],

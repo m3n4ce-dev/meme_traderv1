@@ -1,0 +1,464 @@
+diff --git a/meme_trader/sniper/engine.py b/meme_trader/sniper/engine.py
+index ad64d74..76de84d 100644
+--- a/meme_trader/sniper/engine.py
++++ b/meme_trader/sniper/engine.py
+@@ -272,7 +272,8 @@ class Engine:
+         self._mayhem_q: deque = deque()                     # coins whose curve account is to be read for Mayhem mode
+         self._mayhem_busy: dict[str, int] = {}              # mint -> failed reads so far (in the queue or reading)
+         self._mayhem_next = 0.0
+-        self.mayhem_reads = {"day": "", "read": 0, "mayhem": 0, "failed": 0}   # today's curve reads (HQ)
++        self.mayhem_reads = {"day": "", "read": 0, "mayhem": 0, "failed": 0, "unknown": 0}   # today's curve reads (HQ)
++        self._mayhem_due: dict[str, float] = {}             # mint -> not before (a retry's backoff)
+         self._last_x_scan = 0.0
+         # data for the next studies (sniper.intel): every active coin's X link, and graduated coins' candles
+         from .gradlog import GradLog
+@@ -501,24 +502,34 @@ class Engine:
+             return
+         self._mayhem_next = time.time() + 0.25
+         mint = self._mayhem_q.popleft()
++        if time.time() < self._mayhem_due.get(mint, 0.0):  # backing off: back of the line
++            self._mayhem_q.append(mint)
++            return
+ 
+         async def read():
+             from .mayhem import lookup
+             day = time.strftime("%Y-%m-%d", time.gmtime())
+             if self.mayhem_reads["day"] != day:
+-                self.mayhem_reads = {"day": day, "read": 0, "mayhem": 0, "failed": 0}
++                self.mayhem_reads = {"day": day, "read": 0, "mayhem": 0, "failed": 0, "unknown": 0}
+             try:
+                 yes = await asyncio.to_thread(lookup, mint)
+             except Exception:
+-                self.mayhem_reads["failed"] += 1
++                yes, failed = None, True
++            else:
++                failed = False
++            if yes is None:                              # an RPC error, no account, or not a recognizable curve:
++                self.mayhem_reads["failed" if failed else "unknown"] += 1      # still unknown, never "safe"
+                 n = self._mayhem_busy.get(mint, 0) + 1
+-                if n < 3:
++                if n < 3:                                # retried twice, 20 s then 40 s later
+                     self._mayhem_busy[mint] = n
++                    self._mayhem_due[mint] = time.time() + 20 * n
+                     self._mayhem_q.append(mint)
+                 else:
+                     self._mayhem_busy.pop(mint, None)
++                    self._mayhem_due.pop(mint, None)
+                 return
+             self._mayhem_busy.pop(mint, None)
++            self._mayhem_due.pop(mint, None)
+             self.mayhem_reads["read"] += 1
+             self.mayhem_reads["mayhem"] += bool(yes)
+             s = self.tokens.get(mint)
+@@ -1995,9 +2006,12 @@ class Engine:
+             ctx = saved_tokens.get(m) or {}
+             launch = Launch(**ctx["launch"]) if ctx.get("launch") else None
+             s = self.tokens[m] = TokenState(m, launch, now)    # price unknown until its next trade
+-            if launch is not None and launch.dev_buy_tokens > 0:
+-                s.holders[launch.creator] = launch.dev_buy_tokens
+             s.dev_sold = ctx.get("dev_sold", 0.0)
++            if launch is not None and launch.dev_buy_tokens > 0:   # the one balance known across the gap
++                s.net[launch.creator] = launch.dev_buy_tokens - s.dev_sold
++                if s.net[launch.creator] > 0:
++                    s.holders[launch.creator] = s.net[launch.creator]
++            s.partial = True                             # other wallets' balances from before the restart are unknown
+             s.decided = "entered"
+             return s
+         for m, pd in d["positions"].items():
+diff --git a/meme_trader/sniper/events.py b/meme_trader/sniper/events.py
+index ec0fe37..fc0b53d 100644
+--- a/meme_trader/sniper/events.py
++++ b/meme_trader/sniper/events.py
+@@ -45,6 +45,8 @@ class Trade:
+     chain_ts: float = 0.0
+     fee_bps: int = -1           # protocol fee, basis points
+     creator_fee_bps: int = -1
++    event_index: int = -1       # this TradeEvent's place among its transaction's TradeEvents (-1: not recorded):
++                                # with the signature, the trade's identity (two identical buys in one tx are two)
+ 
+ 
+ @dataclass
+diff --git a/meme_trader/sniper/features.py b/meme_trader/sniper/features.py
+index ff70a6d..dcd15e1 100644
+--- a/meme_trader/sniper/features.py
++++ b/meme_trader/sniper/features.py
+@@ -13,6 +13,11 @@ from __future__ import annotations
+ 
+ import math
+ 
++# The features' definitions, versioned: a model trained on one version is never used with another.
++#   2 (2026-10-07): concentration shares (dev, bundle, snipers, insiders, top 10, cluster) are of the TRADABLE 1B
++#     on the curve (tracker.TRADABLE), for Mayhem coins too (2B minted, ~1B with the agent); balances in chain order
++FEATURE_VERSION = 2
++
+ FEATURES = [
+     "age_min", "curve_pct", "real_sol", "log_mcap_sol", "log_buyers", "log_holders",
+     "buyers_20s", "buyers_60s", "sellers_60s", "net_flow_20s", "net_flow_60s", "vol_60s",
+diff --git a/meme_trader/sniper/feeds.py b/meme_trader/sniper/feeds.py
+index f8c96b0..ba95629 100644
+--- a/meme_trader/sniper/feeds.py
++++ b/meme_trader/sniper/feeds.py
+@@ -492,6 +492,7 @@ class SolanaTradeFeed(Feed):
+             return []                                   # failed transactions moved nothing
+         out = []
+         stack: list[str] = []
++        n_event = -1                                     # TradeEvents seen in this transaction, in log order
+         for line in value.get("logs") or ():
+             if line.startswith("Program ") and not line.startswith(("Program log:", "Program data:",
+                                                                       "Program return:")):
+@@ -517,6 +518,7 @@ class SolanaTradeFeed(Feed):
+                 continue
+             if raw[:8] != TRADE_EVENT or len(raw) < 129:
+                 continue
++            n_event += 1
+             if trade_quote_mint(raw):                   # not a SOL coin: this bot prices everything in SOL
+                 SolanaTradeFeed.non_sol_skipped += 1
+                 continue
+@@ -531,7 +533,7 @@ class SolanaTradeFeed(Feed):
+                              trader=str(Pubkey.from_bytes(raw[57:89])), side="buy" if raw[56] else "sell",
+                              sol=sol / 1e9, tokens=tokens / 1e6, v_sol=v_sol / 1e9, v_tokens=v_tokens / 1e6,
+                              signature=value.get("signature", ""), slot=int(slot), chain_ts=float(chain_ts),
+-                             fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps)))
++                             fee_bps=int(fee_bps), creator_fee_bps=int(creator_bps), event_index=n_event))
+         return out
+ 
+     def _load_lags(self) -> None:
+diff --git a/meme_trader/sniper/mayhem.py b/meme_trader/sniper/mayhem.py
+index 7e17c6c..a763bb9 100644
+--- a/meme_trader/sniper/mayhem.py
++++ b/meme_trader/sniper/mayhem.py
+@@ -13,6 +13,8 @@ import base64
+ 
+ PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+ MAYHEM_BYTE = 81
++DISCRIMINATOR = bytes.fromhex("17b7f83760d8ac60")   # sha256("account:BondingCurve")[:8]; checked on live accounts
++LEGACY_LEN = 81                                       # a curve from before the creator/Mayhem upgrades ends here
+ 
+ 
+ def bonding_curve(mint: str) -> str:
+@@ -23,19 +25,29 @@ def bonding_curve(mint: str) -> str:
+     return str(pda)
+ 
+ 
+-def parse(data_b64: str) -> bool | None:
+-    """True / False from the account's bytes; None when the account predates the field."""
+-    raw = base64.b64decode(data_b64)
+-    return bool(raw[MAYHEM_BYTE]) if len(raw) > MAYHEM_BYTE else None
++def parse(data_b64: str, owner: str = PUMP_PROGRAM) -> bool | None:
++    """True / False only from a validated pump.fun bonding curve: owned by the pump program, with the BondingCurve
++    discriminator, and a flag byte that is 0 or 1. A recognized pre-upgrade layout (no flag yet: Mayhem didn't exist)
++    is False. Anything else is None: unknown, never "safe" (a third review, 2026-10-06)."""
++    try:
++        raw = base64.b64decode(data_b64)
++    except ValueError:
++        return None
++    if owner != PUMP_PROGRAM or raw[:8] != DISCRIMINATOR:
++        return None
++    if len(raw) <= MAYHEM_BYTE:
++        return False if len(raw) >= 49 else None        # the original layout (to `complete`) or with the creator
++    flag = raw[MAYHEM_BYTE]
++    return bool(flag) if flag in (0, 1) else None
+ 
+ 
+ def lookup(mint: str) -> bool | None:
+-    """One RPC read (SOLANA_RPC_URL). None: no such account (not a pump.fun curve) or too old to say. Raises on RPC
+-    errors: the caller treats those as still unknown."""
++    """One RPC read (SOLANA_RPC_URL). None: no such account, or not a recognizable pump.fun curve - unknown.
++    Raises on RPC errors: also unknown."""
+     from ..wallet import rpc
+ 
+     res = rpc("getAccountInfo", [bonding_curve(mint), {"encoding": "base64", "commitment": "confirmed"}])
+     v = (res or {}).get("value")
+     if not v:
+         return None
+-    return parse(v["data"][0])
++    return parse(v["data"][0], v.get("owner", ""))
+diff --git a/meme_trader/sniper/predictor.py b/meme_trader/sniper/predictor.py
+index 7980b6a..e9021d8 100644
+--- a/meme_trader/sniper/predictor.py
++++ b/meme_trader/sniper/predictor.py
+@@ -25,7 +25,7 @@ from pathlib import Path
+ 
+ from .curve import Curve
+ from .events import Funding, Launch, Metadata, Migration, Trade
+-from .features import FEATURES, extract
++from .features import FEATURE_VERSION, FEATURES, extract
+ from .funding import cluster_report, cohort
+ from .tracker import TokenState
+ 
+@@ -251,7 +251,8 @@ class LogisticModel:
+             m = cls.from_dict(json.loads(path.read_text()))
+         except (ValueError, KeyError):
+             return None
+-        return m if m.features == FEATURES else None     # stale model from an older feature set: ignore
++        ok = m.features == FEATURES and (m.info or {}).get("feature_version", 1) == FEATURE_VERSION
++        return m if ok else None                         # stale model from an older feature set or definition: ignore
+ 
+ 
+ class TreeModel:
+@@ -315,7 +316,8 @@ class TreeModel:
+             m = cls(d["features"], d["trees"], d.get("info"))
+         except (OSError, ValueError, KeyError):
+             return None
+-        return m if d.get("kind") == cls.kind and m.features == FEATURES else None
++        ok = d.get("kind") == cls.kind and m.features == FEATURES and (m.info or {}).get("feature_version", 1) == FEATURE_VERSION
++        return m if ok else None
+ 
+ 
+ def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict | None = None) -> tuple[TreeModel, dict]:
+@@ -352,7 +354,8 @@ def train_trees(events, params, train_frac: float = 0.7, log=print, source: dict
+     ts = [e.ts for e in events]
+     src = source or {}
+     final.info = {
+-        "kind": "trees", "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
++        "kind": "trees", "feature_version": FEATURE_VERSION,
++        "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
+         "files": [Path(f).name for f in src.get("files", [])],
+         "data_start_ts": min(ts) if ts else None, "data_end_ts": max(ts) if ts else None, "embargo_s": embargo,
+         "trained_at": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+@@ -439,6 +442,7 @@ def train(events, params, train_frac: float = 0.7, log=print, source: dict | Non
+     ts = [e.ts for e in events]
+     src = source or {}
+     final.info = {
++        "feature_version": FEATURE_VERSION,
+         "source": "synthetic" if src.get("synthetic") else ("recorded" if src.get("files") else "unknown"),
+         "files": [Path(f).name for f in src.get("files", [])],
+         "data_start_ts": min(ts) if ts else None, "data_end_ts": max(ts) if ts else None,
+diff --git a/meme_trader/sniper/research.py b/meme_trader/sniper/research.py
+index 3f11ad5..abdaa87 100644
+--- a/meme_trader/sniper/research.py
++++ b/meme_trader/sniper/research.py
+@@ -186,6 +186,8 @@ def manifest(files: list | None = None) -> dict:
+             pass
+     pkgs = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"])
+     out["packages"] = hashlib.sha256("\n".join(pkgs).encode()).hexdigest()[:16]
++    out["package_list"] = pkgs
++    out["code_identity"] = out["code_revision"].replace("+dirty", "") + (f"+patch:{out['patch']}" if out.get("patch") else "")
+     out["models"] = {}
+     for name in ("model.json", "model-trees.json"):
+         f = ROOT / "data" / name
+@@ -195,12 +197,8 @@ def manifest(files: list | None = None) -> dict:
+     for f in files or []:
+         f = Path(f)
+         try:
+-            size = f.stat().st_size
+-            with f.open("rb") as fh:
+-                head = fh.read(1 << 20)
+-                fh.seek(max(0, size - (1 << 20)))
+-                tail = fh.read(1 << 20)
+-            ins[f.name] = {"bytes": size, "sha_ends": hashlib.sha256(head + tail).hexdigest()[:16]}
++            ins[f.name] = {"bytes": f.stat().st_size, "sha256": file_digest(f),
++                           "sealed": f.suffix == ".gz"}          # a .jsonl is today's, still growing
+         except OSError:
+             ins[f.name] = {"bytes": None}
+     if ins:
+@@ -208,6 +206,35 @@ def manifest(files: list | None = None) -> dict:
+     return out
+ 
+ 
++def file_digest(f: Path) -> str:
++    """The whole file's sha256 (a third review, 2026-10-06: first+last MB missed edits in the middle), read in 8 MB
++    chunks and cached by path, size and mtime, so a sealed recording is hashed once."""
++    import hashlib
++
++    from ..config import ROOT
++
++    st = f.stat()
++    key = f"{f.resolve()}|{st.st_size}|{st.st_mtime_ns}"
++    cache_path = ROOT / "research" / "digests.json"
++    try:
++        cache = json.loads(cache_path.read_text())
++    except (OSError, ValueError):
++        cache = {}
++    if key in cache:
++        return cache[key]
++    h = hashlib.sha256()
++    with f.open("rb") as fh:
++        for chunk in iter(lambda: fh.read(8 << 20), b""):
++            h.update(chunk)
++    cache[key] = h.hexdigest()
++    try:
++        cache_path.parent.mkdir(parents=True, exist_ok=True)
++        cache_path.write_text(json.dumps(cache, indent=0))
++    except OSError:
++        pass
++    return cache[key]
++
++
+ def write_lock(pol: dict, at: str, h: str) -> None:
+     sn = json.loads(json.dumps(policy_params(pol)["sniper"], default=str))
+     m = manifest()
+@@ -217,15 +244,27 @@ def write_lock(pol: dict, at: str, h: str) -> None:
+ 
+ 
+ def code_note(pol: dict) -> dict:
+-    """The code at the freeze against the code now. Policies frozen before revisions were recorded say so: a new
+-    version records it; an old holdout isn't rewritten after the fact."""
++    """The code at the freeze against the code now, as an executable identity: commit plus the exact uncommitted
++    patch (two different dirty trees on one commit are different code). Packages and model files are compared too.
++    Policies frozen before identities were recorded say so; an old holdout isn't rewritten after the fact."""
+     try:
+-        frozen = json.loads(lock_path(pol).read_text()).get("code_revision")
++        lock = json.loads(lock_path(pol).read_text())
+     except (OSError, ValueError):
+-        frozen = None
+-    now = code_revision()
+-    return {"code_revision": now, "code_at_freeze": frozen or "not recorded (frozen before revisions were kept)",
+-            "code_changed_since_freeze": (frozen != now) if frozen else None}
++        lock = {}
++    fm = lock.get("manifest") or {}
++    frozen = fm.get("code_identity")
++    if not frozen and lock.get("code_revision"):    # a freeze from before identities: rebuild it from what it kept
++        rev = lock["code_revision"]
++        frozen = rev.replace("+dirty", "") + (f"+patch:{fm['patch']}" if fm.get("patch") else ("+dirty" if "+dirty" in rev else ""))
++    now_m = manifest()
++    now = now_m["code_identity"]
++    out = {"code_revision": now, "code_at_freeze": frozen or "not recorded (frozen before revisions were kept)",
++           "code_changed_since_freeze": (frozen != now) if frozen else None}
++    if fm:
++        out["environment_changed_since_freeze"] = {
++            "packages": fm.get("packages") != now_m.get("packages"),
++            "models": fm.get("models") != now_m.get("models")}
++    return out
+ 
+ 
+ def frozen_ts(pol: dict) -> float | None:
+@@ -694,8 +733,12 @@ def cmd_final(name: str, files: list[str] | None = None, jobs: int = 0) -> dict:
+         rep["verdict_on_frozen_code"] = None
+         rep["verdict"] = f"INVALID (code changed since the freeze: {rep['code_at_freeze']} -> {rep['code_revision']}); " \
+                          f"exploratory {rep['verdict']} on today's code"
+-    elif rep.get("code_changed_since_freeze") is None:
++    elif rep.get("code_changed_since_freeze") is None:          # no unqualified PASS without provenance
+         rep["provenance"] = "the code at the freeze wasn't recorded: this verdict can't prove it ran the frozen code"
++        rep["verdict"] = f"{rep['verdict']} (provenance unverified)"
++    env = rep.get("environment_changed_since_freeze") or {}
++    if any(env.values()):
++        rep["verdict"] = f"{rep['verdict']} (changed since the freeze: {', '.join(k for k, v in env.items() if v)})"
+     stored.parent.mkdir(parents=True, exist_ok=True)
+     stored.write_text(json.dumps(rep, indent=1, default=str))
+     log_experiment({"kind": "final", "policy": pol["name"], "hash": rep["hash"], "verdict": rep["verdict"],
+diff --git a/meme_trader/sniper/revival.py b/meme_trader/sniper/revival.py
+index b926386..5b505a5 100644
+--- a/meme_trader/sniper/revival.py
++++ b/meme_trader/sniper/revival.py
+@@ -78,6 +78,7 @@ class Revival:
+             self.done = [json.loads(x) for x in self.out.read_text().splitlines() if x.strip()]
+         except (OSError, ValueError):
+             self.done = []
++        self.done_keys = {(r.get("id"), r.get("exit")) for r in self.done if r.get("id")}
+         try:
+             st = json.loads(self.state_path.read_text())
+             self.path = Path(st["path"]) if st.get("path") else None
+@@ -94,7 +95,7 @@ class Revival:
+     def save(self, force: bool = False) -> None:
+         if not (self._dirty or force) or (not force and time.time() - self._saved_at < 10):
+             return
+-        st = {"path": str(self.path) if self.path else "", "offset": self.offset,
++        st = {"path": str(self.path) if self.path else "", "offset": self.offset - len(self.rest),
+               "fired": {k: v for k, v in self.fired.items() if self.newest_t - v < COOLDOWN_S},
+               "open": self.open, "saved": time.time()}
+         tmp = self.state_path.with_suffix(".tmp")
+@@ -128,8 +129,16 @@ class Revival:
+             self.offset, self.warm_from = size, max(0, size - WARMUP_BYTES)
+         if self.warm_from is not None:                 # history before the resume point: pools only
+             self._warm(max_bytes)
+-        if want != self.path:                          # a new UTC day: finish yesterday's file, then switch
+-            n += self._read(max_bytes, now)
++        if want != self.path:                          # a new UTC day: finish yesterday's file first
++            for _ in range(8):
++                got = self._read(max_bytes, now)
++                n += got
++                if self._at_end():
++                    break
++            if not self._at_end():                     # more backlog than a tick reads: keep at it next tick
++                self._expire(now)
++                self.save()
++                return n
+             self.path, self.offset, self.rest = want, 0, b""
+             self._dirty = True
+         n += self._read(max_bytes, now)
+@@ -137,6 +146,12 @@ class Revival:
+         self.save()
+         return n
+ 
++    def _at_end(self) -> bool:
++        try:
++            return self.offset >= self.path.stat().st_size
++        except OSError:
++            return True                                # gone (compressed): nothing more to read from it
++
+     def _warm(self, max_bytes: int) -> None:
+         """History before the resume point, a chunk a tick (pools only: no signals, no follows)."""
+         try:
+@@ -263,7 +278,7 @@ class Revival:
+         sym, mint = self.meta.get(pool, (None, None))
+         for d in DELAYS:
+             self.open.setdefault(pool, []).append({
+-                "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
++                "id": f"{pool}|{rule}|{t:.0f}|{d}|{'c' if control else 's'}", "pool": pool, "symbol": sym, "mint": mint, "rule": rule, "delay": d, "control": control,
+                 "signal_t": t, "decided_at": seen, "lag_s": round(seen - t, 1), "ret5": ret5 and round(ret5, 3),
+                 "surge": surge and round(surge, 1), "cost": round(cost, 4), "cost_how": how, "exits": {}})
+ 
+@@ -309,11 +324,18 @@ class Revival:
+                     if a <= due <= b:
+                         due = b
+                 x["why"], x["sell_at"] = "time", due + f["delay"]
++                if t >= x["sell_at"]:                  # the timer was set when it filled: this trade is the first after
++                    x["pnl"] = round((px / f["p0"] - 1 - f["cost"]) * 100, 2)
++                    self._close(f, name, x, t)
+         if len(f["exits"]) == len(EXITS) and all("pnl" in x or x.get("censored") for x in f["exits"].values()):
+             f["finished"] = True
+ 
+     def _close(self, f: dict, name: str, x: dict, t: float) -> None:
+-        row = {"closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
++        if (f.get("id"), name) in self.done_keys:       # already written (a restart replayed it): once only
++            return
++        if f.get("id"):
++            self.done_keys.add((f["id"], name))
++        row = {"id": f.get("id"), "closed": t, "signal_t": f["signal_t"], "decided_at": f.get("decided_at"), "lag_s": f.get("lag_s"),
+                "pool": f["pool"], "mint": f["mint"], "symbol": f["symbol"], "rule": f["rule"], "delay": f["delay"],
+                "control": f.get("control", False), "exit": name, "why": x.get("why", ""), "pnl_pct": x.get("pnl"),
+                "censored": bool(x.get("censored")), "mark_pct": x.get("mark"), "cost": f.get("cost"),
+diff --git a/meme_trader/sniper/tracker.py b/meme_trader/sniper/tracker.py
+index 932c174..e0ae99a 100644
+--- a/meme_trader/sniper/tracker.py
++++ b/meme_trader/sniper/tracker.py
+@@ -60,7 +60,8 @@ class TokenState:
+     net: dict = field(default_factory=dict)          # wallet -> tokens bought minus sold, signed: any arrival order
+     sold_by: dict = field(default_factory=dict)      # wallet -> tokens it sold (early buyers' dumps, order-free)
+     early_c: dict = field(default_factory=dict)      # early buyer -> its part of early_sold
+-    seen: dict = field(default_factory=dict)         # recent trade identities (signature, side, size, reserves)
++    seen: dict = field(default_factory=dict)         # recent trade identities (signature, event index)
++    partial: bool = False                            # restored after a gap: other wallets' balances aren't known
+ 
+     @property
+     def created_ts(self) -> float:
+@@ -126,10 +127,12 @@ class TokenState:
+             self.curve = Curve(self.slot_start[1], self.slot_start[0])
+ 
+     def _duplicate(self, t: Trade) -> bool:
+-        """The same trade delivered twice (a reconnect can replay it): counted once."""
+-        if not t.signature:
++        """The same trade EVENT delivered twice (a reconnect can replay it): counted once. Its identity is the
++        transaction's signature and the event's place in it, not its content: one transaction can hold two identical
++        buys. Without an event index (older recordings) nothing is dropped - uniqueness isn't invented."""
++        if not t.signature or t.event_index < 0:
+             return False
+-        k = (t.signature, t.side, round(t.tokens), round(t.v_tokens))
++        k = (t.signature, t.event_index)
+         if k in self.seen:
+             return True
+         self.seen[k] = None
+diff --git a/meme_trader/ui/static/index.html b/meme_trader/ui/static/index.html
+index 568e4c0..c41c1d9 100644
+--- a/meme_trader/ui/static/index.html
++++ b/meme_trader/ui/static/index.html
+@@ -2463,7 +2463,7 @@ async function loadHQ() {
+      d.xchain ? `${d.xchain.active ? "paper, scanning" : "off"}${d.xchain.note ? " · " + esc(d.xchain.note) : ""} · ${d.xchain.open} open · today ${d.xchain.today.trades} trades ${usdS(d.xchain.today.pnl_usd)} · real-money checklist ${d.xchain.ready}${d.xchain.last_scan_s != null ? ` · scanned ${dur(d.xchain.last_scan_s)} ago` : ""}` : "–"],
+     ["AI desk", d.desk.awake ? true : null, `${d.desk.awake ? "awake" : "resting"}${d.desk.model ? " · " + esc(d.desk.model) : ""}${d.desk.vote_s ? ` · votes take ${d.desk.vote_s.median} s (slowest 10%: ${d.desk.vote_s.p90} s, ${d.desk.vote_s.n} votes)` : ""} · ${d.desk.huddles} huddles${d.desk.huddle_error ? " · " + esc(d.desk.huddle_error) : ""}`],
+     ["Chat (Claude)", d.chat.available, d.chat.available ? "ready" : "Claude Code not found on this machine"],
+-    ["Data collection", d.intel ? true : null, d.intel ? `X links: ${d.intel.x_reads_today} of ${d.intel.x_per_day} reads today (${d.intel.x_links_cached} posts and accounts cached)${d.intel.graduated ? ` · graduated coins: ${d.intel.graduated.logged_today} logged today, ${d.intel.graduated.queued} waiting${d.intel.graduated.failed_today ? `, ${d.intel.graduated.failed_today} without a pool` : ""}` : ""}${d.intel.mayhem_reads ? ` · Mayhem checked on-chain: ${d.intel.mayhem_reads.read} coins today, ${d.intel.mayhem_reads.mayhem} were Mayhem${d.intel.mayhem_reads.failed ? `, ${d.intel.mayhem_reads.failed} reads failed` : ""}` : ""}` : "–"],
++    ["Data collection", d.intel ? true : null, d.intel ? `X links: ${d.intel.x_reads_today} of ${d.intel.x_per_day} reads today (${d.intel.x_links_cached} posts and accounts cached)${d.intel.graduated ? ` · graduated coins: ${d.intel.graduated.logged_today} logged today, ${d.intel.graduated.queued} waiting${d.intel.graduated.failed_today ? `, ${d.intel.graduated.failed_today} without a pool` : ""}` : ""}${d.intel.mayhem_reads ? ` · Mayhem checked on-chain: ${d.intel.mayhem_reads.read} coins today, ${d.intel.mayhem_reads.mayhem} were Mayhem${d.intel.mayhem_reads.failed ? `, ${d.intel.mayhem_reads.failed} reads failed` : ""}${d.intel.mayhem_reads.unknown ? `, ${d.intel.mayhem_reads.unknown} unreadable (kept unknown: no bot buys)` : ""}` : ""}` : "–"],
+     ["Machine", d.machine.disk_free_gb > 20 && d.machine.mem_free_mb > 3000 ? true : null, `${d.machine.disk_free_gb} GB disk free (${d.machine.disk_used_pct}% used) · ${(d.machine.mem_free_mb / 1024).toFixed(1)} GB memory free`]];
+   $("hq-body").innerHTML = `<div class="hq-svcs">${svc}</div><div class="hq-rows">${rows.map(([k, ok, v]) => `<div>${dot(ok)}<b>${k}</b><span class="note">${v}</span></div>`).join("")}</div>`;
+ }
