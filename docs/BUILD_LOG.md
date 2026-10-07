@@ -43,7 +43,32 @@ A running record of decisions, research, parameters and status. Newest entries a
    - **Sensitivities:** v4's process and its mirror run on a subset fixed before the run.
    - **The late-fill share** now counts the exits the account executed.
    - **Each cell reports both arms:** signals, entries, skips by reason, measured and impaired exits.
-   - **Results:** POWER_V5
+   - **Results:**
+
+| Pass rate at 90 days (H = 1 SOL, +0 cost) | A1 | A2 | A3 | A4 | A5 |
+|---|---|---|---|---|---|
+| **No edge** (500 runs) | 0.020 [0.011, 0.036] | 0.004 | 0.000 | 0.000 | always INVALID |
+| A quarter of the replay's winner rate, flat | 0.70 | 0.59 | 0.23 | 0.01 | — |
+| Half, flat | 0.99 | 0.95 | 0.77 | 0.33 | — |
+| Half, flat, +1.5% cost | 0.93 | 0.80 | 0.59 | 0.22 | — |
+| The replay's rate, pessimistic | 0.97 | 0.97 | 0.82 | 0.57 | — |
+
+**The drift sensitivities** are pass rates under the centered / positive (v4) / negative late-price processes, 90 days, +0 cost:
+
+| | A2 | A3 | A4 |
+|---|---|---|---|
+| Null | 0.004 / 0.012 / 0.002 | 0 / 0 / 0 | 0 / 0 / 0 |
+| A quarter, flat | 0.59 / 0.53 / 0.60 | 0.23 / 0.17 / 0.15 | 0.01 / 0.02 / 0.03 |
+| Half, flat | 0.95 / 0.98 / 0.97 | 0.77 / 0.72 / 0.81 | 0.33 / 0.34 / 0.37 |
+| The replay's rate, pessimistic | 0.97 / 0.97 / 0.96 | 0.82 / 0.90 / 0.89 | 0.57 / 0.61 / 0.59 |
+
+- **Centering changed almost nothing.** v5's centered results equal v4's within simulation noise, and the drift variants move pass rates by a few points, in both directions. Late fills are about 10% of executed exits, so the drift's effect is small. The reviewer's point about the mechanism was right; its effect on these tables is negligible.
+- **False passes:** at most 2.6%, at A1 over 60 days with no extra cost (Wilson 1.5–4.4%).
+- **The new per-arm counts show a capacity limit.** At A3 with the replay's rate, summed over 150 runs: of 580,412 signals, **56% were skipped by the daily loss stop**, 11% had no entry quote, and 30% were entered.
+  - **Why:** the 0.5 SOL stop counts each losing trade's loss, not the day's net, so a few ordinary losers stop a day's trading even when the strategy is net positive.
+  - **Not a bug:** it's the registered design. But it limits every test's sample, and is a question for the reviewer and the owner (a net-loss stop, or a larger budget).
+- **The full table:** `power_t9_e1_v5.{out,json}` (930 cells), from revision `ebacdff` with no uncommitted changes. Its sha256 is in `.sha256`.
+- **No window is chosen.**
 6. **The fork lifecycle export.**
    - **Records:** each one has a stable id and a process epoch.
    - **Matching:** the export matches creation to terminal by id and classifies every unmatched conflict: pending at the cutoff, created before the log, or a restart.
