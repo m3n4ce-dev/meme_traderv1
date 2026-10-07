@@ -80,7 +80,7 @@ def test_a_buy_sell_buy_slot_ends_right_in_every_arrival_order():
 
 def test_the_same_trade_delivered_twice_counts_once():
     s = TokenState(M, Launch(M, 0, "DEV"), 0)
-    t = Trade(M, 10, "W", "buy", 1, 10e6, 31, 1.063e9, signature="SIG", slot=5)
+    t = Trade(M, 10, "W", "buy", 1, 10e6, 31, 1.063e9, signature="SIG", slot=5, event_index=0)
     s.on_trade(t, 3)
     s.on_trade(t, 3)
     assert s.holders["W"] == 10e6 and s.buys == 1 and s.volume_sol == 1

@@ -13,6 +13,8 @@ import base64
 
 PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 MAYHEM_BYTE = 81
+DISCRIMINATOR = bytes.fromhex("17b7f83760d8ac60")   # sha256("account:BondingCurve")[:8]; checked on live accounts
+LEGACY_LEN = 81                                       # a curve from before the creator/Mayhem upgrades ends here
 
 
 def bonding_curve(mint: str) -> str:
@@ -23,19 +25,29 @@ def bonding_curve(mint: str) -> str:
     return str(pda)
 
 
-def parse(data_b64: str) -> bool | None:
-    """True / False from the account's bytes; None when the account predates the field."""
-    raw = base64.b64decode(data_b64)
-    return bool(raw[MAYHEM_BYTE]) if len(raw) > MAYHEM_BYTE else None
+def parse(data_b64: str, owner: str = PUMP_PROGRAM) -> bool | None:
+    """True / False only from a validated pump.fun bonding curve: owned by the pump program, with the BondingCurve
+    discriminator, and a flag byte that is 0 or 1. A recognized pre-upgrade layout (no flag yet: Mayhem didn't exist)
+    is False. Anything else is None: unknown, never "safe" (a third review, 2026-10-06)."""
+    try:
+        raw = base64.b64decode(data_b64)
+    except ValueError:
+        return None
+    if owner != PUMP_PROGRAM or raw[:8] != DISCRIMINATOR:
+        return None
+    if len(raw) <= MAYHEM_BYTE:
+        return False if len(raw) >= 49 else None        # the original layout (to `complete`) or with the creator
+    flag = raw[MAYHEM_BYTE]
+    return bool(flag) if flag in (0, 1) else None
 
 
 def lookup(mint: str) -> bool | None:
-    """One RPC read (SOLANA_RPC_URL). None: no such account (not a pump.fun curve) or too old to say. Raises on RPC
-    errors: the caller treats those as still unknown."""
+    """One RPC read (SOLANA_RPC_URL). None: no such account, or not a recognizable pump.fun curve - unknown.
+    Raises on RPC errors: also unknown."""
     from ..wallet import rpc
 
     res = rpc("getAccountInfo", [bonding_curve(mint), {"encoding": "base64", "commitment": "confirmed"}])
     v = (res or {}).get("value")
     if not v:
         return None
-    return parse(v["data"][0])
+    return parse(v["data"][0], v.get("owner", ""))
