@@ -1,0 +1,3737 @@
+{
+  "schemaVersion": 1,
+  "generator": "generate_golden_quotes.cjs",
+  "sdk": "@pump-fun/pump-swap-sdk",
+  "sdkVersion": "1.20.0",
+  "npmTarball": "https://registry.npmjs.org/@pump-fun/pump-swap-sdk/-/pump-swap-sdk-1.20.0.tgz",
+  "npmIntegrity": "sha512-DuBZ5ge3OJPao6m0aZZj+GTZFzfZ/TU3ca1EgL9ejr+8QIYETlLQVMaiznS+U4uGzM9z58mpxoXn3HuVEYHCFw==",
+  "sha256": {
+    "dist/index.js": "1ede6b4184a808cf986cd20a89d7c7487c4623054065238c5b9656f6b7309547",
+    "src/sdk/buy.ts": "fb63c16e7a2782f54f12a8fba030957ecd54040daf255797d717ab0f13bf8f10",
+    "src/sdk/sell.ts": "7d6cfe9c1c627fba0a721cec61606d240510fa08bb76a43ff69f4b2b1cdc274f",
+    "src/sdk/fees.ts": "45d55d0faca9aec48aca2637f885973602182012ab9623c703f42fec9be164c1",
+    "src/sdk/util.ts": "a06f5ae7f96e1acfeb8bc4282a3cf17a30bfa78c465492ce1ee101259d61e90a",
+    "src/idl/pump_amm.json": "53e9ae78c5acc01c8f02cdcd10ad00310e915180685eaa6ae159483e50749a15"
+  },
+  "feeConfig": {
+    "admin": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+    "flatFees": {
+      "lpFeeBps": "21",
+      "protocolFeeBps": "8",
+      "creatorFeeBps": "11"
+    },
+    "feeTiers": [
+      {
+        "marketCapLamportsThreshold": "0",
+        "fees": {
+          "lpFeeBps": "20",
+          "protocolFeeBps": "5",
+          "creatorFeeBps": "30"
+        }
+      },
+      {
+        "marketCapLamportsThreshold": "400000000000",
+        "fees": {
+          "lpFeeBps": "15",
+          "protocolFeeBps": "5",
+          "creatorFeeBps": "20"
+        }
+      },
+      {
+        "marketCapLamportsThreshold": "800000000000",
+        "fees": {
+          "lpFeeBps": "10",
+          "protocolFeeBps": "5",
+          "creatorFeeBps": "10"
+        }
+      }
+    ],
+    "stableFeeTiers": [
+      {
+        "marketCapLamportsThreshold": "0",
+        "fees": {
+          "lpFeeBps": "3",
+          "protocolFeeBps": "2",
+          "creatorFeeBps": "1"
+        }
+      }
+    ],
+    "exoticFlatFees": {
+      "lpFeeBps": "33",
+      "protocolFeeBps": "7",
+      "creatorFeeBps": "12"
+    }
+  },
+  "globalConfig": {
+    "lpFeeBasisPoints": "20",
+    "protocolFeeBasisPoints": "5",
+    "coinCreatorFeeBasisPoints": "30",
+    "creatorFeeConfigurable": false
+  },
+  "limitations": [
+    "All vaults, mint supply, fee schedules and balances are synthetic. These are unit-test fixtures, not real pools or trade recommendations.",
+    "Token-program labels are legacy and bare Token-2022 with NO extensions. Public quote functions do not take token-program ownership as an argument; the no-extension arithmetic is identical. This does NOT validate TransferFeeConfig, hooks, withheld fees or instruction-account routing.",
+    "Pure SDK conformance is not on-chain parity. Coherent account reads, owner checks, fee config validation, slot freshness, balances, transaction simulation and executable sell quotes remain observer acceptance requirements.",
+    "Only integer quote and layout APIs executed. No RPC, signing, wallet or paid service used.",
+    "Expected throws reflect SDK behaviour. Caller must ALSO reject nonpositive effective reserves, negative/zero amount, invalid decimals/slippage, unsupported extensions and out-of-range i128 before calling.",
+    "Synthetic feeConfig exact threshold boundaries; no claims that this schedule is current mainnet configuration.",
+    "sellQuoteInput inversion is SDK output, not a proof that forward net output always reaches target under separately rounded per-component fees; add a forward sellBaseInput guard."
+  ],
+  "counts": {
+    "quoteCases": 94,
+    "successfulBigIntChecks": 90,
+    "expectedThrows": 4,
+    "layoutCases": 5,
+    "mintDecodeCases": 2,
+    "sdkInverseSellShortfallCases": 12
+  },
+  "cases": [
+    {
+      "id": "legacy-positive-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "70001",
+          "uiQuote": "70284",
+          "maxQuote": "70986"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "1422840",
+          "internalQuoteWithoutFees": "99600",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "69719",
+          "minQuote": "69021",
+          "internalQuoteAmountOut": "69999"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100402",
+          "base": "1434317",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100402"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "legacy-positive-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "7777777778",
+          "uiQuote": "7808888890",
+          "maxQuote": "7886977778"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "66418703478",
+          "internalQuoteWithoutFees": "4980079680",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "6338181816",
+          "minQuote": "6274799997",
+          "internalQuoteAmountOut": "6363636363"
+        }
+      }
+    },
+    {
+      "id": "legacy-positive-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5020080322",
+          "base": "77255871459",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999999",
+          "minQuote": "4949999999",
+          "internalQuoteAmountOut": "5020080322"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "legacy-zero-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50204",
+          "maxQuote": "50706"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "1991976",
+          "internalQuoteWithoutFees": "99600",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49799",
+          "minQuote": "49301",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100402",
+          "base": "2008045",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100402"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "legacy-zero-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "5555555556",
+          "uiQuote": "5577777780",
+          "maxQuote": "5633555557"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "90579710107",
+          "internalQuoteWithoutFees": "4980079680",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "4527272725",
+          "minQuote": "4481999997",
+          "internalQuoteAmountOut": "4545454545"
+        }
+      }
+    },
+    {
+      "id": "legacy-zero-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5020080322",
+          "base": "111607142875",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999999",
+          "minQuote": "4949999999",
+          "internalQuoteAmountOut": "5020080322"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "legacy-negative-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "30001",
+          "uiQuote": "30169",
+          "maxQuote": "30470"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "3315022",
+          "internalQuoteWithoutFees": "99452",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "29834",
+          "minQuote": "29535",
+          "internalQuoteAmountOut": "29999"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100554",
+          "base": "3351812",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100554"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "legacy-negative-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "3333333334",
+          "uiQuote": "3351666669",
+          "maxQuote": "3385183335"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "142186833433",
+          "internalQuoteWithoutFees": "4972650421",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "2712272725",
+          "minQuote": "2685149997",
+          "internalQuoteAmountOut": "2727272727"
+        }
+      }
+    },
+    {
+      "id": "legacy-negative-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5027652087",
+          "base": "201328769907",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999998",
+          "minQuote": "4949999998",
+          "internalQuoteAmountOut": "5027652087"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "2"
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000--1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "399999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "402204",
+          "maxQuote": "406226"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000--1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "399999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "397799",
+          "minQuote": "393821",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000-0-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "401604",
+          "maxQuote": "405620"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000-0-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "398399",
+          "minQuote": "394415",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000-1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "401604",
+          "maxQuote": "405620"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-400000000000-1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "398399",
+          "minQuote": "394415",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000--1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "799999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "803204",
+          "maxQuote": "811236"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000--1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "799999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "796799",
+          "minQuote": "788831",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000-0-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "802004",
+          "maxQuote": "810024"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000-0-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "797999",
+          "minQuote": "790019",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000-1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "802004",
+          "maxQuote": "810024"
+        }
+      }
+    },
+    {
+      "id": "legacy-tier-800000000000-1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "797999",
+          "minQuote": "790019",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "70001",
+          "uiQuote": "70284",
+          "maxQuote": "70986"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "1422840",
+          "internalQuoteWithoutFees": "99600",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "69719",
+          "minQuote": "69021",
+          "internalQuoteAmountOut": "69999"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100402",
+          "base": "1434317",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100402"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "token2022-positive-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "7777777778",
+          "uiQuote": "7808888890",
+          "maxQuote": "7886977778"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "66418703478",
+          "internalQuoteWithoutFees": "4980079680",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "6338181816",
+          "minQuote": "6274799997",
+          "internalQuoteAmountOut": "6363636363"
+        }
+      }
+    },
+    {
+      "id": "token2022-positive-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5020080322",
+          "base": "77255871459",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999999",
+          "minQuote": "4949999999",
+          "internalQuoteAmountOut": "5020080322"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "token2022-zero-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50204",
+          "maxQuote": "50706"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "1991976",
+          "internalQuoteWithoutFees": "99600",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49799",
+          "minQuote": "49301",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100402",
+          "base": "2008045",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100402"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "token2022-zero-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "5555555556",
+          "uiQuote": "5577777780",
+          "maxQuote": "5633555557"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "90579710107",
+          "internalQuoteWithoutFees": "4980079680",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "4527272725",
+          "minQuote": "4481999997",
+          "internalQuoteAmountOut": "4545454545"
+        }
+      }
+    },
+    {
+      "id": "token2022-zero-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5020080322",
+          "base": "111607142875",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999999",
+          "minQuote": "4949999999",
+          "internalQuoteAmountOut": "5020080322"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "token2022-negative-small-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "30001",
+          "uiQuote": "30169",
+          "maxQuote": "30470"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-small-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "3315022",
+          "internalQuoteWithoutFees": "99452",
+          "maxQuote": "101000"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-small-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "29834",
+          "minQuote": "29535",
+          "internalQuoteAmountOut": "29999"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-small-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "100000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "100554",
+          "base": "3351812",
+          "minQuote": "99000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "99999",
+          "minQuote": "98999",
+          "internalQuoteAmountOut": "100554"
+        },
+        "targetQuote": "100000",
+        "meetsTarget": false,
+        "shortfallAtoms": "1"
+      }
+    },
+    {
+      "id": "token2022-negative-large-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "3333333334",
+          "uiQuote": "3351666669",
+          "maxQuote": "3385183335"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-large-buyQuoteInput",
+      "api": "buyQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "base": "142186833433",
+          "internalQuoteWithoutFees": "4972650421",
+          "maxQuote": "5050000000"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-large-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "100000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "2712272725",
+          "minQuote": "2685149997",
+          "internalQuoteAmountOut": "2727272727"
+        }
+      }
+    },
+    {
+      "id": "token2022-negative-large-sellQuoteInput",
+      "api": "sellQuoteInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "-20000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "quote": "5000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalRawQuote": "5027652087",
+          "base": "201328769907",
+          "minQuote": "4950000000"
+        }
+      },
+      "forwardSellCheck": {
+        "output": {
+          "uiQuote": "4999999998",
+          "minQuote": "4949999998",
+          "internalQuoteAmountOut": "5027652087"
+        },
+        "targetQuote": "5000000000",
+        "meetsTarget": false,
+        "shortfallAtoms": "2"
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000--1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "399999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "402204",
+          "maxQuote": "406226"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000--1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "399999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "397799",
+          "minQuote": "393821",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000-0-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "401604",
+          "maxQuote": "405620"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000-0-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "398399",
+          "minQuote": "394415",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000-1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "400001",
+          "uiQuote": "401604",
+          "maxQuote": "405620"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-400000000000-1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "400000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "398399",
+          "minQuote": "394415",
+          "internalQuoteAmountOut": "399999"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000--1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "799999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "803204",
+          "maxQuote": "811236"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000--1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "799999999999",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "796799",
+          "minQuote": "788831",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000-0-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "802004",
+          "maxQuote": "810024"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000-0-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "797999",
+          "minQuote": "790019",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000-1-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "800001",
+          "uiQuote": "802004",
+          "maxQuote": "810024"
+        }
+      }
+    },
+    {
+      "id": "token2022-tier-800000000000-1-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "800000000001",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "1000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "10",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "10"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "797999",
+          "minQuote": "790019",
+          "internalQuoteAmountOut": "799999"
+        }
+      }
+    },
+    {
+      "id": "noncanonical-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "21",
+        "protocolFeeBps": "8",
+        "creatorFeeBps": "11"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50204",
+          "maxQuote": "50706"
+        }
+      }
+    },
+    {
+      "id": "noncanonical-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "21",
+        "protocolFeeBps": "8",
+        "creatorFeeBps": "11"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49799",
+          "minQuote": "49301",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "creator-none-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "11111111111111111111111111111111",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50103",
+          "maxQuote": "50604"
+        }
+      }
+    },
+    {
+      "id": "creator-none-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "11111111111111111111111111111111",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49899",
+          "minQuote": "49400",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "creator-override-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": true,
+        "creatorFeeBps": "77",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "77"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50489",
+          "maxQuote": "50993"
+        }
+      }
+    },
+    {
+      "id": "creator-override-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": true,
+        "creatorFeeBps": "77",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "77"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49514",
+          "minQuote": "49018",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "creator-gate-off-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "77",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50204",
+          "maxQuote": "50706"
+        }
+      }
+    },
+    {
+      "id": "creator-gate-off-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "77",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49799",
+          "minQuote": "49301",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "global-fallback-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": false,
+        "feeConfigVariant": "none",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50279",
+          "maxQuote": "50781"
+        }
+      }
+    },
+    {
+      "id": "global-fallback-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": false,
+        "feeConfigVariant": "none",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49724",
+          "minQuote": "49226",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "usdc-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "3",
+        "protocolFeeBps": "2",
+        "creatorFeeBps": "1"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50034",
+          "maxQuote": "50534"
+        }
+      }
+    },
+    {
+      "id": "usdc-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "3",
+        "protocolFeeBps": "2",
+        "creatorFeeBps": "1"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49969",
+          "minQuote": "49469",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "exotic-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "33",
+        "protocolFeeBps": "7",
+        "creatorFeeBps": "12"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50264",
+          "maxQuote": "50766"
+        }
+      }
+    },
+    {
+      "id": "exotic-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "33",
+        "protocolFeeBps": "7",
+        "creatorFeeBps": "12"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49739",
+          "minQuote": "49241",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "exotic-unset-buyBaseInput",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "exotic-unset",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "21",
+        "protocolFeeBps": "8",
+        "creatorFeeBps": "11"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "50001",
+          "uiQuote": "50204",
+          "maxQuote": "50706"
+        }
+      }
+    },
+    {
+      "id": "exotic-unset-sellBaseInput",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "exotic-unset",
+        "base": "1000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "21",
+        "protocolFeeBps": "8",
+        "creatorFeeBps": "11"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "49799",
+          "minQuote": "49301",
+          "internalQuoteAmountOut": "49999"
+        }
+      }
+    },
+    {
+      "id": "ceil-small-fees-buy",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000",
+        "quoteReserve": "100",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "10000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "internalQuoteAmount": "2",
+          "uiQuote": "5",
+          "maxQuote": "5"
+        }
+      }
+    },
+    {
+      "id": "ceil-small-fees-sell",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000",
+        "quoteReserve": "10000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "10000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "return",
+        "output": {
+          "uiQuote": "96",
+          "minQuote": "95",
+          "internalQuoteAmountOut": "99"
+        }
+      }
+    },
+    {
+      "id": "reject-real-vault-coverage",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "1000",
+        "virtualQuoteReserves": "1000000000",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "throw",
+        "message": "Insufficient real quote reserves to cover the sell output."
+      }
+    },
+    {
+      "id": "reject-zero-base-reserve",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "0",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "10"
+      },
+      "selectedFeesBps": null,
+      "expected": {
+        "kind": "throw",
+        "message": "Invalid input: 'baseReserve' or 'quoteReserve' cannot be zero."
+      }
+    },
+    {
+      "id": "reject-buy-too-large",
+      "api": "buyBaseInput",
+      "inputs": {
+        "baseReserve": "1000000000000",
+        "quoteReserve": "50000000000",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "1000000000001"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "15",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "20"
+      },
+      "expected": {
+        "kind": "throw",
+        "message": "Cannot buy more base tokens than the pool reserves."
+      }
+    },
+    {
+      "id": "reject-sell-fees-exceed-output",
+      "api": "sellBaseInput",
+      "inputs": {
+        "baseReserve": "1000000",
+        "quoteReserve": "200",
+        "virtualQuoteReserves": "0",
+        "baseMintSupply": "10000000000000",
+        "baseMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "creator": "77YHk3LDDeRXVARSiXcKwyHS2VNwyn9HjH3o53axzDhT",
+        "coinCreator": "YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+        "quoteMint": "So11111111111111111111111111111111111111112",
+        "baseTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "quoteTokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "tokenExtensions": [],
+        "slippagePercent": 1,
+        "isMayhemMode": false,
+        "creatorFeeConfigurable": false,
+        "creatorFeeBps": "0",
+        "feeConfigPresent": true,
+        "feeConfigVariant": "synthetic-v1",
+        "base": "10000"
+      },
+      "selectedFeesBps": {
+        "lpFeeBps": "20",
+        "protocolFeeBps": "5",
+        "creatorFeeBps": "30"
+      },
+      "expected": {
+        "kind": "throw",
+        "message": "Fees exceed total output; final quote is negative."
+      }
+    }
+  ],
+  "layoutVectors": [
+    {
+      "id": "pool-i128-0",
+      "accountDataBase64": "8ZptBBGxbbwBAQBa0vwPWKLhPf8c4AlsxJseTsGhiU4wvYSa9+JZcGxaUgcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBBAQg8AAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "bytes": 270,
+      "virtualFieldByteOffset": 245,
+      "expectedVirtualQuoteReserves": "0",
+      "expectedType": "i128",
+      "note": "layout decoding only; observer must independently validate owner/discriminator/addresses"
+    },
+    {
+      "id": "pool-i128-20000000000",
+      "accountDataBase64": "8ZptBBGxbbwBAQBa0vwPWKLhPf8c4AlsxJseTsGhiU4wvYSa9+JZcGxaUgcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBBAQg8AAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAyBeoBAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "bytes": 270,
+      "virtualFieldByteOffset": 245,
+      "expectedVirtualQuoteReserves": "20000000000",
+      "expectedType": "i128",
+      "note": "layout decoding only; observer must independently validate owner/discriminator/addresses"
+    },
+    {
+      "id": "pool-i128--20000000000",
+      "accountDataBase64": "8ZptBBGxbbwBAQBa0vwPWKLhPf8c4AlsxJseTsGhiU4wvYSa9+JZcGxaUgcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBBAQg8AAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAOOhX+///////////////AAAAAAAAAAAA",
+      "bytes": 270,
+      "virtualFieldByteOffset": 245,
+      "expectedVirtualQuoteReserves": "-20000000000",
+      "expectedType": "i128",
+      "note": "layout decoding only; observer must independently validate owner/discriminator/addresses"
+    },
+    {
+      "id": "pool-i128-1208925819614629174706176",
+      "accountDataBase64": "8ZptBBGxbbwBAQBa0vwPWKLhPf8c4AlsxJseTsGhiU4wvYSa9+JZcGxaUgcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBBAQg8AAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAA",
+      "bytes": 270,
+      "virtualFieldByteOffset": 245,
+      "expectedVirtualQuoteReserves": "1208925819614629174706176",
+      "expectedType": "i128",
+      "note": "layout decoding only; observer must independently validate owner/discriminator/addresses"
+    },
+    {
+      "id": "pool-i128--1208925819614629174706176",
+      "accountDataBase64": "8ZptBBGxbbwBAQBa0vwPWKLhPf8c4AlsxJseTsGhiU4wvYSa9+JZcGxaUgcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBBAQg8AAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAAAAAAAAAAAAAAAA////////AAAAAAAAAAAA",
+      "bytes": 270,
+      "virtualFieldByteOffset": 245,
+      "expectedVirtualQuoteReserves": "-1208925819614629174706176",
+      "expectedType": "i128",
+      "note": "layout decoding only; observer must independently validate owner/discriminator/addresses"
+    }
+  ],
+  "mintDecodeVectors": [
+    {
+      "mintAddress": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "dataBase64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKByThgJAAAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "expectedSupply": "10000000000000",
+      "expectedDecimals": 6,
+      "extensions": [],
+      "wrongOwnerRejected": true,
+      "note": "bare mint layout; no transfer-fee or hook extensions"
+    },
+    {
+      "mintAddress": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "dataBase64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKByThgJAAAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "expectedSupply": "10000000000000",
+      "expectedDecimals": 6,
+      "extensions": [],
+      "wrongOwnerRejected": true,
+      "note": "bare mint layout; no transfer-fee or hook extensions"
+    }
+  ]
+}

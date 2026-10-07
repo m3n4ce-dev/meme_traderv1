@@ -11,8 +11,11 @@ could lose cash while reporting zero, and the daily stop didn't see the loss):
   (the round-trip fee assumption, debited from cash as well), booked on the day the retry runs out - the day it's
   recognized, not the day the exit was due. Its tokens stay as quarantined inventory: a paper write-off isn't proof
   they're gone, so the same coin can't be entered again in the window;
+- an exit due at HOLD_S that fails and is filled by a later retry (`exit_at`, within RETRY_S) holds its cash until
+  that fill, is booked on the fill's day at the fill's return, and is a failed exit meanwhile (a ninth review: the
+  simulation had credited it at the intended time, inside the outage that delayed it);
 - the daily RISK budget (DAY_STOP) counts measured losses and impairments on their day, plus a reservation for every
-  exit that has already failed and is still being retried;
+  open position whose due exit has passed without a fill (being retried);
 - `measured_daily` is a diagnostic (measured trades only), never the primary statistic.
 
 Time is continuous (seconds from the window's start); UTC days are `int(t // 86400)`. A position:
@@ -61,7 +64,7 @@ class Portfolio:
 
     def settle(self, t: float) -> None:
         """Every measured exit and every impairment due by t, in time order, each booked on the UTC day it happens."""
-        due = sorted((p for p in self.open if p["free_t"] <= t), key=lambda p: p["free_t"])
+        due = sorted((p for p in self.open if p["free_t"] <= t), key=lambda p: (p["free_t"], p["n"]))
         for p in due:
             self.open.remove(p)
             if p["ret"] is None:                                 # the retries ran out: zero recovery plus its fees
@@ -75,22 +78,24 @@ class Portfolio:
                 self.quarantined.add(p["coin"])
                 self._log("impaired", p["free_t"], coin=p["coin"], pnl=round(-loss, 6))
                 continue
-            day = int(p["exit_t"] // 86400)
+            day = int(p["free_t"] // 86400)              # the day it filled: due, or a later retry
             pnl = self.size * p["ret"]
             self.cash += self.size + pnl
             self.economic[day] += pnl
             self.measured_pnl[day] += pnl
             self.lost[day] += max(-pnl, 0.0)
-            self._log("exit", p["exit_t"], coin=p["coin"], pnl=round(pnl, 6))
+            self._log("exit", p["free_t"], coin=p["coin"], pnl=round(pnl, 6), late_s=round(p["free_t"] - p["exit_t"], 3))
 
     def risk_used(self, t: float) -> float:
-        """The UTC day's risk losses at t, with a reservation for each failed exit still being retried."""
+        """The UTC day's risk losses at t, with a reservation for each position whose due exit has passed without a
+        fill - from the first failed attempt until it fills or is impaired."""
         day = int(t // 86400)
-        reserved = sum(self.size * (1.0 + p["fee"]) for p in self.open if p["ret"] is None and p["exit_t"] <= t)
+        reserved = sum(self.size * (1.0 + p["fee"]) for p in self.open if p["exit_t"] <= t)
         return self.lost[day] + reserved
 
-    def try_enter(self, signal_t: float, coin, ret: float | None, fee: float = FEE) -> str:
-        """A signal at signal_t on `coin` whose trade would return `ret` (net), or None if its exit can't be
+    def try_enter(self, signal_t: float, coin, ret: float | None, fee: float = FEE, exit_at: float | None = None) -> str:
+        """A signal at signal_t on `coin` whose trade would return `ret` (net) when its exit fills at `exit_at` (None:
+        on time, HOLD_S after entering; later: a retry within RETRY_S filled it), or ret None if no exit can be
         measured. Returns "" if entered, else why not."""
         t = signal_t + DELAY_S
         self.settle(t)
@@ -102,14 +107,19 @@ class Portfolio:
         if why:
             self._log("skip", t, coin=coin, why=why)
             return why
+        exit_t = t + HOLD_S
+        if ret is not None and exit_at is not None and not exit_t <= exit_at <= exit_t + RETRY_S:
+            raise ValueError(f"exit_at {exit_at} outside the exit's retry window [{exit_t}, {exit_t + RETRY_S}]")
         self.cash -= self.size
         self.attempted += 1
-        exit_t = t + HOLD_S
+        self._n = getattr(self, "_n", 0) + 1
         if ret is None:
-            self.open.append({"coin": coin, "exit_t": exit_t, "free_t": exit_t + RETRY_S, "ret": None, "fee": fee})
+            self.open.append({"coin": coin, "exit_t": exit_t, "free_t": exit_t + RETRY_S, "ret": None, "fee": fee,
+                              "n": self._n})
         else:
             self.measured += 1
-            self.open.append({"coin": coin, "exit_t": exit_t, "free_t": exit_t, "ret": ret, "fee": fee})
+            self.open.append({"coin": coin, "exit_t": exit_t, "free_t": exit_t if exit_at is None else exit_at,
+                              "ret": ret, "fee": fee, "n": self._n})
         self._log("enter", t, coin=coin, measured=ret is not None)
         return ""
 

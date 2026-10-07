@@ -1,0 +1,81 @@
+{
+ "source": "Solana mainnet, getMultipleAccounts at confirmed (api.mainnet-beta.solana.com), 2026-10-07",
+ "note": "public chain data; decoded by meme_trader/sniper/pumpswap.py and checked by hand",
+ "accounts": [
+  {
+   "id": "zero",
+   "address": "Gf7sXMoP8iRw4iiXmJ1nq4vxcRycbGXy5RL8a8LnTd3v",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 454286455,
+   "dataBase64": "8ZptBBGxbbz/AACsMMF1T3BihLnos89yp5TKMAay450Pa891k9yYKdvEtMb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAF4pA87J9+0qNQ41OUaW7yDdB7NDSCk1OPZ5+dYg1CGIQueH4dredc28RV2l2EKVkjk6f5vSsuYtZuN9QhDo1Fpy/07MUb6tdntkozkw8lXjFE0gjTfbcz3fmZ6u+P9waiHk28KEwgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+   "expected": {
+    "bytes": 301,
+    "virtual_quote_reserves": "0",
+    "base_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "quote_mint": "So11111111111111111111111111111111111111112",
+    "undocumented_tail": false,
+    "is_holder_reward": false
+   }
+  },
+  {
+   "id": "tail",
+   "address": "G64RurwsvAxacgdRPBGFRLupzmPLR8wMBfaFwoMKbK6e",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 454286455,
+   "dataBase64": "8ZptBBGxbbz/AAAd46BDLNOuYt+lAW34qsxHeEdTIlSQl0GuwVGwEw5h+NIIAZKfbg3/SvTya4IUuaQ0ByeZ/zmhwr7fM9jBYsfUBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAE7Nao4xtD3hiYBNHxk82MrruHnuGRb6Xr+fFHS/XfYIMvZO8gX0beBhV3wTc4kf9Zf6705xB1o8coFY8ZAWZ9Ldl8f+7SqpZKibqctZy3VLGDY2cpIW85u02unpqym3DcdCmxZ0AMAAOjozhWdS0KyKdFGJgll2f+zvzAtRBuQrz7LxfgGDStmAAAsZAQYBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASN8ZAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+   "expected": {
+    "bytes": 301,
+    "virtual_quote_reserves": "17582810156",
+    "base_mint": "F8shSPpvEtZtAp5avEKBvGZRYf8eiKodutFBoUCmonqH",
+    "quote_mint": "So11111111111111111111111111111111111111112",
+    "undocumented_tail": true,
+    "is_holder_reward": false
+   }
+  },
+  {
+   "id": "positive",
+   "address": "9A2LD9EweMLy9mbgQoYTmrQLW3HEEvfVbxVCo7ThC1q4",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 454286455,
+   "dataBase64": "8ZptBBGxbbz/AADhXhJPEJGMhZmXbX1J0GlgQa+COToK7q8CYUL2SHaqpb36twENAHQcOn7dd5vbH/E/13KEDFRK+LARUjHFOIjBB+ilDhQP2leR9FZqlX/Trj+HPmo0Zv/BPXkRnfqatQpxsvbU7c9735eNOH7iCWMt38LkE5yyVJKTVyWzDOMT2+6NzgR8Vkz7KRoxOnQV3o1S1LPqq/odH85diITips4lKBOEZghuqwfCvOdLmhcCSm5c+2bbjlqXn5JFRlymEcd4rLI19AAAAJRLWv5LeZTUxdR4bT6UEyheYBoIBUhyOwbw3TGPPV9xAAAGuJJBAAAAAAAAAAAAAAAAZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+   "expected": {
+    "bytes": 301,
+    "virtual_quote_reserves": "1100134406",
+    "base_mint": "Dnbnj5R7Z3NWq8rH4QuuoHfBGVtgZtVy9XFTWtxiRZUt",
+    "quote_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+    "undocumented_tail": false,
+    "is_holder_reward": false
+   }
+  },
+  {
+   "id": "short287",
+   "address": "DoPx5TLzWZDkXYfDQw1h9xsW7o5xDj972wCKxUsD3fNU",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 454286455,
+   "dataBase64": "8ZptBBGxbbz9AAD9Wb2VzQbg57WaXBz6WFBb5v7EvqFrHlBMnbebCrxU+AabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAAB0MWAzqet9W4tFm8lPfVwn0gxT/UGwB7JOvai3rXm8i/AgTREZxkBxRXCD7KPh46cBtxJwv4bRgLthch6zkhlUNdYpZ8Q40Q6uK7+Z+iqNU5v9Bp0XdmGmiLWDhJUvpkJ7uxPuZheM3+6JhLc2SbuEFH6sf4Nj3I9PJMSGkM2T3BkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+   "expected": {
+    "bytes": 287,
+    "virtual_quote_reserves": "0",
+    "base_mint": "So11111111111111111111111111111111111111112",
+    "quote_mint": "F3xUVHKuokmbqShTSUame1DpuRPHCP14qa73Kxe9pump",
+    "undocumented_tail": false,
+    "is_holder_reward": false
+   }
+  },
+  {
+   "id": "negative",
+   "address": "8LjfG2dAMgyTQmvKKT3VtwLgfxJc79RwkcLGuq19LSfC",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 454286549,
+   "dataBase64": "8ZptBBGxbbz/AABGUmlwKpDNCmK59a49/ZSOa6h1PkthPOI1WznIHMSAYxzyDbDNjhqri38WjrEE5VIS5ZfJcnBFX50RX0bfmQcvBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGV50UWwlwzjaJ0w73wactVCgX2KJA2b+TFXTCyiducCWVBY3rerroTemrs6ndqQuxcZ4S7oSb6L6DkUl96m0+byHQJQkIE++fQtB75wh2r3tu/Hh1SOSwu+l0BFN2Q6Sia7Wt10AMAACumNKoRkeaqy4hS1WTTMAIzz02rABHj1K1KPscNRLlnAACNwPj/////////////////AAAAAAAAAAAAAAAAAAAAAAAAcz8HAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+   "expected": {
+    "bytes": 301,
+    "virtual_quote_reserves": "-474995",
+    "base_mint": "2wzVMXhLypmP92mXNCq4fuFcd9TCC972AbMfuiH3pump",
+    "quote_mint": "So11111111111111111111111111111111111111112",
+    "undocumented_tail": true,
+    "is_holder_reward": false
+   }
+  }
+ ]
+}
