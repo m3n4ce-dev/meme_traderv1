@@ -162,7 +162,7 @@ def code_revision() -> str:
 
 def manifest(files: list | None = None) -> dict:
     """What a result rests on beyond its settings (a second review, 2026-10-06): the code (commit, and the exact
-    uncommitted patch by its hash, saved beside the research log), the installed packages, the model files, and each
+    uncommitted patch by its hash, saved in data/research/patches), the installed packages, the model files, and each
     input recording (size, and a hash of its first and last MB: cheap, and it changes if the file does)."""
     import hashlib
     from importlib import metadata
@@ -179,7 +179,7 @@ def manifest(files: list | None = None) -> dict:
         h = hashlib.sha256(diff.encode()).hexdigest()[:16]
         out["patch"] = h
         try:
-            d = ROOT / "research" / "patches"
+            d = ROOT / "data" / "research" / "patches"            # data/: never committed
             d.mkdir(parents=True, exist_ok=True)
             (d / f"{h}.patch").write_text(diff)
         except OSError:
@@ -215,7 +215,7 @@ def file_digest(f: Path) -> str:
 
     st = f.stat()
     key = f"{f.resolve()}|{st.st_size}|{st.st_mtime_ns}"
-    cache_path = ROOT / "research" / "digests.json"
+    cache_path = ROOT / "data" / "research" / "digests.json"
     try:
         cache = json.loads(cache_path.read_text())
     except (OSError, ValueError):

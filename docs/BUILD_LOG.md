@@ -84,7 +84,7 @@ Models carry the version they were trained on, and a model from another version 
 - **Labelled exploratory:** 18 correlated variants. A confirmatory test will freeze one rule, delay, exit and order size, with a start date, and won't be edited once running.
 
 **Research records:**
-- **Freezes** save a manifest: commit, the hash of any uncommitted patch (saved under `research/patches/`), installed packages, the model files, and each input recording's size and an end hash.
+- **Freezes** save a manifest: commit, the hash of any uncommitted patch (saved under `data/research/patches/`), installed packages, the model files, and each input recording's size and an end hash.
 - **A final verdict** on code that changed since the freeze reads "INVALID (code changed since the freeze)", with the result shown only as exploratory. When the freeze didn't record its code (graduation-v1), it says so.
 - **The edge check** groups days in UTC everywhere, and gives no "promising" or "real" verdict with fewer than 5 UTC days of trades.
 
