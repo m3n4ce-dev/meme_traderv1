@@ -3,6 +3,7 @@ is flagged, rebuilt provisionally with the later slot's version, and made final 
 recorded Reconcile event), so replays repair it the same way."""
 import asyncio
 import copy
+import json
 from types import SimpleNamespace as NS
 
 import pytest
@@ -127,15 +128,15 @@ def test_a_replay_with_the_recorded_answer_repairs_the_same_way():
 
 
 def test_the_engine_asks_the_chain_in_batches(monkeypatch):
-    from meme_trader import wallet
     e = engine()
     e.tokens[M] = coin()
     seen = []
 
-    def rpc(method, params):
-        seen.append((method, params[0]))
-        return {"value": [{"slot": 101, "confirmationStatus": "confirmed"}, None]}
-    monkeypatch.setattr(wallet, "rpc", rpc)
+    def lookup(url, sigs):
+        seen.append(("getSignatureStatuses", sigs))
+        return [{"slot": 101, "confirmationStatus": "confirmed"}, None]
+    monkeypatch.setattr(Engine, "_status_lookup", staticmethod(lookup))
+    monkeypatch.setenv("SOLANA_WS_URL", "wss://feed.example/?api_key=SECRET")
 
     async def go():
         await e.handle(Launch(M, 0, "DEV"))
@@ -146,4 +147,7 @@ def test_the_engine_asks_the_chain_in_batches(monkeypatch):
     asyncio.run(go())
     assert seen and seen[0][0] == "getSignatureStatuses" and set(seen[0][1]) == {"S", "X"}
     assert e.tokens[M].conflicts[("S", 0)]["status"] == "resolved" and ("X", 0) in e.fork_pending
-    assert NS(**e.tokens[M].conflicts[("S", 0)]["evidence"]).source.startswith("getSignatureStatuses")
+    ev = NS(**e.tokens[M].conflicts[("S", 0)]["evidence"])
+    assert ev.source == "getSignatureStatuses@feed.example" and "SECRET" not in json.dumps(vars(ev))   # host only
+    assert e._fork_rpc()[0] == "https://feed.example/?api_key=SECRET"            # the feed's own provider, over HTTP
+    assert e.intel_view()["forks"]["conflicts"] == 1 and e.intel_view()["forks"]["replaced"] == 0
