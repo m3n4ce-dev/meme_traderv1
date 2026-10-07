@@ -30,6 +30,7 @@ class SniperFill:
     blockhash: str = ""          # the signed transaction's recent blockhash: proves when it can no longer land
     expired: bool = False        # unknown, with proof it never landed: not in the chain's history and past expiry
     landed: bool = False         # unknown amounts, but the chain shows it landed: keep waiting, never re-send
+    attempts: list | None = None # live: every signed attempt behind this result (sell retries), for the outbox
     timing: dict | None = None   # live: seconds to build / send / confirm, landing slot and block time
 
     @property
@@ -80,6 +81,7 @@ class LiveExecutor:
     URL = "https://pumpportal.fun/api/trade-local"
 
     def __init__(self, ex, wallet):
+        self.outbox = None                           # the engine's Outbox (live): signed orders on disk before sending
         self.ex = ex
         self.wallet = wallet
 
@@ -145,6 +147,14 @@ class LiveExecutor:
             timing["build_s"] = round(time.time() - t0, 3)
         except Exception as e:                       # nothing was sent
             return SniperFill(False, error=f"{type(e).__name__}: {e}"[:240])
+        if self.outbox is not None:                  # durable BEFORE it can reach the network, or it isn't sent
+            from .outbox import ORDER_INTENT
+            try:
+                self.outbox.prepare(sig, bh, mint, action, {**(ORDER_INTENT.get() or {}), "amount": amount,
+                                                            "in_sol": in_sol, "slippage": slippage})
+            except Exception as e:
+                return SniperFill(False, signature=sig, attempts=[sig],
+                                  error=f"couldn't record the signed order before sending ({type(e).__name__}): not sent")
         try:
             w.send(raw)
             timing["sent"] = time.time()
@@ -198,7 +208,11 @@ class LiveExecutor:
         return 0.0
 
     async def buy(self, mint: str, curve: Curve, sol: float, priority: float | None = None) -> SniperFill:
-        return await asyncio.to_thread(self._attempt, mint, "buy", sol, True, self.ex.slippage_pct, 0.0, priority)
+        def run() -> SniperFill:
+            fill = self._attempt(mint, "buy", sol, True, self.ex.slippage_pct, 0.0, priority)
+            fill.attempts = [fill.signature] if fill.signature else []
+            return fill
+        return await asyncio.to_thread(run)
 
     async def sell(self, mint: str, curve: Curve, tokens: float, priority: float | None = None,
                    steps: list | None = None) -> SniperFill:
@@ -208,12 +222,15 @@ class LiveExecutor:
         def run() -> SniperFill:
             fill = SniperFill(False, error="no attempt")
             lost = 0.0
+            sigs: list[str] = []
             slips = list(steps or self.ex.sell_slippage_steps)
             prios = [priority] * len(slips) if priority is not None else \
                 list(self.ex.sell_priority_fee_steps) + [self.ex.sell_priority_fee_steps[-1]] * len(slips)
             for slip, prio in zip(slips, prios):     # each retry: more slippage room AND more priority
                 fill = self._attempt(mint, "sell", round(tokens, 6), False, slip, estimate, prio)
                 lost += fill.fees_lost
+                if fill.signature:
+                    sigs.append(fill.signature)
                 if fill.unknown:                     # a fresh sell now could sell twice: stop and resolve
                     break
                 if fill.ok:
@@ -224,6 +241,7 @@ class LiveExecutor:
                         pass
                     break
             fill.fees_lost = lost
+            fill.attempts = sigs
             return fill
         return await asyncio.to_thread(run)
 

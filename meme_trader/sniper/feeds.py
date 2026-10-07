@@ -991,7 +991,14 @@ class FileFeed(Feed):
         import zlib
 
         for p in self.paths:
-            f = gzip.open(p, "rt") if p.suffix == ".gz" else p.open()
+            try:
+                f = gzip.open(p, "rt") if p.suffix == ".gz" else p.open()
+            except FileNotFoundError:
+                # the recorder compresses a finished day (writes the .gz, then removes the .jsonl): a replay queued
+                # with the plain path reads the archive. Neither there: fail loudly, never skip a day
+                if p.suffix != ".jsonl" or not p.with_name(p.name + ".gz").exists():
+                    raise
+                f = gzip.open(p.with_name(p.name + ".gz"), "rt")
             try:
                 while True:
                     try:
