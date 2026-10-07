@@ -248,6 +248,14 @@ class QuoteBook:
         self.lock = threading.Lock()                     # the event loop requests while a worker thread runs jobs
         self._view, self._view_at = None, 0.0
 
+    @classmethod
+    def read_only(cls, path: Path) -> "QuoteBook":
+        """The book opened read-only, for exports (no quoter: nothing is run)."""
+        b = cls.__new__(cls)
+        b.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None, check_same_thread=False)
+        b.quoter, b.clock, b.lock, b._view, b._view_at = None, time.time, threading.Lock(), None, 0.0
+        return b
+
     def request(self, key: str, kind: str, pool: str, side: str, amount: int, due: float, deadline: float,
                 meta: dict | None = None) -> bool:
         """A new job (an existing key is left alone: requests are idempotent across restarts)."""
