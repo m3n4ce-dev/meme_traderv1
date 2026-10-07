@@ -20,12 +20,12 @@ could lose cash while reporting zero, and the daily stop didn't see the loss):
 
 The risk POLICY (an eleventh review: the registered stop is an entry-halt trigger, not a maximum daily loss - four
 fresh positions can all be admitted before any loss is realized, then lose 1.0 SOL past a 0.5 threshold). `risk`:
-- "gross" (the registration's, the default): entries halt once the day's gross losses and impairments, plus a
-  reservation for each overdue exit, reach DAY_STOP;
+- "gross" (the original registration's, and `Portfolio()`'s default): entries halt once the day's gross losses and
+  impairments, plus a reservation for each overdue exit, reach DAY_STOP;
 - "hard": a strict worst-case budget - a position is admitted only if the day's net economic loss so far, plus the
   total loss (stake + fees) of EVERY open position, plus this one's, stays within DAY_STOP: the day can't lose more;
 - "net+cap": entries halt once the day's NET economic loss (plus overdue reservations) reaches DAY_STOP, or its gross
-  losses reach an outer cap of OUTER_CAP x DAY_STOP (frozen here; any other budget is the owner's to choose).
+  losses reach an outer cap of OUTER_CAP x DAY_STOP (frozen here) - T9-E1's policy since 2026-10-07 (REGISTERED_RISK).
 
 Time is continuous (seconds from the window's start); UTC days are `int(t // 86400)`. A position:
 - enters at its signal time + DELAY_S, debiting SIZE from cash, if: it can close inside the window (no entry later
@@ -41,6 +41,11 @@ from collections import defaultdict
 
 BANK, SIZE, MAX_OPEN, DAY_STOP = 9.0, 0.25, 4, 0.5
 RISK_POLICIES = ("gross", "hard", "net+cap")
+# T9-E1's policy: the owner chose, on 2026-10-07, the rule with the best returns in power v6 - "net+cap" (the highest
+# total and pass rate in every scenario with an edge; with no edge it trades more and loses more: -5.7 against -3.3
+# SOL over 90 days at A2). `Portfolio()`'s default stays "gross" so the earlier reviews' contracts keep their meaning;
+# the runner and the power analysis use REGISTERED_RISK.
+REGISTERED_RISK = "net+cap"
 OUTER_CAP = 2.0                      # net+cap's outer gross-loss cap, in DAY_STOPs
 HOLD_S, DELAY_S, RETRY_S = 3600, 60, 900
 FEE = 0.012                          # round trip, when a scenario doesn't model fees itself
