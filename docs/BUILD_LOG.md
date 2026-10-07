@@ -36,7 +36,7 @@ A running record of decisions, research, parameters and status. Newest entries a
    - **The registry for coins whose history is gone** stores and compares the decoded content too, with an identity check.
    - **A status-only answer keeps bot buys blocked** while the transaction is fetched again, for a bounded time. Afterwards the coin stays blocked and the uncertainty is shown in HQ. Manual trading is never blocked.
    - **Complete logs:** a fetched transaction's logs must close their program stack. The live feed counts unclosed ones (`feed_unclosed_logs`).
-   - **The lifecycle log:** every conflict's creation and terminal state are logged (`data/fork_conflicts.jsonl`). That explains, for example, the 71% of conflicts with no lookup: their coins weren't tracked.
+   - **The lifecycle log:** every conflict's creation and terminal state are logged (`data/fork_conflicts.jsonl`). In its first minutes, 22 conflicts were created on tracked coins: 21 resolved by decoded transaction, 1 pending.
 4. **The wallet ledger** (R9-6/7).
    - **Pruning:** retracted events (tombstones) keep their identity through pruning, and pruned or folded identities are remembered, so a late reinstatement is marked unknown and never counted again.
    - **Unknown order:** an arrival older than a bag's fold checkpoint, and two transactions in one slot with a sell (their order isn't proven), mark the bag unknown.
@@ -112,7 +112,7 @@ A running record of decisions, research, parameters and status. Newest entries a
    - **The chain keeps the second copy.** A deterministic sample of 200 was fetched at `finalized` from the paid provider and, independently, from the public endpoint. All 200 show the transaction in slot N+1 with exactly the second copy's contents, and both endpoints agree. That puts a mismatch rate above about 1.9% out (95% bound).
    - **Single deliveries are right:** 200 events that arrived once all match the chain.
    - **This supersedes #66's "7 of 9 matched".** Those 9 can't be re-identified, because they predate event indexes.
-   - **About 71% of the differing events weren't looked up.** Their coins weren't tracked, so nothing depended on them.
+   - **About 71% of the differing events have no recorded answer.** *(Corrected in #73: this first said their coins weren't tracked. Checked against the recording, all were young, tracked coins.)* All 3,944 happened before 05:23 UTC, when fork lookups started with the sixth review's deploy. After that, 1,249 of 1,249 were answered.
    - **For the owner:** a redacted report for RPC Fast is in `data/research/PROVIDER_REPORT_rpcfast_2026-10-07.md`. At `confirmed`, these notifications look like `processed`.
 3. **Followed wallets: corrections are replayed, not added** (`copytrade.LeaderBook`).
    - **What was wrong:** correcting a buy after a later sell changed the inventory by the difference, but not the sell's cost share, the realized profit, the closed bag or the win. A reinstated event never reached the wallet at all.
