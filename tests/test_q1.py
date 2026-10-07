@@ -104,7 +104,7 @@ def test_a_short_guard_extends_the_window_a_day_at_a_time_and_pending_jobs_hold_
 
 
 def test_the_window_and_targets_are_the_frozen_ones():
-    assert (q1.START_DAY, q1.DAYS, q1.MAX_DAYS) == ("2026-10-08", 14, 28)
+    assert (q1.START_DAY, q1.DAYS, q1.MAX_DAYS) == ("2026-10-09", 14, 28)
     assert q1.TARGETS == {"eventual": 0.95, "first_try": 0.90}
     assert (q1.MIN_EXITS_PER_CELL, q1.MIN_POOLS, q1.MIN_POOL_DAYS) == (200, 30, 100)
 

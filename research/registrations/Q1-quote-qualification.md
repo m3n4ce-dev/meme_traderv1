@@ -1,12 +1,23 @@
 # Q1: qualifying the live price watcher (FROZEN 2026-10-07, before its window; the owner's approval)
 
+> **Amendment 1 (2026-10-07, ~23:20 UTC, before the window opened; the owner had delegated changes to the builder).**
+> The window now runs **2026-10-09 00:00 through 2026-10-22 23:59 UTC** (same length and rules). A twelfth review
+> found the observer under test was wrong in two ways that decide what this window measures:
+> - pump.fun has published a newer Pool layout (287 bytes: `protocol_fees`, `creator_fees` at 271 and 279), so most of
+>   the "undocumented pool bytes" are documented;
+> - sells were checked against the whole quote vault, when the spendable part is the vault minus those fee buckets.
+>
+> The window must run entirely on the fixed observer (record v3), which is deployed before the new start. If it isn't,
+> the start moves mechanically to the first complete UTC day after that deploy. No data from the original window
+> existed when this was decided: it hadn't opened.
+
 **What it decides:** whether the price watcher's measured availability may replace the planning envelope (A1–A5) in T9-E1's power. It's an **engineering** qualification, not a trading test and not a trading approval. Nothing here estimates transaction landing, failed-transaction fees or any edge.
 
 **Where it comes from:** the eleventh review's proposal. The owner approved it on 2026-10-07 and asked the builder to change it where needed. The changes are marked **(change)**. The report is code, frozen with this document: `meme_trader/sniper/q1.py`, run with `python -m meme_trader.sniper q1-report`, tested in `tests/test_q1.py`.
 
 ## The window
 
-- **The days:** 14 complete UTC days, **2026-10-08 00:00 through 2026-10-21 23:59 UTC**. Jobs are assigned by their due time.
+- **The days:** 14 complete UTC days, **2026-10-09 00:00 through 2026-10-22 23:59 UTC** (amendment 1). Jobs are assigned by their due time.
 - **The start (change):** the first complete day after the wallet recorder moved to the paid stream (2026-10-07, about 9 s faster), so the pipeline is the same throughout.
 - **No exclusions:** no day is excluded, and no restart is chosen for a better start. Deploys and restarts happen; every job in the window counts, and one missed during downtime is a failure.
 - **Extension:** if a guard is short when the window ends, it extends a whole UTC day at a time, to at most 28 days. Still short at 28: **insufficient**, neither pass nor fail.
