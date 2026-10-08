@@ -15,7 +15,7 @@
 
 **Where it comes from:** the eleventh review's proposal. The owner approved it on 2026-10-07 and asked the builder to change it where needed. The changes are marked **(change)**. The report is code, frozen with this document: `meme_trader/sniper/q1.py`, run with `python -m meme_trader.sniper q1-report`, tested in `tests/test_q1.py`.
 
-> **Amendment 2 (2026-10-08, ~03:00 UTC, before the window opened; awaiting the owner's confirmation). Q1 gives no formal PASS/FAIL.**
+> **Amendment 2 (2026-10-08, ~01:50 UTC, before the window opened; awaiting the owner's confirmation). Q1 gives no formal PASS/FAIL.**
 > A thirteenth review showed the confidence bound was wrong for this data:
 > - the pool-day bootstrap treats pools as independent, but a provider outage hits every pool at once;
 > - an all-success sample bootstraps to a bound of 1.0.
