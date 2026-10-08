@@ -24,7 +24,59 @@
 - **Signed bytes are checked** against their recorded signature and blockhash (`check_tx_association`). Real orders must use `sign(..., verify=True)`.
 - **No invariant is weakened for fixtures:** the identity columns are `NOT NULL` again, so a bare-SQL event is refused before anything can read it. A database written by another schema version is **quarantined** on open: it must be migrated explicitly.
 
-## Paper shadow v0: built, off by default (the fourteenth review)
+## Paper shadow v1: durable coverage, a checked source, the authority cut (the fifteenth review)
+
+The reviewer showed v0 could become **falsely clean**. Its watermark was the highest line mirrored. A malformed line, a refused event or a divergence lived only in the instance's status, so a restart erased it. A changed or missing source was never reread. v1 changes what is stored, not what the shadow may do: it is still non-authoritative, paper only, and acts on nothing.
+
+**Coverage lives in storage, one transaction per line.** Each journal line's event carries:
+- its byte offset and length;
+- the sha256 of its bytes, and a chain hash over every line before it;
+- the shadow's cash after it;
+- its **state**:
+  - `validated`: mirrored, and the cash equals the authority's;
+  - `divergent`: mirrored, and the cash differs;
+  - `refused`: the ledger refused it, and a marker keeps the row and the cause;
+  - `malformed` or `oversize`: a hole, with its raw bytes kept (the first 4 KiB of an oversize one);
+  - `flagged`: mirrored, but the authority recorded a problem itself (a restore gap).
+
+Every open re-derives three things: `committed`, `validated_through` (the longest fully validated prefix) and `unresolved`. Before any of them is trusted, the ledger's content-level `startup_check()` runs, and the coverage records must be contiguous, with an unbroken chain. A v0 store fails that check and is not trusted.
+
+**The source is checked, not trusted:**
+- its device and inode are a recorded **epoch**;
+- a file shorter than what was consumed is truncation;
+- the last consumed line is re-hashed every pass;
+- the whole consumed prefix is re-hashed, streamed, at each instance's first pass and every 10 minutes. A same-length edit anywhere is found within that interval, and at the tail at once.
+
+A replaced file whose consumed prefix is byte-identical is a new epoch. Anything else is a persisted **source fault**: mirroring stops until a recorded `rebuild`, which archives the old store and never deletes it. A missing journal is `missing`, or `not_ready` before anything was mirrored, and never an empty clean pass.
+
+**Bounded.** A pass streams from the consumed offset, at most 8 MiB and 5,000 lines. A line over 64 KiB is an oversize hole, hashed in 1 MiB chunks. A partial last line waits, and one still partial after 2 minutes is reported as torn.
+
+**The authority cut.** The engine reads its in-memory cash and the journal's size together on its event loop. The shadow compares its own cash at exactly that line. The journal can be internally consistent while the authority moved without it (an append that failed). A difference is persisted and stays unresolved. While rows are still pending after a failed append, the shadow reports the journal as behind and records nothing.
+
+**Repairs are records:**
+- `resolve(<line> | "authority:<line>", note)` marks one reviewed item;
+- `rebuild(note)` archives the store and builds a fresh one.
+
+Both need a note, and both survive restarts. An incremental replay and a full rebuild give the same books **and** the same per-line states.
+
+**The authority's own journal** (engine.py), from the crash matrix:
+- a row that can't be written (a full disk) stays pending and goes out late, in order, once;
+- a row leaves the queue only when all its bytes are out, so a retry never repeats a row;
+- a torn last line is terminated before anything else is written, and at every restore, so it stays its own visible hole and never fuses with the next row.
+
+At a paper restore, the restored cash is compared with the journal's last row. A crash between the append and the state save leaves the state *behind* its journal. A failed append followed by a save leaves it *ahead*. Either way the difference is recorded as a `restore_gap` row carrying both numbers, never silently adopted.
+
+**The crash matrix** (`research/shadow_crash_matrix.py`, run by `tests/test_account_journal_crash.py`) runs the real paper engine in child processes. It injects faults at these points:
+- **SIGKILL:** before the append, mid-append, after the append and before the save, mid-save, and in the shadow's own commit;
+- **full disk:** an append that recovers, one followed by a kill, and the kernel's real file-size limit;
+- **the source:** atomic replacement, a same-length edit, deletion;
+- **concurrency:** a writer splitting rows while another process syncs.
+
+Each case restarts and compares the restored authority, the journal, the shadow's books, the epochs and the unresolved coverage against a declared expectation. All 13 cases match.
+
+**Still to build:** the trade-log mirror (inventory, fills, per-signature fees, a joined cash/trade cut), and an external heartbeat. Promotion still needs the owner's approval of an all-writer cutover.
+
+## Paper shadow v0: built, off by default (the fourteenth review; its watermark and status model are superseded by v1)
 
 `meme_trader/sniper/shadow_ledger.py`, enabled by `sniper.ledger.shadow` (default `false`, paper only), tested in `tests/test_shadow_ledger.py`.
 
