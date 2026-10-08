@@ -24,7 +24,32 @@
 - **Signed bytes are checked** against their recorded signature and blockhash (`check_tx_association`). Real orders must use `sign(..., verify=True)`.
 - **No invariant is weakened for fixtures:** the identity columns are `NOT NULL` again, so a bare-SQL event is refused before anything can read it. A database written by another schema version is **quarantined** on open: it must be migrated explicitly.
 
-## Paper shadow: the next step (design only; no code wired yet)
+## Paper shadow v0: built, off by default (the fourteenth review)
+
+`meme_trader/sniper/shadow_ledger.py`, enabled by `sniper.ledger.shadow` (default `false`, paper only), tested in `tests/test_shadow_ledger.py`.
+
+**What it mirrors.** Every 30 s, off the event loop, it mirrors each complete line of the account journal (`data/account-paper.jsonl`) into its own ledger file (`data/shadow-ledger-paper.db`):
+- **the key:** each line is keyed by its line number. The journal is append-only, so the key is stable across restarts.
+- **the watermark:** read back from the shadow's own events. A crash before the mirror ran, or after its commit and before anything was acknowledged, is caught up by re-reading the journal. Replays are no-ops.
+- **a partial last line** waits for the next pass.
+
+**The check.** After each line, the shadow's cash is compared with that line's `cash_after`: the same watermark on both sides, within 10 lamports of float rounding.
+
+**Scope.** Cash and rent are mirrored. The journal carries no token amounts, so inventory needs the trade log (next).
+
+**What can go wrong, and what happens.** Refusals (a negative holding, a double-booked fill), divergences, a locked database and a quarantined file are all **status**, shown in the intel view, never actions.
+- **No capability to act:** it imports nothing that can trade, sign or send (a test checks its imports).
+- **Rebuilding:** deleting its file and rebuilding gives the same books, and the authority's journal is byte-identical throughout.
+- **Durability:** WAL with `synchronous=FULL`, durable against a process crash; a power loss is only as safe as the disk's flush.
+
+**Still to build:**
+- the trade-log mirror (inventory, fills, per-signature fees);
+- crash injection at the real adapter boundary under load;
+- the disk-full case.
+
+Promotion still needs the owner's approval of an all-writer cutover and a restart proof.
+
+## Paper shadow: the design (thirteenth review)
 
 The reviewer approved non-authoritative shadow engineering, not action authority. The plan:
 

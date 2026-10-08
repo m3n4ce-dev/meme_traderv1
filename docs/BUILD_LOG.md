@@ -4,6 +4,69 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-08 — Entry #80: The fourteenth review: legacy schedule provenance, an export check that sees the raw tables, transport observations, the outage-profile recipe, and the paper shadow ledger
+
+**Source:** a fourteenth external review (GPT 6.1 Sol, revision b6c2b81).
+- **The reviewer's view:** the descriptive Q1 is the right move, and two integrity gaps remained.
+- **Its 7 new properties:** 4 failed before, and **all 7 pass now.**
+- **Its 9 round-13 properties** pass, and the earlier inventory holds.
+- **Suite:** 1,140 passed.
+
+1. **Legacy schedule provenance** (R14-A, `quotes.py` book version 3).
+   - **The gap:** the old writer could overwrite a job's scheduled time with a retry, then finish the job as missed without counting the try (tries = 1), and version 2's migration missed that path.
+   - **The fix:** version 3 marks such a job's time unknown, decided by evidence. A missed job's last attempt written by current code records `next_attempt_at`; one without it is legacy. Raw times are never rewritten.
+   - **Reading an unmigrated book:** read-only consumers (the export, Q1) now call every time **unknown**: a missing provenance column isn't proof.
+   - **Q1 counts unknown times on their own** and never places them in a window.
+2. **An export check that sees the raw tables** (R14-B).
+   - **The gap:** attempts were inner-joined to their jobs, so an orphan vanished before the check could count it.
+   - **The fix:** a LEFT join keeps and flags orphans. `QuoteBook.export()` reads jobs, attempts and the check in **one transaction** and cross-foots:
+     - raw against exported attempts;
+     - orphans and duplicates;
+     - each job's tries against its attempt numbers (1..n);
+     - pending against finished zero-attempt jobs.
+
+     An unclean check is a package finding.
+3. **What the outage numbers are** (the measurement finding).
+   - **Renamed:** the spans of unavailable jobs are now **eventual quote-failure spans**. They're sampled at scheduled times, recovered interruptions don't appear, and a one-job span's 0 minutes isn't a 0-minute outage.
+   - **The provider is now observed attempt by attempt** (`transport_observations`): each run of transport failures (`timeout`, `rpc_error`, `slow_response`, `stale_state`) gets a censored bracket:
+     - observed first to last failure (the minimum);
+     - within the last success before and the first after (the maximum);
+     - left or right censoring flagged;
+     - 10-minute gaps with no attempts listed as unobserved, never up.
+   - **The recipe, fixed before the window opens:** Q1 amendment 3 pre-specifies how any outage profile will be fitted. With fewer than 10 uncensored runs there's no fitted law, only a conservative envelope. Otherwise the longer-tailed of an exponential and a log-normal fit, at the upper bound. Unobserved time is never filled. The profile is added beside A1–A5, never replacing them.
+   - **Cleanup:** the registration's superseded "PASS" and "replace A1–A5" wording is marked.
+4. **The calibration, version 2:**
+   - stationary and initially-down starts (version 1 always started up);
+   - a zero-outage control;
+   - 28-day windows beside 14-day ones;
+   - the as-run revision and environment recorded.
+
+   **Results** (`data/research/q1_calibration_v2.{json,out}`, 400 windows per scenario, 92 scenarios). The run started at `63a218d`. Its record shows the end-of-run revision, `826ebe2` plus uncommitted docs, because the script took provenance at the end. The two files it executes are byte-identical at both, and their recorded hashes match. The script now records provenance at the start.
+   - **The controls, with no outages:**
+     - with 3% transient errors (true eventual 100%, first try 97%), every block gate fails at 14 and 28 days;
+     - with none, the 1-hour and 3-hour gates pass, the 6-hour gate passes only at 28 days (the reviewer's 97.36%), and the 24-hour gate never does.
+   - **The worst false passes** (true eventual availability below 95%):
+
+     | Window | Pool-day bootstrap | 1-hour blocks | 3-hour blocks | 6-hour blocks | 24-hour blocks |
+     |---|---|---|---|---|---|
+     | 14 days | 43.8% | 40.5% | 40.3% | 0% | 0% |
+     | 28 days | 33.3% | 33.5% | 29.5% | 23.0% | 0% |
+
+     The worst cases are day-long outages at 6% down (true ~94%).
+   - **The 6-hour gate at 28 days** gains power but passes 16–23% of windows truly at ~94% under day-scale outages. So the descriptive amendment stands at 28 days too.
+   - **Windows that open inside an outage** pass rarely (at most 10%), as they should.
+
+5. **The paper shadow ledger, v0** (`sniper/shadow_ledger.py`; `sniper.ledger.shadow`, default off, paper only).
+   - **What it does:** mirrors the account journal into the ledger prototype every 30 s. Line numbers are the stable keys, and the watermark is read back from the shadow itself, so a crash is caught up by re-reading the journal and replays are no-ops.
+   - **The check:** the same-watermark cash comparison on every line.
+   - **When something goes wrong:** refusals, divergences, locks and quarantined files are status, never actions.
+   - **No capability to act:** a test checks its imports.
+   - **Tests:** 11.
+   - **Still to build:** inventory, which needs the trade log.
+6. **Q1's state:** the window opens 2026-10-09 00:00 UTC, descriptive. **Amendment 2 still awaits the owner's explicit confirmation.**
+
+---
+
 ## 2026-10-08 — Entry #79: The thirteenth review: the retry clock, export identity, the ledger file gate, executed SDK goldens, and why Q1 can't certify 95% in 14 days
 
 **Source:** a thirteenth external review (GPT 6.1 Sol, revision 63dc235).

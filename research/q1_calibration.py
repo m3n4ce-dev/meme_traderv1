@@ -164,12 +164,33 @@ def grid() -> list[dict]:
     return out
 
 
+def _as_run(root: Path) -> dict:
+    """The revision, any uncommitted diff, the executed files' hashes and the environment, at the START of the run."""
+    import importlib.metadata as md
+    import platform
+    import subprocess
+
+    def git(*args):
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True, timeout=10, cwd=root).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    diff = git("diff", "HEAD") + git("status", "--porcelain")
+    return {"code_revision": git("rev-parse", "HEAD").strip(),
+            "uncommitted_changes_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff.strip() else "",
+            "files_sha256": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                             for p in (Path(__file__).resolve(), root / "meme_trader/sniper/q1.py")},
+            "python": sys.version.split()[0], "numpy": md.version("numpy"), "platform": platform.platform()}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--windows", type=int, default=400)
     ap.add_argument("--procs", type=int, default=1)
     ap.add_argument("--json", default="")
     a = ap.parse_args(argv)
+    root = Path(__file__).resolve().parents[1]
+    as_run = _as_run(root)                               # taken BEFORE the run: what ran, not what's checked out after
     jobs_ = [(i, sc, a.windows) for i, sc in enumerate(grid())]
     if a.procs > 1:
         from multiprocessing import Pool
@@ -182,22 +203,8 @@ def main(argv=None) -> int:
         print(f"{r['days']}d {r['start'][:4]} {m:12} u {r['u']:.2f} eps {r['eps']:.2f}: true eventual {r['true_eventual']:.3f} first {r['true_first_try']:.3f}"
               f" | " + " ".join(f"{g} {v:.2f}" for g, v in r["pass_rate"].items()), flush=True)
     if a.json:
-        root = Path(__file__).resolve().parents[1]
-        import importlib.metadata as md
-        import platform
-        import subprocess
-
-        def git(*args):
-            try:
-                return subprocess.run(["git", *args], capture_output=True, text=True, timeout=10, cwd=root).stdout
-            except (OSError, subprocess.SubprocessError):
-                return ""
-        diff = git("diff", "HEAD") + git("status", "--porcelain")
         doc = {"what": __doc__.split("\n\n")[0], "version": 2, "seed": SEED + 2, "windows_per_scenario": a.windows,
-               "as_run": {"code_revision": git("rev-parse", "HEAD").strip(),
-                          "uncommitted_changes_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff.strip() else "",
-                          "python": sys.version.split()[0], "numpy": md.version("numpy"),
-                          "platform": platform.platform()},
+               "as_run": as_run,
                "files_sha256": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in (Path(__file__).resolve(), root / "meme_trader/sniper/q1.py")},
                "targets": q1.TARGETS, "rows": rows}
