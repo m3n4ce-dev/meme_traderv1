@@ -23,6 +23,12 @@ Wilson bound beside them), the time-block bounds (exact one-sided Clopper-Pearso
 each valid only if provider states are independent across blocks of that length), the pool-day bootstrap (a
 diagnostic only), and the outage episodes seen - the measured outage process T9-E1's power may add as a profile.
 Targets kept for reference: eventual >= 95%, first try >= 90%.
+
+Amendment 4 (a fifteenth review, before the window opened; amendment 2 confirmed by the owner): the attempt-level
+observation product is three-state (up / down / unknown, from each attempt's own read-stage evidence), covers all
+elapsed time (edges and empty windows unobserved; clipped to now), and reports DETECTED failure runs that never
+cross an unsampled gap or a host change. The outage-profile recipe is replaced by a nonparametric stress profile at
+frozen horizons (the registration), labelled stress - not confidence - until the whole pipeline is calibrated.
 """
 from __future__ import annotations
 
@@ -158,16 +164,40 @@ def _cell_stats(rows: list[dict]) -> dict:
 
 
 EPISODE_GAP_S = 900                # unavailable jobs this close (no available job between) are one failure span
-# The attempt-level observation product (a fourteenth review: final job outcomes aren't a provider up/down trace).
-# Every quote ATTEMPT observes the read path at its request time: a coherent answer - even a refusal about one pool -
-# means the transport/provider was UP; these reasons mean it may have been DOWN. Everything else is about a pool.
-TRANSPORT = {"timeout", "rpc_error", "slow_response", "stale_state"}
-NO_OBSERVATION_S = 600              # a gap this long between any two attempts is unobserved time: never called up
+# The attempt-level observation product (a fourteenth review: final job outcomes aren't a provider up/down trace;
+# a fifteenth: an attempt is evidence about the read path only if it READ). Each attempt is classified from its own
+# read-stage evidence (quote record v5 `reads`), three ways:
+#   up      - a network read responded (an answer, even a refusal about one pool, is the provider responding);
+#   down    - a read was attempted and failed: timeout, HTTP or RPC error, a malformed answer;
+#   unknown - no read: a cached or local refusal, a local error, or a legacy record whose evidence can't place it.
+# Unknown attempts observe nothing: they are neither up nor down, and they don't cover time. Responses outside the
+# freshness or latency limits (stale_state, slow_response) are UP for the transport and DEGRADED for the read path -
+# a stale answer can be the provider's lag or the reference feed's, not proof of a provider outage.
+READ_FAILED = {"timeout", "rpc_error"}
+DEGRADED = {"slow_response", "stale_state"}
+TRANSPORT = READ_FAILED | DEGRADED   # the read-path product's failures (legacy name: a fourteenth review's set)
+NO_OBSERVATION_S = 600              # a gap longer than this with no observing read is UNOBSERVED - never up, never down
+MAX_INTERVALS = 500                 # unobserved intervals listed (all are counted)
+
+
+def observation(r: dict) -> tuple[str, str]:
+    """(up | down | unknown, its evidence) for one attempt record."""
+    reads = r.get("reads")
+    if isinstance(reads, list):                          # v5+: explicit read-stage evidence
+        if not reads:
+            return "unknown", "no read (a cached or local refusal, or a local error)"
+        last = reads[-1]
+        return ("up" if last.get("outcome") == "responded" else "down"), f"{last.get('stage')} read {last.get('outcome')}"
+    if r.get("responded_at") is not None:                # legacy: the main read responded
+        return "up", "legacy: the accounts read responded"
+    if r.get("reason") in READ_FAILED:                   # legacy: inferred (an old rpc_error may have been local)
+        return "down", "legacy: inferred from the reason"
+    return "unknown", "legacy: no read-stage evidence"
 
 
 def attempt_trace(db: Path) -> list[dict]:
-    """Every attempt as an observation: when it was requested and finished, its reason and class (transport down /
-    up), its job and host. Ordered by request time."""
+    """Every attempt as an observation: when it was requested and finished, its reason, what it observed (up / down /
+    unknown, with the evidence), whether a response was degraded, its job, host and code revision. By request time."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     rows = con.execute("SELECT job, n, rec FROM attempts").fetchall()
     con.close()
@@ -177,42 +207,125 @@ def attempt_trace(db: Path) -> list[dict]:
         t = r.get("requested_at") or (r.get("job") or {}).get("started_at")
         if t is None:
             continue
+        o, why = observation(r)
         out.append({"job": job, "n": n, "t": float(t), "done": r.get("finished_at"), "reason": r.get("reason"),
-                    "down": r.get("reason") in TRANSPORT, "host": r.get("host", "")})
+                    "observation": o, "evidence": why, "down": o == "down",
+                    "degraded": o == "up" and r.get("reason") in DEGRADED, "host": r.get("host", ""),
+                    "code": r.get("code", "")})
     return sorted(out, key=lambda a: a["t"])
 
 
-def transport_brackets(trace: list[dict], start: float, end: float) -> dict:
-    """Censored brackets for each run of consecutive transport failures (any job, any pool): observed from its first
-    to its last failure (the minimum), within the last success before and the first success after (the maximum).
-    A run with no success before or after in the window is left- or right-censored (no maximum). Gaps of
-    NO_OBSERVATION_S or more between attempts are unobserved time, listed apart - never counted as up."""
-    obs = [a for a in trace if start <= a["t"] < end]
-    runs, cur, last_up = [], [], None
-    for a in obs:
-        if a["down"]:
-            if not cur:
-                cur = [last_up]
-            cur.append(a["t"])
-        else:
-            if cur:
-                runs.append(cur + [a["t"]])
-                cur = []
-            last_up = a["t"]
-    if cur:
-        runs.append(cur + [None])
-    brackets = []
-    for r in runs:
-        before, fails, after = r[0], r[1:-1], r[-1]
-        brackets.append({"first_fail": fails[0], "last_fail": fails[-1], "failures": len(fails),
-                         "min_s": round(fails[-1] - fails[0], 1),
-                         "max_s": round(after - before, 1) if before is not None and after is not None else None,
-                         "left_censored": before is None, "right_censored": after is None})
-    gaps = [(b["t"] - a["t"]) for a, b in zip(obs, obs[1:]) if b["t"] - a["t"] >= NO_OBSERVATION_S]
-    return {"attempts": len(obs), "transport_failures": sum(a["down"] for a in obs),
-            "reasons": dict(Counter(a["reason"] for a in obs).most_common()), "runs": len(brackets),
-            "brackets": brackets, "unobserved_gaps": len(gaps), "unobserved_hours": round(sum(gaps) / 3600, 2),
-            "hosts": dict(Counter(a["host"] for a in obs))}
+def _obs(a: dict) -> str:
+    return a.get("observation") or ("down" if a.get("down") else "up")
+
+
+def _runs(seen: list[dict], start: float, clip: float, end: float, failed) -> list[dict]:
+    """Detected failure runs among observing attempts. A run is consecutive failed observations within one SEGMENT -
+    observations no more than NO_OBSERVATION_S apart, on one host - so an unsampled gap or a host change always ends
+    a run: it can't be counted as continuous downtime. Each run's edges say what bounds it: an up observation, or
+    (censored) the window's start, the clip (window end, or `now` while running), an unobserved gap, a host change."""
+    runs, cur, seg_start = [], None, 0
+    for i, a in enumerate(seen):
+        prev = seen[i - 1] if i else None
+        boundary = prev is None or a["t"] - prev["t"] > NO_OBSERVATION_S or a.get("host") != prev.get("host")
+        if boundary:
+            if cur is not None:
+                cur["right"] = "gap" if prev and a["t"] - prev["t"] > NO_OBSERVATION_S else "host_change"
+                runs.append(cur)
+                cur = None
+            seg_start = i
+        if failed(a):
+            if cur is None:
+                left = ("up", seen[i - 1]["t"]) if i > seg_start else \
+                    (("window_start" if a["t"] - start <= NO_OBSERVATION_S else "gap") if prev is None else
+                     ("gap" if a["t"] - prev["t"] > NO_OBSERVATION_S else "host_change"))
+                cur = {"fails": [], "left": left, "i0": i}
+            cur["fails"].append(a["t"])
+            cur["i1"] = i
+        elif cur is not None:
+            cur["right"] = ("up", a["t"])
+            runs.append(cur)
+            cur = None
+    if cur is not None:
+        cur["right"] = ("clip" if clip < end else "window_end") if clip - seen[-1]["t"] <= NO_OBSERVATION_S else "gap"
+        runs.append(cur)
+    out = []
+    for k, r in enumerate(runs):
+        f = r["fails"]
+        lu = r["left"][1] if isinstance(r["left"], tuple) else None
+        ru = r["right"][1] if isinstance(r["right"], tuple) else None
+        # the nearest UP observation on each side, beyond any gap or host change: the episode containing these
+        # failures (if they are one) lies between them - a bound that includes unobserved time when an edge is a gap
+        before = lu if lu is not None else next((x["t"] for x in reversed(seen[:r["i0"]]) if not failed(x)), None)
+        after = ru if ru is not None else next((x["t"] for x in seen[r["i1"] + 1:] if not failed(x)), None)
+        out.append({"first_fail": f[0], "last_fail": f[-1], "failures": len(f),
+                    "min_s": round(f[-1] - f[0], 1),
+                    "max_s": round(ru - lu, 1) if lu is not None and ru is not None else None,
+                    "max_s_including_unobserved": round(after - before, 1) if before is not None and after is not None
+                    else None,
+                    "left": r["left"][0] if isinstance(r["left"], tuple) else r["left"],
+                    "right": r["right"][0] if isinstance(r["right"], tuple) else r["right"],
+                    "left_censored": lu is None, "right_censored": ru is None,
+                    "may_join_previous": bool(k and out[-1]["right"] in ("gap", "host_change") and
+                                              r["left"] in ("gap", "host_change") and
+                                              not any(not failed(x) for x in seen[runs[k - 1]["i1"] + 1:r["i0"]]))})
+    return out
+
+
+def transport_brackets(trace: list[dict], start: float, end: float, now: float | None = None,
+                       liveness: list | None = None) -> dict:
+    """The observation product over [start, min(now, end)) - never past `now`: future scheduled time isn't unobserved
+    downtime. Exposure is all of that elapsed time; it's OBSERVED only between observing reads at most
+    NO_OBSERVATION_S apart, so the window's leading and trailing edges, and an empty window, are unobserved too.
+    Runs are DETECTED failure runs (see _runs): `min_s` (first to last failure) is a duration only under the declared
+    one-episode assumption for failures within one segment, and `max_s` is bounded only by up observations. Two
+    products: the TRANSPORT (down = a failed read) and the READ PATH (down or degraded). `liveness`: the process's
+    heartbeat intervals, which split unobserved time into the process up with no reads, and the process down/unknown."""
+    clip = min(end, now) if now is not None else end
+    obs = [a for a in trace if start <= a["t"] < clip]
+    seen = [a for a in obs if _obs(a) != "unknown"]
+    gaps, t = [], start
+    for a in seen:
+        if a["t"] - t > NO_OBSERVATION_S:
+            gaps.append((t, a["t"]))
+        t = a["t"]
+    if clip - t > NO_OBSERVATION_S:
+        gaps.append((t, clip))
+    if not seen and clip > start:
+        gaps = [(start, clip)]
+    unobs = sum(b - a for a, b in gaps)
+    exposure = max(0.0, clip - start)
+    transport = _runs(seen, start, clip, end, lambda a: _obs(a) == "down") if seen else []
+    read_path = _runs(seen, start, clip, end, lambda a: _obs(a) == "down" or a.get("degraded")) if seen else []
+    hosts = Counter(a.get("host", "") for a in seen)
+    by_host = {h: {"observations": n, "down": sum(1 for a in seen if a.get("host", "") == h and _obs(a) == "down")}
+               for h, n in hosts.items()}
+    out = {"what": "DETECTED failure runs from observing reads (record v5 read-stage evidence; legacy records are "
+                   "inferred and labelled). Not a physical outage trace: episodes between reads are missed, one run "
+                   "can hide several episodes, min_s holds only under the one-episode assumption within a segment",
+           "clipped_to": clip, "running": clip < end, "exposure_hours": round(exposure / 3600, 2),
+           "attempts": len(obs), "observing_attempts": len(seen),
+           "observations": dict(Counter(_obs(a) for a in obs)),
+           "evidence": dict(Counter(a.get("evidence", "") for a in obs if a.get("evidence")).most_common()),
+           "transport_failures": sum(1 for a in seen if _obs(a) == "down"),
+           "degraded_responses": sum(1 for a in seen if a.get("degraded")),
+           "reasons": dict(Counter(a["reason"] for a in obs).most_common()),
+           "runs": len(transport), "brackets": transport,
+           "read_path": {"runs": len(read_path), "brackets": read_path},
+           "observed_hours": round((exposure - unobs) / 3600, 2), "unobserved_hours": round(unobs / 3600, 2),
+           "unobserved_gaps": len(gaps), "unobserved_intervals": [[round(a, 3), round(b, 3)] for a, b in gaps[:MAX_INTERVALS]],
+           "hosts": dict(hosts), "by_host": by_host,
+           "host_changes": sum(1 for x, y in zip(seen, seen[1:]) if x.get("host") != y.get("host")),
+           "code_revisions": dict(Counter(a.get("code", "") for a in seen))}
+    if liveness is not None:
+        up_s = 0.0
+        for a, b in gaps:
+            for s0, s1 in liveness:
+                up_s += max(0.0, min(b, s1) - max(a, s0))
+        out["unobserved_split"] = {"process_up_no_reads_hours": round(up_s / 3600, 2),
+                                   "process_down_or_unknown_hours": round((unobs - up_s) / 3600, 2),
+                                   "heartbeat_since": liveness[0][0] if liveness else None}
+    return out
 
 
 def _split(runs: list[list[dict]]) -> list[list[dict]]:
@@ -227,6 +340,17 @@ def _split(runs: list[list[dict]]) -> list[list[dict]]:
             cur.append(j)
         out.append(cur)
     return out
+
+
+def _liveness(db: Path) -> list:
+    """The price watcher's heartbeat intervals (quotes.QuoteBook), or [] for a book from before it."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return [tuple(r) for r in con.execute("SELECT start, last FROM liveness ORDER BY start")]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
 
 
 def load(db: Path) -> list[dict]:
@@ -360,7 +484,8 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
                 "spans": len(episodes), "spans_per_day": round(len(episodes) / max(days, 1), 3),
                 "span_minutes": sorted(e["minutes"] for e in episodes), "span_list": episodes},
             "outages": {"episodes": len(episodes), "renamed": "failure_spans (not provider outages)"},
-            "transport_observations": transport_brackets(attempt_trace(db), start, end),
+            "transport_observations": transport_brackets(attempt_trace(db), start, end, now=now,
+                                                         liveness=_liveness(db)),
             "assessment": "descriptive (amendment 2): no formal verdict - a block bound holds only if provider states "
                           "are independent across blocks of its length; see block_lower per cell and "
                           "data/research/q1_calibration.json",

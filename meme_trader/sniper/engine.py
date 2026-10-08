@@ -219,6 +219,8 @@ class Engine:
         self.desk_error = ""
         self.paused = False
         self.journal = log_to_journal
+        self._journal_pending: list[bytes] = []           # account-journal rows not yet written (a full disk), in order
+        self._journal_clean = False                       # the journal's end checked for a torn line this run?
         # replays start from neutral caller weights: today's learned track records are future information
         self.callers = CallerBook(DATA / "callers.json" if log_to_journal else None)
         self.session = f"{mode}-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
@@ -469,12 +471,82 @@ class Engine:
         row = {"ts": round(self.now or time.time(), 3), "account": self.book.account_id, "kind": kind,
                "sol": round(sol, 9),
                "cash_after": round(self.book.sol, 9), **{k: v for k, v in kw.items() if v not in (None, "")}}
+        self._journal_pending.append((json.dumps(row, default=str) + "\n").encode())
+        self._flush_account_journal()
+
+    def _flush_account_journal(self, seal: bool = False) -> None:
+        """Write the pending account-journal rows, in order, each one whole (a fifteenth review's crash matrix):
+        - a row that can't be written (a full disk) stays pending and goes out, late but in order, with the next;
+        - a row is dropped from the queue only once all of its bytes are out, so a retry never repeats a row;
+        - a torn last line - a crash or a full disk mid-write - is terminated before anything else is written, so it
+          stays its own (unreadable, reported) line instead of fusing with the next row. `seal` (at a restore): that
+          check alone, at once, so a crash's torn line is visible before anything else is written."""
+        if not self._journal_pending and not (seal and self.journal):
+            return
+        if not self._journal_pending and not (DATA / f"account-{self.mode}.jsonl").exists():
+            return                                       # (a seal never creates the journal: a missing one stays missing)
         try:
             DATA.mkdir(exist_ok=True)
-            with (DATA / f"account-{self.mode}.jsonl").open("a") as f:
-                f.write(json.dumps(row, default=str) + "\n")
+            with (DATA / f"account-{self.mode}.jsonl").open("a+b", buffering=0) as f:
+                if not self._journal_clean:
+                    end = f.seek(0, 2)
+                    if end:
+                        f.seek(end - 1)
+                        if f.read(1) != b"\n":
+                            if f.write(b"\n") != 1:
+                                raise OSError("the torn line couldn't be terminated")
+                            self.stats["account_journal_torn"] += 1
+                            self.say("error", "the account journal's last line was torn (a crash or a full disk "
+                                              "mid-write): terminated and kept as its own line - see the shadow ledger")
+                    self._journal_clean = True
+                while self._journal_pending:
+                    data = self._journal_pending[0]
+                    n = f.write(data)
+                    if n != len(data):                   # a short write: those bytes are a torn line now
+                        self._journal_clean = False
+                        raise OSError(f"short write: {n} of {len(data)} bytes")
+                    self._journal_pending.pop(0)
         except OSError:
+            self._journal_clean = False                  # (whatever got out may be torn: check the end first next time)
             self.stats["account_journal_errors"] += 1
+            self.stats["account_journal_pending"] = len(self._journal_pending)
+            return
+        self.stats["account_journal_pending"] = 0
+
+    def _restore_gap(self) -> None:
+        """PAPER: the restored book's cash against its own journal's last row for this account. The journal is written
+        before the state is saved, so a crash between them leaves a state BEHIND its journal (and a full disk, ahead):
+        the difference is recorded, never silently adopted - a `restore_gap` row carrying both numbers (the shadow
+        flags it until a recorded review), and an error on the dashboard (a fifteenth review's crash matrix)."""
+        if self.mode.startswith("live") or not self.journal:
+            return
+        path = DATA / f"account-{self.mode}.jsonl"
+        try:
+            with path.open("rb") as f:
+                end = f.seek(0, 2)
+                f.seek(max(0, end - 262144))
+                tail = f.read()
+        except OSError:
+            return
+        last = None
+        for raw in reversed(tail.split(b"\n")):
+            try:
+                r = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and r.get("account") == self.book.account_id and "cash_after" in r:
+                last = r
+                break
+        if last is None:
+            return
+        logged = float(last["cash_after"])
+        if abs(round(self.book.sol, 9) - round(logged, 9)) <= 1e-8:
+            return
+        self.stats["restore_gaps"] += 1
+        self._account_event("restore_gap", self.book.sol - logged, journal_cash_after=logged,
+                            note="the saved state's cash differs from the journal's last row for this account")
+        self.say("error", f"restored paper cash {self.book.sol:.9f} SOL differs from the account journal's last "
+                          f"{logged:.9f} SOL: recorded as a restore gap (see the shadow ledger)")
 
     def _global_block(self, manual: bool = False) -> str:
         """Account-level stops that apply to EVERY entry source (sniper, copy, graduation, callout). Your own
@@ -2268,9 +2340,20 @@ class Engine:
     async def _run_shadow(self) -> None:
         self._shadow_busy = True
         try:
-            await asyncio.to_thread(self.shadow.sync)    # (sync never raises: its failures are its own status)
+            cut = self._shadow_cut()
+            await asyncio.to_thread(self.shadow.sync, None, cut)  # (sync never raises: its failures are its status)
         finally:
             self._shadow_busy = False
+
+    def _shadow_cut(self) -> dict | None:
+        """The authority's cash and its journal's size, read together on the event loop (no cash moves between the
+        two): the shadow compares its own cash at exactly that line. Rows still pending (a full disk) are named."""
+        try:
+            size = os.stat(self.shadow.journal).st_size
+        except OSError:
+            return None
+        return {"account": self.book.account_id, "cash": self.book.sol, "size": size,
+                "journal_errors": self.stats["account_journal_errors"], "pending_rows": len(self._journal_pending)}
 
     async def _tick(self) -> None:
         if self.shadow is not None and not self._shadow_busy and time.time() - self._shadow_at >= 30:
@@ -2598,6 +2681,7 @@ class Engine:
                                   "adopt its book")
 
     async def restore_state(self) -> None:
+        self._flush_account_journal(seal=True)             # a line torn by the last crash: terminated now, visibly
         if not self.state_path.exists():
             self._account_event("open", 0.0, start_sol=self.book.start_sol)
             self._reconcile_outbox()                      # no saved book, but maybe signed orders
@@ -2614,6 +2698,7 @@ class Engine:
         self.book.sol, self.book.start_sol, self.book.day = b["sol"], b["start_sol"], b["day"]
         if d.get("account_id"):
             self.book.account_id = d["account_id"]
+            self._restore_gap()
         else:                                             # an account from before the journal: adopted at this balance
             self._account_event("adopted", 0.0, start_sol=self.book.start_sol)
         self.book.day_pnl, self.book.halted = b["day_pnl"], b["halted"]
