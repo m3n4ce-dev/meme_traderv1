@@ -86,11 +86,30 @@ def test_undocumented_pool_bytes_count_against_qualification_but_not_availabilit
     assert r["pools_with_undocumented_bytes"] > 0
 
 
-def test_provider_failures_show_as_outage_episodes(tmp_path):
+def test_provider_failures_show_as_failure_spans_not_outages(tmp_path):
     db = book(tmp_path, window_jobs(fail=0.08))
     r = q1.report(db, now=q1._day0(q1.START_DAY) + 15 * 86400)
-    assert r["outages"]["unavailable_runs"] > 0 and r["outages"]["episodes"] >= r["outages"]["unavailable_runs"]
+    f = r["failure_spans"]
+    assert f["unavailable_runs"] > 0 and f["spans"] >= f["unavailable_runs"] and "not a provider outage" in f["what"].lower()
+    assert r["outages"]["episodes"] == f["spans"]                                  # (the old name, kept as an alias)
     assert r["cells"]["exit / signal / 5 s / hold 1 h"]["available_eventual"]["rate"] < 1
+
+
+def test_transport_failures_are_bracketed_with_censoring_and_unobserved_gaps():
+    t0 = 1_000_000.0
+
+    def a(t, reason):
+        return {"t": t0 + t, "reason": reason, "down": reason in q1.TRANSPORT, "host": "h"}
+    trace = [a(0, "timeout"), a(30, "timeout"), a(60, "ok"),                 # left-censored: no success before
+             a(100, "insufficient_liquidity"),                                  # a pool's refusal: the provider was UP
+             a(200, "rpc_error"), a(260, "stale_state"), a(400, "ok"),          # bracketed: 60 s .. 300 s
+             a(5000, "ok"), a(5030, "timeout")]                                 # an unobserved gap, then right-censored
+    b = q1.transport_brackets(trace, t0, t0 + 10_000)
+    assert b["runs"] == 3 and b["transport_failures"] == 5 and b["unobserved_gaps"] == 1
+    first, mid, last = b["brackets"]
+    assert first["left_censored"] and first["max_s"] is None and first["min_s"] == 30
+    assert (mid["min_s"], mid["max_s"], mid["failures"]) == (60, 300, 2) and not mid["left_censored"]
+    assert last["right_censored"] and last["max_s"] is None and last["min_s"] == 0
 
 
 def test_a_short_guard_extends_the_window_a_day_at_a_time_and_pending_jobs_hold_the_verdict(tmp_path):

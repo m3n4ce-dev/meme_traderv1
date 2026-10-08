@@ -157,7 +157,62 @@ def _cell_stats(rows: list[dict]) -> dict:
     return out
 
 
-EPISODE_GAP_S = 900                # unavailable jobs this close (no available job between) are one outage episode
+EPISODE_GAP_S = 900                # unavailable jobs this close (no available job between) are one failure span
+# The attempt-level observation product (a fourteenth review: final job outcomes aren't a provider up/down trace).
+# Every quote ATTEMPT observes the read path at its request time: a coherent answer - even a refusal about one pool -
+# means the transport/provider was UP; these reasons mean it may have been DOWN. Everything else is about a pool.
+TRANSPORT = {"timeout", "rpc_error", "slow_response", "stale_state"}
+NO_OBSERVATION_S = 600              # a gap this long between any two attempts is unobserved time: never called up
+
+
+def attempt_trace(db: Path) -> list[dict]:
+    """Every attempt as an observation: when it was requested and finished, its reason and class (transport down /
+    up), its job and host. Ordered by request time."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows = con.execute("SELECT job, n, rec FROM attempts").fetchall()
+    con.close()
+    out = []
+    for job, n, rec in rows:
+        r = json.loads(rec)
+        t = r.get("requested_at") or (r.get("job") or {}).get("started_at")
+        if t is None:
+            continue
+        out.append({"job": job, "n": n, "t": float(t), "done": r.get("finished_at"), "reason": r.get("reason"),
+                    "down": r.get("reason") in TRANSPORT, "host": r.get("host", "")})
+    return sorted(out, key=lambda a: a["t"])
+
+
+def transport_brackets(trace: list[dict], start: float, end: float) -> dict:
+    """Censored brackets for each run of consecutive transport failures (any job, any pool): observed from its first
+    to its last failure (the minimum), within the last success before and the first success after (the maximum).
+    A run with no success before or after in the window is left- or right-censored (no maximum). Gaps of
+    NO_OBSERVATION_S or more between attempts are unobserved time, listed apart - never counted as up."""
+    obs = [a for a in trace if start <= a["t"] < end]
+    runs, cur, last_up = [], [], None
+    for a in obs:
+        if a["down"]:
+            if not cur:
+                cur = [last_up]
+            cur.append(a["t"])
+        else:
+            if cur:
+                runs.append(cur + [a["t"]])
+                cur = []
+            last_up = a["t"]
+    if cur:
+        runs.append(cur + [None])
+    brackets = []
+    for r in runs:
+        before, fails, after = r[0], r[1:-1], r[-1]
+        brackets.append({"first_fail": fails[0], "last_fail": fails[-1], "failures": len(fails),
+                         "min_s": round(fails[-1] - fails[0], 1),
+                         "max_s": round(after - before, 1) if before is not None and after is not None else None,
+                         "left_censored": before is None, "right_censored": after is None})
+    gaps = [(b["t"] - a["t"]) for a, b in zip(obs, obs[1:]) if b["t"] - a["t"] >= NO_OBSERVATION_S]
+    return {"attempts": len(obs), "transport_failures": sum(a["down"] for a in obs),
+            "reasons": dict(Counter(a["reason"] for a in obs).most_common()), "runs": len(brackets),
+            "brackets": brackets, "unobserved_gaps": len(gaps), "unobserved_hours": round(sum(gaps) / 3600, 2),
+            "hosts": dict(Counter(a["host"] for a in obs))}
 
 
 def _split(runs: list[list[dict]]) -> list[list[dict]]:
@@ -177,7 +232,10 @@ def _split(runs: list[list[dict]]) -> list[list[dict]]:
 def load(db: Path) -> list[dict]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     have = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
-    known = "due_known" if "due_known" in have else "1"
+    from .quotes import QuoteBook
+    current = con.execute("PRAGMA user_version").fetchone()[0] >= QuoteBook.BOOK_VERSION
+    # an unmigrated book's scheduled times are UNKNOWN (no provenance is not proof), never assumed known (14th review)
+    known = "due_known" if ("due_known" in have and current) else "0"
     rows = con.execute(f"SELECT id, kind, pool, due, deadline, state, tries, result, meta, {known} FROM jobs").fetchall()
     con.close()
     out = []
@@ -208,7 +266,7 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
     # `due` is each job's SCHEDULED time (immutable since book version 2): window, pool-day and recovery use it. A
     # job whose scheduled time was lost to an old retry (`due_known` false) can't be placed: kept out, and counted
     every = [j for j in loaded if j["due_known"]]
-    unplaced = sum(1 for j in loaded if not j["due_known"] and start <= j["due"] < start + MAX_DAYS * 86400)
+    unplaced = sum(1 for j in loaded if not j["due_known"])   # (all of them: an unknown time places no job in a window)
     days, status = DAYS, "running"
     while True:
         end = start + days * 86400
@@ -291,10 +349,18 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
                        "pending_jobs": pending, "jobs": len(win)},
             "status": status, "verdict": verdict, "guards": g, "targets": TARGETS, "cells": cells,
             "jobs_with_unknown_scheduled_time": unplaced,
-            "outages": {"unavailable_runs": len(runs), "longest_run_jobs": len(longest),
-                        "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0,
-                        "episodes": len(episodes), "episodes_per_day": round(len(episodes) / max(days, 1), 3),
-                        "episode_minutes": sorted(e["minutes"] for e in episodes), "episode_list": episodes},
+            "failure_spans": {
+                "what": "EVENTUAL quote-failure spans: jobs whose final outcome was unavailable, merged when under "
+                        f"{EPISODE_GAP_S} s apart, timed by their scheduled due - sampled where jobs happened to be, so "
+                        "first/last failed dues are detection points, not onset/recovery, a one-job span's 0 minutes "
+                        "isn't a 0-minute outage, and recovered interruptions don't appear. Not a provider outage trace: "
+                        "see transport_observations",
+                "unavailable_runs": len(runs), "longest_run_jobs": len(longest),
+                "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0,
+                "spans": len(episodes), "spans_per_day": round(len(episodes) / max(days, 1), 3),
+                "span_minutes": sorted(e["minutes"] for e in episodes), "span_list": episodes},
+            "outages": {"episodes": len(episodes), "renamed": "failure_spans (not provider outages)"},
+            "transport_observations": transport_brackets(attempt_trace(db), start, end),
             "assessment": "descriptive (amendment 2): no formal verdict - a block bound holds only if provider states "
                           "are independent across blocks of its length; see block_lower per cell and "
                           "data/research/q1_calibration.json",

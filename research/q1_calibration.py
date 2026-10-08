@@ -18,6 +18,10 @@ The availability process (declared here, before Q1's window - its parameters are
 TRUE availability is each scenario's job-weighted success rate over many windows. A gate's false-pass rate is its
 pass rate in scenarios whose true availability is below target; its power, its pass rate where it's comfortably above.
 Synthetic: says what a gate can certify under each process, nothing about the real provider's uptime.
+
+Version 2 (a fourteenth review): the timeline starts in its STATIONARY state (down with probability u, each period's
+remainder exponential) - version 1 always started up, a chosen stress initialization - plus explicitly initially-down
+cases; a zero-outage control; 28-day windows beside 14-day ones; the as-run revision and environment recorded.
 """
 from __future__ import annotations
 
@@ -38,17 +42,25 @@ SEED = 20261008
 BLOCKS = (1, 3, 6, 24)
 
 
-def timeline(rng, days: int, D: float, u: float, day_model: bool):
-    """Down intervals [(start, end)] in seconds over the window (+ a day's margin for retries)."""
+def timeline(rng, days: int, D: float, u: float, day_model: bool, start: str = "stationary"):
+    """Down intervals [(start, end)] in seconds over the window (+ a day's margin for retries). `start`: "stationary"
+    (down at t=0 with probability u; exponential periods are memoryless, so the remainder is a full exponential) or
+    "down" (the window opens inside an outage)."""
     end = (days + 1) * 86400
     if u <= 0:
         return np.empty((0, 2))
     if day_model:
         down = rng.random(days + 1) < u
+        if start == "down":
+            down[0] = True
         return np.array([(d * 86400, (d + 1) * 86400) for d in range(days + 1) if down[d]]).reshape(-1, 2)
     up_mean = D * (1 - u) / u
     t, out = 0.0, []
-    t += rng.exponential(up_mean) * rng.random()                 # start somewhere in an up period
+    if start == "down" or rng.random() < u:                       # opens inside an outage
+        d = rng.exponential(D)
+        out.append((0.0, d))
+        t = d
+    t += rng.exponential(up_mean)
     while t < end:
         d = rng.exponential(D)
         out.append((t, t + d))
@@ -116,13 +128,14 @@ def gates(js, first, event):
 
 def scenario(args):
     i, sc, windows = args
-    rng = np.random.default_rng(np.random.SeedSequence(SEED, spawn_key=(i,)))
+    rng = np.random.default_rng(np.random.SeedSequence(SEED + 2, spawn_key=(i,)))
+    days = sc["days"]
     passes = {f"block_{h}h": 0 for h in BLOCKS}
     passes["pool_day_bootstrap"] = 0
     k_ev = k_ft = n = 0
     for _ in range(windows):
-        down = timeline(rng, DAYS, sc["D"], sc["u"], sc["day_model"])
-        js = jobs(rng, DAYS)
+        down = timeline(rng, days, sc["D"], sc["u"], sc["day_model"], sc["start"])
+        js = jobs(rng, days)
         first, event = outcomes(rng, js, down, sc["eps"])
         k_ev += int(event.sum())
         k_ft += int(first.sum())
@@ -135,13 +148,19 @@ def scenario(args):
 
 def grid() -> list[dict]:
     out = []
-    for D in (120, 900, 3600, 3 * 3600, 6 * 3600, 24 * 3600):
-        for u in (0.01, 0.03, 0.06, 0.10):
+    for days in (14, 28):
+        for eps in (0.0, 0.03):                                   # the control: no outages at all
+            out.append({"days": days, "D": 0, "u": 0.0, "eps": eps, "day_model": False, "start": "stationary"})
+        durations = (120, 900, 3600, 3 * 3600, 6 * 3600, 24 * 3600) if days == 14 else (3600, 6 * 3600, 24 * 3600)
+        for D in durations:
+            for u in (0.01, 0.03, 0.06, 0.10):
+                for eps in (0.0, 0.03):
+                    out.append({"days": days, "D": D, "u": u, "eps": eps, "day_model": False, "start": "stationary"})
+        for u in (0.03, 0.06, 0.10):                              # the reviewer's model: whole UTC days up or down
             for eps in (0.0, 0.03):
-                out.append({"D": D, "u": u, "eps": eps, "day_model": False})
-    for u in (0.03, 0.06, 0.10):                                  # Sol's model: whole UTC days up or down
-        for eps in (0.0, 0.03):
-            out.append({"D": 86400, "u": u, "eps": eps, "day_model": True})
+                out.append({"days": days, "D": 86400, "u": u, "eps": eps, "day_model": True, "start": "stationary"})
+        for D in (6 * 3600, 24 * 3600):                           # windows that open inside an outage
+            out.append({"days": days, "D": D, "u": 0.06, "eps": 0.0, "day_model": False, "start": "down"})
     return out
 
 
@@ -160,11 +179,25 @@ def main(argv=None) -> int:
         rows = [scenario(j) for j in jobs_]
     for r in rows:
         m = "day" if r["day_model"] else f"D {r['D'] / 60:.0f} min"
-        print(f"{m:12} u {r['u']:.2f} eps {r['eps']:.2f}: true eventual {r['true_eventual']:.3f} first {r['true_first_try']:.3f}"
+        print(f"{r['days']}d {r['start'][:4]} {m:12} u {r['u']:.2f} eps {r['eps']:.2f}: true eventual {r['true_eventual']:.3f} first {r['true_first_try']:.3f}"
               f" | " + " ".join(f"{g} {v:.2f}" for g, v in r["pass_rate"].items()), flush=True)
     if a.json:
         root = Path(__file__).resolve().parents[1]
-        doc = {"what": __doc__.split("\n\n")[0], "seed": SEED, "windows_per_scenario": a.windows,
+        import importlib.metadata as md
+        import platform
+        import subprocess
+
+        def git(*args):
+            try:
+                return subprocess.run(["git", *args], capture_output=True, text=True, timeout=10, cwd=root).stdout
+            except (OSError, subprocess.SubprocessError):
+                return ""
+        diff = git("diff", "HEAD") + git("status", "--porcelain")
+        doc = {"what": __doc__.split("\n\n")[0], "version": 2, "seed": SEED + 2, "windows_per_scenario": a.windows,
+               "as_run": {"code_revision": git("rev-parse", "HEAD").strip(),
+                          "uncommitted_changes_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff.strip() else "",
+                          "python": sys.version.split()[0], "numpy": md.version("numpy"),
+                          "platform": platform.platform()},
                "files_sha256": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in (Path(__file__).resolve(), root / "meme_trader/sniper/q1.py")},
                "targets": q1.TARGETS, "rows": rows}
