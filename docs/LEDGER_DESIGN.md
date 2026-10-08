@@ -1,8 +1,49 @@
-# One transactional ledger: schema and migration (DESIGN, revision 3, for review before implementation)
+# One transactional ledger: schema and migration (DESIGN, revision 4, for review before implementation)
 
 **Status: a proposal, nothing built.** It answers the eighth review's answer 7 and the ninth review's 12-point acceptance list, and is meant to be reviewed before implementation. Numbers in brackets, like [A3], refer to that list.
 
-**The current specification** is `research/ledger/schema.sql` and `reference.py`, with the revision 3 and 2 sections below. The revision 1 sections after them are kept for history and are **superseded wherever they disagree** (listed at the end of revision 3).
+**The current specification** is `research/ledger/schema.sql` and `reference.py`, with the revision 4, 3 and 2 sections below. The revision 1 sections after them are kept for history and are **superseded wherever they disagree** (listed at the end of revision 3).
+
+## Revision 4 (the twelfth review): typed proofs, frozen settlements, effects in identity
+
+- **Observations carry a typed outcome**, checked by the schema and recomputed at startup:
+  - `success`: a landing slot, no error;
+  - `executed_failure`: a landing slot and an error;
+  - `absent`: no slot, found by a **full-history search** (`history_searched`), with the block height it was made at;
+  - `inconclusive`: anything else.
+
+  The error string alone is never the proof. An observation's digest covers every field, outcome included, and startup recomputes every one.
+- **A terminal state needs the matching finalized proof:**
+  - `landed_ok` ← success;
+  - `landed_failed` ← executed failure;
+  - `expired_absent` ← absent, above the last valid height.
+
+  A processed or confirmed answer is kept, but settles nothing, so it never frees the order for a fresh signature.
+- **A settled attempt is final:** its state and its proof reference are frozen together, and every transition is written by the database into an append-only `attempt_transitions` table. Startup rechecks every settled attempt's proof, and that its state is the last one its history recorded.
+- **An event's identity** (its content hash) includes its effect locators (as a set) and the event it corrects. A retry naming another fill or fee, or adding or dropping one, is a conflict, not a silent replay.
+- **Signed bytes are checked** against their recorded signature and blockhash (`check_tx_association`). Real orders must use `sign(..., verify=True)`.
+- **No invariant is weakened for fixtures:** the identity columns are `NOT NULL` again, so a bare-SQL event is refused before anything can read it. A database written by another schema version is **quarantined** on open: it must be migrated explicitly.
+
+## Paper shadow: the next step (design only; no code wired yet)
+
+The reviewer approved non-authoritative shadow engineering, not action authority. The plan:
+
+- **Authority:**
+  - **the JSON book stays the only authority** for trading actions and balances;
+  - the shadow is behind a flag (`ledger.shadow`, off by default), with its own epoch and database file, starting from a validated opening boundary.
+- **The mirror:**
+  - committed authoritative events (deposits, fills, fees, rent, releases, resets) are mirrored with stable replay keys taken from the authority's own ids;
+  - the cross-store write is **not** atomic, and isn't presented as if it were: lag and missing events are tracked and shown.
+- **What the shadow can't do:** sign, submit, retry, release a reservation, publish an executable outbox action, or decide that an order settled.
+- **Comparison:** cash, reservations, inventory, rent, fills and per-signature fees are compared separately. A divergence alerts. The shadow can be disabled or rebuilt without any change to trading.
+- **Crash tests at the real boundaries:**
+  - the authority committed but the shadow not written;
+  - the shadow committed but not acknowledged;
+  - a duplicate receipt, and a late receipt;
+  - a partial fill;
+  - a failed transaction's network fee;
+  - a restored unknown attempt.
+- **Promotion** needs the owner's approval of an all-writer cutover and a restart proof. Green reference-writer tests alone aren't enough.
 
 ## Revision 3 (the eleventh review): acceptance work before any engine integration
 
