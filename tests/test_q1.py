@@ -105,7 +105,7 @@ def test_transport_failures_are_bracketed_with_censoring_and_unobserved_gaps():
              a(200, "rpc_error"), a(260, "stale_state"), a(400, "ok"),          # bracketed: 60 s .. 300 s
              a(5000, "ok"), a(5030, "timeout")]                                 # an unobserved gap, then right-censored
     b = q1.transport_brackets(trace, t0, t0 + 10_000)
-    assert b["runs"] == 3 and b["transport_failures"] == 5 and b["unobserved_gaps"] == 1
+    assert b["runs"] == 3 and b["transport_failures"] == 5 and b["unobserved_gaps"] == 2     # (the trailing edge too)
     first, mid, last = b["brackets"]
     assert first["left_censored"] and first["max_s"] is None and first["min_s"] == 30
     assert (mid["min_s"], mid["max_s"], mid["failures"]) == (60, 300, 2) and not mid["left_censored"]

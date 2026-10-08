@@ -4,6 +4,45 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-08 — Entry #81: The fifteenth review: a shadow that can't become falsely clean, a crash matrix at the real boundary, a three-state observer, and a stress profile in place of the fitting recipe
+
+**Source:** a fifteenth external review (GPT 6.1 Sol, PR #112's merge `e2e9df2`).
+- **The reviewer's view:** the previous fixes hold, and the quote evidence is materially stronger. All 250 v4 records match the official SDK 2.1.0 and SPL decoders across all six raw accounts. Two new problem areas, both reproduced as boundary cases, not as incidents.
+- **Its 10 new contracts:** 8 failed before, and **all 10 pass now**.
+- **Its 16 round-13 and 14 contracts** pass unchanged. The earlier inventory holds: 72 passed and 1 deselected, plus the 2 by-design failures (fixtures that write directly into NOT NULL columns).
+- **Suite:** 1,173 passed.
+
+**The owner's decisions, recorded apart from the merge:**
+- the owner confirmed Q1 amendment 2 (descriptive, no formal PASS/FAIL);
+- the owner turned the paper shadow on, after these fixes;
+- probes remain unauthorized.
+
+1. **The shadow could become falsely clean** (R15-A). v0's watermark was the highest line mirrored. A malformed line or a refusal lived only in memory, so a restart erased it. A changed prefix was never reread, and a missing journal passed as empty. **v1** (`shadow_ledger.py`, LEDGER_DESIGN "Paper shadow v1") makes three changes:
+   - **Coverage in storage.** Each line is stored, in one transaction, with its byte offset, its hash, a chain hash, the shadow's cash after it and its state: validated, divergent, refused, malformed, oversize or flagged. `committed`, `validated_through` and `unresolved` are re-derived at every open, after the ledger's content-level `startup_check()` and a contiguity and chain check.
+   - **A checked source.** Its identity is a recorded epoch. The tail is re-hashed every pass, and the whole prefix at each first pass and every 10 minutes. Truncation and changed bytes are persisted faults: mirroring stops until a recorded rebuild, which archives the old store. A missing journal is reported as missing.
+   - **Bounded I/O and recorded repairs.** A pass streams from the consumed offset, at most 8 MiB and 5,000 lines, and an oversize line is hashed in chunks. Repairs are recorded with a note (`resolve`, `rebuild`), never edits.
+
+   Incremental replay and a full rebuild agree on books **and** coverage.
+2. **The crash matrix at the real adapter boundary** (`research/shadow_crash_matrix.py`; 13 cases, all as declared). It runs the real paper engine in child processes and kills it or fills the disk at each boundary. Then it restarts and compares the restored authority, the journal, the shadow, the epochs and the unresolved coverage. **Three authority-side gaps found and fixed** (`engine.py`):
+   - **a crash mid-append** left a torn line that the next row fused with. Now a torn last line is terminated before any write and at every restore, so it stays its own visible hole;
+   - **a failed append was lost.** Now the row stays pending and goes out late, in order, once, and a short write never repeats a row;
+   - **a crash between the append and the state save** restored a state behind its journal (and a full disk then a save, one ahead), silently. Now a paper restore compares the two and records a `restore_gap` row with both numbers, which the shadow flags until reviewed.
+
+   The engine also hands the shadow an **authority cut**: its cash and the journal's size, read together on the event loop, so memory is compared with the shadow at exactly that line.
+3. **The read-path observer overstated what it saw** (R15-B).
+   - **Three states, from evidence.** Quote record v5 logs every network read (stage, times, responded or failed). An attempt is up only if a read responded, down only if one failed, and **unknown** otherwise: a cached or local refusal, or a local error (now `local_error`, not `rpc_error`).
+   - **Degraded is separate.** Stale or slow responses are degraded: a read-path product, not a transport failure.
+   - **Complete elapsed coverage.** Coverage spans all elapsed time, with the edges and empty windows unobserved, clipped to now.
+   - **Detected failure runs** never cross an unsampled gap or a host change.
+   - **A process heartbeat** (`liveness`) splits unobserved time into the process up with no reads, and the process down.
+   - **On the live book**, over the last 24 hours: 743 attempts, all up, 7 degraded. They observe only **5.0 of 24 hours**; the job-conditioned reads leave 19 hours unobserved.
+4. **Q1 amendment 4** (before the window opens):
+   - it records the owner's confirmation;
+   - it puts the corrected observation rules into effect;
+   - it replaces amendment 3's fitting recipe with a **nonparametric stress profile**: detected-run rate per observed hour, and duration survival at frozen horizons (30 s, 60 s, 15 min, 1 h, 2 h). Durations are partially identified, never filled in, with Bonferroni-adjusted exact upper bounds and a declared 24-hour horizon stress;
+   - the profile is labelled **stress, not confidence**, until a calibration of the whole observe → bound → power pipeline, using the window's actual read times, shows coverage;
+   - the profile itself awaits the owner's confirmation.
+
 ## 2026-10-08 — Entry #80: The fourteenth review: legacy schedule provenance, an export check that sees the raw tables, transport observations, the outage-profile recipe, and the paper shadow ledger
 
 **Source:** a fourteenth external review (GPT 6.1 Sol, revision b6c2b81).
