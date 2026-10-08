@@ -230,7 +230,6 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
             done = [j for j in rows if j["state"] != "pending"]          # matured jobs only; pending shown apart
             cells[f"{kind} / {a} / {d} s" + (f" / {h}" if h else "")] = {**_cell_stats(done),
                                                                           "pending": len(rows) - len(done)}
-    exit_cells = {k: v for k, v in cells.items() if k.startswith("exit")}
     if complete and pending == 0:
         if not g["met"]:
             status = "insufficient: a guard is short at the longest window"

@@ -15,6 +15,26 @@
 
 **Where it comes from:** the eleventh review's proposal. The owner approved it on 2026-10-07 and asked the builder to change it where needed. The changes are marked **(change)**. The report is code, frozen with this document: `meme_trader/sniper/q1.py`, run with `python -m meme_trader.sniper q1-report`, tested in `tests/test_q1.py`.
 
+> **Amendment 2 (2026-10-08, ~03:00 UTC, before the window opened; awaiting the owner's confirmation). Q1 gives no formal PASS/FAIL.**
+> A thirteenth review showed the confidence bound was wrong for this data:
+> - the pool-day bootstrap treats pools as independent, but a provider outage hits every pool at once;
+> - an all-success sample bootstraps to a bound of 1.0.
+>
+> `research/q1_calibration.py` then ran 400 whole 14-day windows for each of 54 common-outage scenarios (outages of 2 minutes to 24 hours, and whole-day shocks), through Q1's own bound functions (`data/research/q1_calibration.json`):
+> - **the pool-day bootstrap** passed up to ~40% of windows whose true eventual availability was below 95%;
+> - **6-hour and 24-hour block bounds** never passed, even at 100%;
+> - **1-hour blocks** passed up to ~43% under multi-hour outages, and almost never with ordinary 3% transient errors.
+>
+> No bound in this family both controls false passes and has power within 14 to 28 days. A whole-day common shock can't be certified at 95% in under about two months: 14 clean days support only 80.7%.
+>
+> **So the window runs as planned, on the fixed observer, and reports descriptively:**
+> - per exit cell, the availability and qualification estimates;
+> - exact time-block bounds at 1, 3, 6 and 24 hours, **each labelled with the independence it assumes**;
+> - the pool-day bootstrap, as a diagnostic only;
+> - the outage episodes seen.
+>
+> The measured outage process (episode rate and durations) may be **added** to T9-E1's power as a profile beside A1–A5, never replacing them. Nothing here is a statistical qualification, and no live approval is implied.
+
 ## The window
 
 - **The days:** 14 complete UTC days, **2026-10-09 00:00 through 2026-10-22 23:59 UTC** (amendment 1). Jobs are assigned by their due time.
@@ -56,7 +76,7 @@ The proposal had one target: *qualified* coverage. The freeze keeps that target 
 - **Matured exits:** at least **200 per arm × delay × hold cell** (8 cells). Entries are reported in their own 4 cells.
 - **Spread:** at least **30 distinct pools** and **100 distinct pool-days**.
 
-## Targets and bounds
+## Targets and bounds (reference only since amendment 2)
 
 - **The targets,** per exit cell, for each estimand:
   - eventual success: the one-sided 95% lower bound **≥ 95%**;
@@ -66,7 +86,7 @@ The proposal had one target: *qualified* coverage. The freeze keeps that target 
   - **the simple binomial** beside it: a one-sided Wilson bound.
 - **Zero failures isn't zero probability:** even 0 failures in 200 independent jobs leaves an upper bound of about 1.5%, and correlation makes that optimistic.
 
-## Reported beside the verdict
+## Reported (since amendment 2, the report itself)
 
 - **Per cell:**
   - raw, available and qualified successes, each first-try and eventual;
