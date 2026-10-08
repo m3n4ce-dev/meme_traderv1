@@ -228,8 +228,9 @@ def test_every_job_is_exported_including_those_missed_with_no_attempt(tmp_path):
     b.request("late", "entry", qt.POOL, "buy", 1, 1000, 1060, {"follow": "F", "signal_t": 990, "decided_at": 995})
     b.run()
     jobs = b.jobs()
-    assert [(j["job"], j["state"], j["tries"], j["reason"]) for j in jobs] == [("late", "skipped", 0, "missed")]
-    assert jobs[0]["signal_t"] == 990 and jobs[0]["deadline"] == 1060 and not b.attempts()
+    assert [(j["job_id"], j["state"], j["tries"], j["reason"]) for j in jobs] == [("late", "skipped", 0, "missed")]
+    assert jobs[0]["meta"]["signal_t"] == 990 and jobs[0]["deadline"] == 1060 and not b.attempts()
+    assert jobs[0]["scheduled_due"] == 1000 and jobs[0]["due_known"] and jobs[0]["export_version"] == 2
 
 
 # --------------------------------------------------------------------------- R11-1: the price mark's chain order

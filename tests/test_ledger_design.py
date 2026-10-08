@@ -431,3 +431,83 @@ def test_a_bare_sql_event_without_identity_is_refused_before_anything_can_read_i
         ledger.db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
                           "observed_at, recorded_at, payload, payload_sha256) VALUES ('x', 'A1', 'k', 'open', 1, 'r', "
                           "0, 0, '{}', '')")
+
+
+# --------------------------------------------------------------------------- opening an existing file (13th review)
+def file_sha(p):
+    import hashlib
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def rev3_file(tmp_path):
+    """A REAL file from the revision-3 writer (commit 834fb29, kept in tests/fixtures/ledger/rev3): it created the
+    migrations table and left it empty."""
+    spec3 = importlib.util.spec_from_file_location("ledger_rev3", Path(__file__).parent / "fixtures/ledger/rev3/reference.py")
+    old = importlib.util.module_from_spec(spec3)
+    spec3.loader.exec_module(old)
+    p = tmp_path / "rev3.db"
+    lg = old.Ledger(p)
+    lg.add_account("A1", "paper", "mainnet", "paper")
+    assert lg.db.execute("SELECT COUNT(*) FROM migrations").fetchone()[0] == 0
+    lg.db.close()
+    return p
+
+
+def test_a_real_revision_3_file_is_quarantined_untouched(tmp_path):
+    p = rev3_file(tmp_path)
+    before = file_sha(p)
+    with pytest.raises(ref.LedgerError, match="quarantined"):
+        ref.Ledger(p)
+    assert file_sha(p) == before                                         # not stamped, not altered
+
+
+@pytest.mark.parametrize("damage", ["UPDATE migrations SET sha256 = 'other'", "DROP TRIGGER events_no_delete",
+                                    "CREATE TABLE extra (x)", "ALTER TABLE events ADD COLUMN note TEXT"])
+def test_a_wrong_stamp_or_a_drifted_structure_is_quarantined_untouched(tmp_path, damage):
+    p = tmp_path / "l.db"
+    ref.Ledger(p).db.close()
+    con = sqlite3.connect(p)
+    con.execute(damage)
+    con.commit()
+    con.close()
+    before = file_sha(p)
+    with pytest.raises(ref.LedgerError, match="quarantined"):
+        ref.Ledger(p)
+    assert file_sha(p) == before
+
+
+def test_a_file_that_isnt_a_database_is_quarantined_untouched(tmp_path):
+    p = tmp_path / "l.db"
+    p.write_bytes(b"not a database at all, but not empty either")
+    with pytest.raises(ref.LedgerError, match="quarantined"):
+        ref.Ledger(p)
+    assert p.read_bytes() == b"not a database at all, but not empty either"
+
+
+def test_read_only_files_current_opens_legacy_refused_without_a_write(tmp_path):
+    good = tmp_path / "good.db"
+    lg = ref.Ledger(good)
+    lg.add_account("A1", "paper", "mainnet", "paper")
+    lg.db.close()
+    old = rev3_file(tmp_path)
+    for p in (good, old):
+        p.chmod(0o444)
+    try:
+        ref.Ledger(good).startup_check()                                 # reads fine
+        with pytest.raises(ref.LedgerError, match="quarantined"):
+            ref.Ledger(old)
+    finally:
+        for p in (good, old):
+            p.chmod(0o644)
+
+
+def test_a_failed_creation_rolls_back_and_a_retry_creates_cleanly(tmp_path, monkeypatch):
+    p = tmp_path / "l.db"
+    real = ref._statements
+    monkeypatch.setattr(ref, "_statements", lambda text: real(text)[:5] + ["CREATE TABLE broken ("])
+    with pytest.raises(sqlite3.Error):
+        ref.Ledger(p)
+    monkeypatch.setattr(ref, "_statements", real)
+    lg = ref.Ledger(p)                                                   # nothing half-made was left behind
+    assert lg.db.execute("SELECT version FROM migrations").fetchall() == [(ref.SCHEMA_VERSION,)]
+    lg.startup_check()
