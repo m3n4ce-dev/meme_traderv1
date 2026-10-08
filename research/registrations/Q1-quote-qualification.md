@@ -11,7 +11,7 @@
 > the start moves mechanically to the first complete UTC day after that deploy. No data from the original window
 > existed when this was decided: it hadn't opened.
 
-**What it decides:** whether the price watcher's measured availability may replace the planning envelope (A1–A5) in T9-E1's power. It's an **engineering** qualification, not a trading test and not a trading approval. Nothing here estimates transaction landing, failed-transaction fees or any edge.
+**What it decides:** ~~whether the price watcher's measured availability may replace the planning envelope (A1–A5) in T9-E1's power~~ *(superseded by amendment 2: it decides nothing formally; a measured profile may only be ADDED beside A1–A5)*. It's an **engineering** qualification, not a trading test and not a trading approval. Nothing here estimates transaction landing, failed-transaction fees or any edge.
 
 **Where it comes from:** the eleventh review's proposal. The owner approved it on 2026-10-07 and asked the builder to change it where needed. The changes are marked **(change)**. The report is code, frozen with this document: `meme_trader/sniper/q1.py`, run with `python -m meme_trader.sniper q1-report`, tested in `tests/test_q1.py`.
 
@@ -35,13 +35,40 @@
 >
 > The measured outage process (episode rate and durations) may be **added** to T9-E1's power as a profile beside A1–A5, never replacing them. Nothing here is a statistical qualification, and no live approval is implied.
 
+> **Amendment 3 (2026-10-08, ~03:45 UTC, before the window opened; the builder, pending the owner's confirmation with amendment 2).** It does two things:
+> - it renames a statistic;
+> - it pre-specifies how any outage profile will be built, before the data exists (a fourteenth review).
+>
+> **The renaming.** Final job outcomes are not a provider up/down trace. The report's spans of unavailable jobs are **eventual quote-failure spans**: sampled at scheduled times, missing recovered interruptions, with detection points rather than onsets. The provider is observed by the **attempt-level product** (`transport_observations`).
+>
+> **The attempt-level product.** Every quote attempt observes the read path at its request time:
+> - a coherent answer, even a refusal about one pool, is UP;
+> - `timeout`, `rpc_error`, `slow_response` or `stale_state` is DOWN.
+>
+> Each run of DOWN observations gets a censored bracket:
+> - **its minimum:** first to last failure;
+> - **its maximum:** the last UP before to the first UP after;
+> - **censoring:** flagged left or right when no UP bounds it in the window.
+>
+> Gaps of 10 minutes or more with no attempt are **unobserved**, never up. Process downtime (jobs missed with no attempt) is counted apart, and so are pool-specific causes (liquidity, layout, state).
+>
+> **The fitting recipe, fixed now:**
+> 1. **What's fitted:** only the transport layer's DOWN-run process, from the brackets: a run rate per day, and durations as an interval-censored sample (each run lies between its minimum and maximum; censored runs carry only their minimum).
+> 2. **When there's too little to fit** (fewer than 10 uncensored runs): no fitted law. The profile is the conservative envelope:
+>    - **the rate:** the observed rate with its exact Poisson upper 95% bound;
+>    - **durations:** every run at its maximum, censored runs at the longest observed maximum.
+> 3. **With 10 or more:** an exponential and a log-normal interval-censored fit. The profile uses the **longer-tailed** of the two at its upper 95% bound, never the better-fitting one.
+> 4. **Unobserved time:** it isn't filled. A sensitivity profile treats every unobserved gap as down.
+> 5. **What's recorded:** at window close, the fitted parameters are timestamped with the code revision. The profile is added to T9-E1's power as **one more profile beside A1–A5** and the informative-missingness stress, never replacing them, with the same no-strategy-selection rule (parameters are never chosen by any strategy's P&L).
+> 6. **Probes:** fixed-schedule read-only probes would observe the provider independently of signals. They'd need the owner's authorization and a cost budget, and aren't part of this window.
+
 ## The window
 
 - **The days:** 14 complete UTC days, **2026-10-09 00:00 through 2026-10-22 23:59 UTC** (amendment 1). Jobs are assigned by their due time.
 - **The start (change):** the first complete day after the wallet recorder moved to the paid stream (2026-10-07, about 9 s faster), so the pipeline is the same throughout.
 - **No exclusions:** no day is excluded, and no restart is chosen for a better start. Deploys and restarts happen; every job in the window counts, and one missed during downtime is a failure.
 - **Extension:** if a guard is short when the window ends, it extends a whole UTC day at a time, to at most 28 days. Still short at 28: **insufficient**, neither pass nor fail.
-- **The verdict** waits until every window job has finished (exits retry for 15 minutes past their due time).
+- ~~**The verdict** waits until every window job has finished~~ *(amendment 2: there is no verdict; the report is final once every window job has finished - exits retry for 15 minutes past their due time)*.
 - **Looking during the window:** coverage may be viewed at any time (it carries no P&L). Nothing in this document or `q1.py` changes during the window.
 
 ## The population
@@ -55,10 +82,10 @@ Every quote job the revival forward test creates. That's both arms (signal and a
 
 The proposal had one target: *qualified* coverage. The freeze keeps that target and adds a second estimand with the same targets:
 
-1. **Availability:** the provider gave a coherent, fresh read (the slot within 2 of the feed's, a freshness reference present), validated and priced, **in hand by the job's deadline**. Its only qualification gap, if any, is undocumented pool bytes. This is what A1–A5 models (provider outages and failures), so it **is what may replace A1–A5 in power**.
+1. **Availability:** the provider gave a coherent, fresh read (the slot within 2 of the feed's, a freshness reference present), validated and priced, **in hand by the job's deadline**. Its only qualification gap, if any, is undocumented pool bytes. This is what A1–A5 models (provider outages and failures), so ~~it **is what may replace A1–A5 in power**~~ *(amendment 2: a profile measured from it may be added beside A1–A5, never replace them)*.
 2. **Execution qualification:** the same, **and** the pool's whole account layout is documented. It must **also** pass before any execution approval.
 
-   A failure here caused by undocumented bytes is reported as `FAIL (undocumented pool layout)`. Undocumented bytes are never reclassified as documented.
+   ~~A failure here caused by undocumented bytes is reported as `FAIL (undocumented pool layout)`.~~ *(amendment 2: no FAIL label; undocumented bytes appear as the `ok, unqualified: undocumented_pool_bytes` reason.)* Undocumented bytes are never reclassified as documented.
 
 **Why the split:**
 - In the first two hours of v2 records, 50 of 64 entry quotes were prefix-only, on established pools whose accounts carry bytes past the documented 271-byte layout. Those bytes track virtual-reserve state.
@@ -82,7 +109,7 @@ The proposal had one target: *qualified* coverage. The freeze keeps that target 
   - eventual success: the one-sided 95% lower bound **≥ 95%**;
   - first-try success: the lower bound **≥ 90%**.
 - **The bounds,** both reported:
-  - **the clustered bound** (it decides): the 5th percentile of 2,000 bootstrap resamples of whole pool-days (seed 20261008);
+  - **the clustered bound** ~~(it decides)~~ *(amendment 2: a diagnostic only)*: the 5th percentile of 2,000 bootstrap resamples of whole pool-days (seed 20261008);
   - **the simple binomial** beside it: a one-sided Wilson bound.
 - **Zero failures isn't zero probability:** even 0 failures in 200 independent jobs leaves an upper bound of about 1.5%, and correlation makes that optimistic.
 
@@ -103,6 +130,6 @@ The proposal had one target: *qualified* coverage. The freeze keeps that target 
 
 ## After it
 
-- **What it permits:** if availability passes, its per-cell estimates may update T9-E1's planning.
+- ~~**What it permits:** if availability passes, its per-cell estimates may update T9-E1's planning.~~ *(amendment 2: nothing passes; amendment 3's profile, if the data supports fitting it, may be added to power beside A1–A5.)*
 - **What stays:** the A1–A5 and informative-missingness stresses, until enough regimes (congestion included) are seen. Availability is modelled by reason, time and state, not as one averaged rate.
 - **What it can't estimate:** landing and failed-fee estimates need owner-authorized attempt records. The halt isn't lifted to collect them.

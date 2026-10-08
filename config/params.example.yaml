@@ -236,6 +236,10 @@ sniper:
   notify:                        # phone alerts (TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID in .env)
     levels: [buy, close, error, digest]   # any of: buy, sell, close, callout, error, signal, desk, info, digest (the day's summary)
 
+  ledger:
+    shadow: false                # the paper SHADOW ledger (sniper/shadow_ledger.py): every 30 s, mirror the account
+                                 # journal into the ledger prototype and report divergences. Non-authoritative: it
+                                 # never trades, signs, sends or changes the bot's books. Paper only
   feed:
     trades: solana               # solana = read trades from pump.fun's on-chain logs (no per-trade fee)
                                  # pumpportal = PumpPortal token-trade stream (0.01 SOL / 10k trades, key + funded wallet)
