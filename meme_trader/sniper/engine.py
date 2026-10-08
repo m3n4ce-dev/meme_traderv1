@@ -317,6 +317,13 @@ class Engine:
             from .quotes import QuoteBook, Quoter
             self.quotes = QuoteBook(DATA / "quotes.db", Quoter(lambda: self._fork_rpc()[0], lambda: self.last_slot))
             self.revival.quotes = self.quotes
+        # the paper SHADOW ledger (shadow_ledger.py): default off; non-authoritative - it reads the account journal and
+        # writes only its own database, every 30 s off the event loop; a divergence is a status, never an action
+        self.shadow = None
+        self._shadow_busy, self._shadow_at = False, 0.0
+        if self.persist and not str(self.mode).startswith("live") and (self.p.get("ledger") or {}).get("shadow"):
+            from .shadow_ledger import ShadowLedger
+            self.shadow = ShadowLedger(DATA / f"account-{self.mode}.jsonl", DATA / f"shadow-ledger-{self.mode}.db")
         self._last_revival = 0.0
         self.xfeed = None                                  # the dashboard's X feed (posts naming a coin), when it runs
         self.note_waiting: dict[str, set] = {}             # memory item id -> personas still writing a reply
@@ -2258,7 +2265,17 @@ class Engine:
         finally:
             self._quotes_busy = False
 
+    async def _run_shadow(self) -> None:
+        self._shadow_busy = True
+        try:
+            await asyncio.to_thread(self.shadow.sync)    # (sync never raises: its failures are its own status)
+        finally:
+            self._shadow_busy = False
+
     async def _tick(self) -> None:
+        if self.shadow is not None and not self._shadow_busy and time.time() - self._shadow_at >= 30:
+            self._shadow_at = time.time()
+            asyncio.ensure_future(self._run_shadow())
         if self.quotes is not None and not self._quotes_busy and time.time() - self._quotes_at >= 1:
             self._quotes_at = time.time()
             asyncio.ensure_future(self._run_quotes())
@@ -2980,6 +2997,7 @@ class Engine:
                 "x_per_day": int((self.p.get("intel") or {}).get("x_reads_per_day", 3000)),
                 "x_links_cached": len(self._x_cache), "graduated": self.gradlog.view() if self.gradlog else None,
                 "mayhem_reads": {**self.mayhem_reads, "queued": len(self._mayhem_q)},
+                "shadow_ledger": dict(self.shadow.status) if self.shadow is not None else None,
                 "forks": {"conflicts": self.stats["fork_conflicts"], "kept": self.stats["fork_kept"],
                           "replaced": self.stats["fork_replaced"], "unresolvable": self.stats["fork_unresolvable"],
                           "pending": len(self.fork_pending), "lookup_errors": self.stats["fork_lookup_errors"],
