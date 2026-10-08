@@ -200,6 +200,12 @@ def test_the_engine_runs_the_shadow_only_when_enabled_and_only_in_paper(tmp_path
     write(tmp_path / f"account-{e.mode}.jsonl", rows())
     asyncio.run(e._run_shadow())
     assert e.shadow.status["mirrored"] == 7 and e.shadow.status["divergences"] == 0
+    with (tmp_path / f"account-{e.mode}.jsonl").open("a") as f:     # a second pass, from another event loop run:
+        f.write(json.dumps({"ts": 9, "account": A, "kind": "deposit", "sol": 1.0,      # (the live bug: each pass on a
+                            "cash_after": round(rows()[-1]["cash_after"] + 1, 9)}) + "\n")   # different thread)
+    asyncio.run(e._run_shadow())
+    asyncio.run(e._run_shadow())
+    assert e.shadow.status["errors"] == 0 and e.shadow.status["mirrored"] == 8, e.shadow.status["last_error"]
 
 
 # ---- a fifteenth review: durable coverage, source integrity, recorded repairs, the authority cut
