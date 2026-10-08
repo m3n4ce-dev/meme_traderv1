@@ -470,28 +470,19 @@ class Export:
         from .quotes import QuoteBook
         qb = QuoteBook.read_only(p)
         (self.out / "quotes_summary.json").write_text(json.dumps(qb.view(max_age_s=0), indent=1))
-        rows = qb.attempts()
+        jobs, rows, check = qb.export()                  # one snapshot; raw tables cross-footed (14th review)
         with open(self.out / "quote_attempts.jsonl", "w") as f:
             for r in rows:
                 f.write(json.dumps(r) + "\n")
         self._note("quote_attempts.jsonl", rows=len(rows))
-        jobs = qb.jobs()                                 # every job's outcome, those with no attempt included
-        with open(self.out / "quote_jobs.jsonl", "w") as f:
+        with open(self.out / "quote_jobs.jsonl", "w") as f:  # every job's outcome, those with no attempt included
             for r in jobs:
                 f.write(json.dumps(r) + "\n")
         self._note("quote_jobs.jsonl", rows=len(jobs))
-        ids = {j["job_id"] for j in jobs}                # the export's own joins, checked end to end (13th review)
-        keys = [(r["job_id"], r["attempt_n"]) for r in rows]
-        tried = {r["job_id"] for r in rows}
-        check = {"export_version": jobs[0]["export_version"] if jobs else None, "jobs": len(jobs), "attempts": len(rows),
-                 "duplicate_attempt_keys": len(keys) - len(set(keys)),
-                 "attempts_without_a_job": sum(1 for r in rows if r["job_id"] not in ids),
-                 "jobs_with_zero_attempts": sum(1 for j in jobs if j["job_id"] not in tried),
-                 "jobs_with_unknown_scheduled_time": sum(1 for j in jobs if not j["due_known"]),
-                 "attempts_by_record_version": dict(Counter(str(r["record"].get("v", 1)) for r in rows))}
         (self.out / "quote_export_check.json").write_text(json.dumps(check, indent=1))
-        if check["duplicate_attempt_keys"] or check["attempts_without_a_job"]:
-            self.findings.append(f"Quote export joins aren't clean: {check}")
+        if not check["clean"]:
+            self.findings.append(f"Quote export isn't clean (orphans, dropped or duplicate attempts, or tries that "
+                                 f"don't match their attempts): {json.dumps(check)}")
 
     def fork_conflicts(self) -> None:
         """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict by a stable id, matched

@@ -369,14 +369,18 @@ class QuoteBook:
         self.lock = threading.Lock()                     # the event loop requests while a worker thread runs jobs
         self._view, self._view_at = None, 0.0
 
-    BOOK_VERSION = 2
+    BOOK_VERSION = 3
 
     def _migrate(self) -> None:
-        """Book version 1 -> 2, once, in one transaction: add `next_at` and `due_known`. A version-1 job that had a
-        retry scheduled (tries >= 2, or still pending after a try) had its `due` overwritten by that retry: its
-        original scheduled time is NOT reconstructed - `due_known` = 0 marks it unknown, and `next_at` takes over the
-        queue."""
-        if self.db.execute("PRAGMA user_version").fetchone()[0] >= self.BOOK_VERSION:
+        """The book's versions, each step once, in one transaction. Original scheduled times are never reconstructed:
+        a job whose `due` an old retry overwrote gets `due_known` = 0.
+        1 -> 2: add `next_at` and `due_known`; mark jobs that had a retry scheduled - tries >= 2, or pending after a try.
+        2 -> 3 (a fourteenth review): also a job that ended MISSED after a try. The old writer scheduled a retry
+        (overwriting `due`), then finished the job as missed without counting a try, so tries stayed at 1. Evidence
+        decides: a missed job's last attempt written by version-2+ code records `next_attempt_at` in its clock; one
+        without it (or with no attempt row at all) is legacy, so its scheduled time is unknown."""
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if version >= self.BOOK_VERSION:
             return
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(jobs)")}
         self.db.execute("BEGIN IMMEDIATE")
@@ -387,6 +391,16 @@ class QuoteBook:
                 self.db.execute("ALTER TABLE jobs ADD COLUMN due_known INTEGER NOT NULL DEFAULT 1")
                 self.db.execute("UPDATE jobs SET due_known = 0, next_at = due WHERE tries >= 2 OR "
                                 "(state = 'pending' AND tries >= 1)")
+            if version < 3:
+                for key, tries, result in self.db.execute(
+                        "SELECT id, tries, result FROM jobs WHERE state != 'pending' AND tries >= 1 AND "
+                        "due_known = 1").fetchall():
+                    if json.loads(result or "{}").get("reason") != "missed":
+                        continue
+                    row = self.db.execute("SELECT rec FROM attempts WHERE job = ? AND n = ?", (key, tries)).fetchone()
+                    clock = (json.loads(row[0]).get("job") or {}) if row else {}
+                    if "next_attempt_at" not in clock:
+                        self.db.execute("UPDATE jobs SET due_known = 0 WHERE id = ?", (key,))
             self.db.execute(f"PRAGMA user_version = {self.BOOK_VERSION}")
             self.db.execute("COMMIT")
         except BaseException:
@@ -399,7 +413,15 @@ class QuoteBook:
         b = cls.__new__(cls)
         b.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None, check_same_thread=False)
         b.quoter, b.clock, b.lock, b._view, b._view_at = None, time.time, threading.Lock(), None, 0.0
+        b.migrated = b.db.execute("PRAGMA user_version").fetchone()[0] >= cls.BOOK_VERSION
         return b
+
+    migrated = True                                      # a writable book migrates on open; read-only ones may not have
+
+    def _known(self, known) -> bool:
+        """A job's scheduled time is known only in a migrated book whose provenance says so - a missing column or an
+        unmigrated book is NOT evidence that `due` was never overwritten (a fourteenth review)."""
+        return bool(self.migrated and known)
 
     def request(self, key: str, kind: str, pool: str, side: str, amount: int, due: float, deadline: float,
                 meta: dict | None = None) -> bool:
@@ -547,28 +569,68 @@ class QuoteBook:
         return ", ".join(c if c in have else f"NULL AS {c}" for c in ("next_at", "due_known"))
 
     def jobs(self) -> list[dict]:
+        with self.lock:
+            return self._jobs()
+
+    def _jobs(self) -> list[dict]:
         """Every job and its outcome - including those that finished with no attempt (missed) and those pending - for
         the package (export version 2: identity, schedule, outcome and the job's full metadata, holds included, are
         separate fields; nothing is merged over anything)."""
-        with self.lock:
-            rows = self.db.execute(f"SELECT id, kind, pool, side, amount, due, deadline, state, tries, result, meta, "
-                                   f"created, {self._cols()} FROM jobs ORDER BY created, id").fetchall()
+        rows = self.db.execute(f"SELECT id, kind, pool, side, amount, due, deadline, state, tries, result, meta, "
+                               f"created, {self._cols()} FROM jobs ORDER BY created, id").fetchall()
         out = []
         for key, kind, pool, side, amount, due, deadline, state, tries, result, meta, created, nxt, known in rows:
             r = json.loads(result or "{}")
             out.append({"export_version": EXPORT_VERSION, "job_id": key, "kind": kind, "pool": pool, "side": side,
-                        "amount": amount, "scheduled_due": due, "due_known": bool(known if known is not None else 1),
+                        "amount": amount, "scheduled_due": due, "due_known": self._known(known),
                         "deadline": deadline, "next_attempt_at": nxt, "created": created, "state": state,
                         "tries": tries, "reason": r.get("reason"),
                         "qualification": qualification(r) if state == "ok" else None, "meta": json.loads(meta or "{}")})
         return out
 
     def attempts(self) -> list[dict]:
+        with self.lock:
+            return self._attempts()
+
+    def _attempts(self) -> list[dict]:
         """Every attempt, for the review package (pool addresses, amounts and account bytes are public chain data).
         Export version 2: `job_id` and `attempt_n` identify it, `record` is the stored attempt as written (its own
         `job` clock inside it) - never expanded over the identity fields (a thirteenth review)."""
+        rows = self.db.execute("SELECT a.job, a.n, a.rec, j.kind, j.id IS NULL FROM attempts a LEFT JOIN jobs j "
+                               "ON j.id = a.job ORDER BY a.rowid").fetchall()
+        # a LEFT join: an attempt whose job is missing (a bad import, drift, an outside writer) is KEPT and flagged, so
+        # the export's check can see it - never filtered away first (a fourteenth review)
+        return [{"export_version": EXPORT_VERSION, "job_id": j, "attempt_n": n, "kind": k, "orphan": bool(orphan),
+                 "record": json.loads(rec)} for j, n, rec, k, orphan in rows]
+
+    def export(self) -> tuple[list[dict], list[dict], dict]:
+        """(jobs, attempts, check) from ONE read transaction - one snapshot, so a concurrent commit can't make the
+        export inconsistent with itself. The check cross-foots the raw tables: every raw attempt exported; attempts
+        whose job is missing; duplicate keys; each job's tries against its attempts (count and 1..n continuity);
+        zero-attempt jobs split into pending and finished (missed); unknown scheduled times; record versions."""
         with self.lock:
-            rows = self.db.execute("SELECT a.job, a.n, a.rec, j.kind FROM attempts a JOIN jobs j ON j.id = a.job "
-                                   "ORDER BY a.rowid").fetchall()
-        return [{"export_version": EXPORT_VERSION, "job_id": j, "attempt_n": n, "kind": k, "record": json.loads(rec)}
-                for j, n, rec, k in rows]
+            self.db.execute("BEGIN")
+            try:
+                raw = self.db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
+                jobs, attempts = self._jobs(), self._attempts()
+                tries = dict(self.db.execute("SELECT id, tries FROM jobs").fetchall())
+            finally:
+                self.db.execute("COMMIT")
+        by_job: dict = defaultdict(list)
+        for a in attempts:
+            by_job[a["job_id"]].append(a["attempt_n"])
+        keys = [(a["job_id"], a["attempt_n"]) for a in attempts]
+        broken = sorted(j for j, ns in by_job.items() if j in tries and sorted(ns) != list(range(1, tries[j] + 1)))
+        zero = [j for j in jobs if j["job_id"] not in by_job]
+        check = {"export_version": EXPORT_VERSION, "jobs": len(jobs), "raw_attempts": raw, "attempts": len(attempts),
+                 "attempts_dropped": raw - len(attempts), "duplicate_attempt_keys": len(keys) - len(set(keys)),
+                 "attempts_without_a_job": sum(a["orphan"] for a in attempts),
+                 "jobs_whose_attempts_dont_match_tries": broken[:20], "jobs_whose_attempts_dont_match_tries_n": len(broken),
+                 "zero_attempt_jobs_pending": sum(1 for j in zero if j["state"] == "pending"),
+                 "zero_attempt_jobs_finished": sum(1 for j in zero if j["state"] != "pending"),
+                 "jobs_with_unknown_scheduled_time": sum(1 for j in jobs if not j["due_known"]),
+                 "book_migrated": self.migrated,
+                 "attempts_by_record_version": dict(Counter(str(a["record"].get("v", 1)) for a in attempts))}
+        check["clean"] = not (check["attempts_dropped"] or check["duplicate_attempt_keys"] or
+                              check["attempts_without_a_job"] or check["jobs_whose_attempts_dont_match_tries_n"])
+        return jobs, attempts, check
