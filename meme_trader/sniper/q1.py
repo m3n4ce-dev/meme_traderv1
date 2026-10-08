@@ -317,6 +317,9 @@ def transport_brackets(trace: list[dict], start: float, end: float, now: float |
            "hosts": dict(hosts), "by_host": by_host,
            "host_changes": sum(1 for x, y in zip(seen, seen[1:]) if x.get("host") != y.get("host")),
            "code_revisions": dict(Counter(a.get("code", "") for a in seen))}
+    out["stress_profile"] = {"power_product": POWER_PRODUCT,
+                             "read_path": stress_profile(out["read_path"], out["observed_hours"]),
+                             "transport": stress_profile(out, out["observed_hours"])}
     if liveness is not None:
         up_s = 0.0
         for a, b in gaps:
@@ -326,6 +329,108 @@ def transport_brackets(trace: list[dict], start: float, end: float, now: float |
                                    "process_down_or_unknown_hours": round((unobs - up_s) / 3600, 2),
                                    "heartbeat_since": liveness[0][0] if liveness else None}
     return out
+
+
+# The stress profile (Q1 amendment 5, before the window opened: amendment 4's specification as frozen code). Per
+# product, from its detected runs and the observed hours only - durations partially identified, never filled in:
+HORIZONS_S = (30, 60, 900, 3600, 7200)
+HORIZON_STRESS_S, HORIZON_SENSITIVITY_S = 86400, 21600   # a run possibly still going past 2 h: to 24 h (6 h: sensitivity)
+PROFILE_ALPHA = 0.05 / (len(HORIZONS_S) + 1)    # five survival points and the rate: Bonferroni, jointly 5%
+POWER_PRODUCT = "read_path"     # the product T9-E1's power may use: a stale or slow read isn't a tradeable quote either
+STRESS_LABEL = ("STRESS SCENARIO (Q1 amendment 5), not a confidence statement - until a calibration of the whole "
+                "observe -> bound -> power pipeline shows coverage")
+
+
+def _ceil(x: float, d: int = 6) -> float:
+    return math.ceil(x * 10 ** d - 1e-9) / 10 ** d
+
+
+def cp_upper(k: int, n: int, alpha: float) -> float | None:
+    """The exact one-sided (1 - alpha) Clopper-Pearson UPPER bound for k of n: the p at which P(X <= k | n, p) =
+    alpha, rounded UP (a stress bound must not round toward the estimate). k = n gives 1.0; n = 0 gives None."""
+    if n == 0:
+        return None
+    if k >= n:
+        return 1.0
+
+    def cdf(p):                                          # P(X <= k), in logs
+        if p <= 0:
+            return 1.0
+        if p >= 1:
+            return 0.0
+        lp, lq = math.log(p), math.log1p(-p)
+        return sum(math.exp(math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * lp + (n - i) * lq)
+                   for i in range(0, k + 1))
+    lo, hi = 0.0, 1.0
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if cdf(mid) > alpha:
+            lo = mid
+        else:
+            hi = mid
+    return min(1.0, _ceil(hi))
+
+
+def poisson_upper(k: int, alpha: float) -> float:
+    """The exact one-sided (1 - alpha) upper bound on a Poisson mean from k events: the lambda at which
+    P(X <= k | lambda) = alpha (k = 0: -ln alpha), rounded up."""
+    def cdf(lam):
+        if lam <= 0:
+            return 1.0
+        return sum(math.exp(i * math.log(lam) - lam - math.lgamma(i + 1)) for i in range(0, k + 1))
+    lo, hi = 0.0, k + 50.0 + 20.0 * math.sqrt(k + 1)
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if cdf(mid) > alpha:
+            lo = mid
+        else:
+            hi = mid
+    return _ceil(hi)
+
+
+def stress_profile(product: dict, observed_hours: float, alpha: float = PROFILE_ALPHA) -> dict:
+    """One product's stress profile from its detected runs (`brackets`), per amendment 5:
+    - RATE: detected runs per OBSERVED hour, and its exact Poisson upper bound (unobserved hours aren't exposure);
+    - SURVIVAL at each frozen horizon h: the lower count (runs with min_s > h - the one-episode assumption) and the
+      UPPER count (runs with max_s > h, or no maximum: a censored or gap-split side is open); the stress value is the
+      exact Clopper-Pearson upper bound of the upper count out of n. No duration is ever assigned to a censored run;
+    - DURATIONS FOR POWER: a step distribution from the stress survival, each bin's mass at its UPPER end (30 s,
+      60 s, 15 min, 1 h, 2 h) and the mass past 2 h at the horizon stress (24 h; a 6-hour sensitivity beside it).
+    No runs: every detected run at the horizon stress, at the rate bound for zero runs. No observed time: none."""
+    if not observed_hours or observed_hours <= 0:
+        return {"label": STRESS_LABEL, "unavailable": "no observed time"}
+    runs = product.get("brackets") or []
+    n = len(runs)
+    lam = poisson_upper(n, alpha)
+    surv = {}
+    for h in HORIZONS_S:
+        upper = sum(1 for r in runs if r.get("max_s") is None or r["max_s"] > h)
+        lower = sum(1 for r in runs if (r.get("min_s") or 0) > h)
+        surv[_label(h)] = {"lower_count": lower, "upper_count": upper, "stress": cp_upper(upper, n, alpha)}
+
+    def durations(tail_s: float) -> list[list[float]]:
+        if n == 0:
+            return [[tail_s, 1.0]]
+        out, prev = [], 1.0
+        for h in HORIZONS_S:
+            s = surv[_label(h)]["stress"]
+            out.append([h, round(max(0.0, prev - s), 6)])
+            prev = s
+        out.append([tail_s, round(prev, 6)])
+        return [d for d in out if d[1] > 0]
+    censored = sum(1 for r in runs if r.get("max_s") is None)
+    return {"label": STRESS_LABEL, "runs": n, "censored_runs": censored, "observed_hours": observed_hours,
+            "alpha_each": round(alpha, 6),
+            "edge": "no runs" if n == 0 else ("all censored" if censored == n else ""),
+            "rate_per_observed_hour": {"detected": round(n / observed_hours, 6),
+                                       "stress": _ceil(lam / observed_hours)},
+            "survival": surv,
+            "durations_for_power": durations(HORIZON_STRESS_S),
+            "durations_sensitivity_6h": durations(HORIZON_SENSITIVITY_S)}
+
+
+def _label(h: int) -> str:
+    return f"{h} s" if h < 900 else (f"{h // 60} min" if h < 3600 else f"{h // 3600} h")
 
 
 def _split(runs: list[list[dict]]) -> list[list[dict]]:

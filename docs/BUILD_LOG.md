@@ -4,6 +4,21 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-08 — Entry #82: Q1 amendment 5 - the stress profile as frozen code
+
+**Source:** the owner confirmed amendment 4's outage profile, and allowed improvements before any data. Four points in it were open and could have become choices made after seeing the data. Amendment 5 closes them, before the window opens on 2026-10-09:
+- **the power product:** the READ PATH (down or degraded), because a stale or slow read isn't a tradeable quote either; the transport profile is a diagnostic;
+- **one joint alpha:** 0.05/6 for each of the five horizons and the rate (amendment 4's text summed to 6%);
+- **bounds to durations:** a step distribution with each bin's mass at its upper end, and the mass past 2 hours at the 24-hour horizon stress (a 6-hour sensitivity beside it);
+- **hosts pooled:** the bot's own experience. Runs already end at a host change.
+
+`q1.stress_profile`, `cp_upper` and `poisson_upper` implement it, and `transport_observations.stress_profile` reports both products on every Q1 report. Tests: `tests/test_q1_profile.py`:
+- closed forms, and bisection identities;
+- rounding toward the stress;
+- the round-14 counterexample (a run censored at 900 s is never given a 30-second maximum);
+- monotone survival, with durations that form a distribution;
+- the declared edge cases (no runs, all censored, no observed time).
+
 ## 2026-10-08 — Entry #81: The fifteenth review: a shadow that can't become falsely clean, a crash matrix at the real boundary, a three-state observer, and a stress profile in place of the fitting recipe
 
 **Source:** a fifteenth external review (GPT 6.1 Sol, PR #112's merge `e2e9df2`).
