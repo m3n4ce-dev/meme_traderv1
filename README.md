@@ -7,7 +7,7 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Tests: 394 passing](https://img.shields.io/badge/tests-394%20passing-brightgreen.svg)
+![Tests: 1,179 passing](https://img.shields.io/badge/tests-1%2C179%20passing-brightgreen.svg)
 ![Mode: paper by default](https://img.shields.io/badge/mode-paper%20by%20default-orange.svg)
 
 ![The trading room: the bots at their desks and the AI team voting on a coin](docs/img/desk.png)
@@ -25,6 +25,18 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 | Early sniper (now off) | 78 | −13.4% | −13.8% (−17.0% to −10.6%) | −2.37 SOL | losing, not by bad luck |
 
 <sub>Real market, pretend money, 2026-10-03 to 10-06. Fills are modelled: a 2.5 s delay to land, curve fees, and failed orders. The paper account hit its drawdown kill switch on 10-06; testing goes on without it (below).</sub>
+
+### Where things stand (2026-10-08, [build log #61–#82](docs/BUILD_LOG.md))
+
+- **The paper account is still halted** by its drawdown kill switch (since 2026-10-06 11:46 UTC). Lifting it is the owner's call. Research and measurement go on without it.
+- **A live price watcher measures what trading would really cost** (measurement only, nothing is sent):
+  - it takes executable PumpSwap quotes from on-chain state, priced by the official SDK's math. An external reviewer re-derived 250 of 250 recorded quotes exactly from their raw accounts;
+  - **trading costs more than the research assumed:** a 0.25 SOL buy-then-sell on 40 pools like the ones tested costs a **median 3.2%** in fees and impact, plus about 0.8% in network fees. The research had assumed 1.2% for the whole round trip.
+- **A 14-day measurement of quote availability** ([Q1](research/registrations/Q1-quote-qualification.md)) runs 2026-10-09 to 10-22, registered before any data:
+  - it's descriptive, with no pass/fail, because a calibration showed no available bound can certify 95% availability in 14–28 days;
+  - its outage stress profile is fixed in code before the window opens.
+- **A shadow ledger checks the paper account's books** against a transactional ledger prototype. It's non-authoritative and paper only, and it has been on since 10-08. A crash matrix at the bot's real write boundaries found and fixed three ways a crash or a full disk could leave the books and the account journal disagreeing.
+- **Every change goes through external review.** Fifteen rounds so far. Each round's findings, the reviewer's tests and the fixes are in the build log.
 
 ### What four days of data say (2026-10-06, [build log #56–#60](docs/BUILD_LOG.md))
 
