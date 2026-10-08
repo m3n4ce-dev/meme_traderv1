@@ -81,6 +81,72 @@ def check_tx_association(signed_tx: bytes, signature: str, blockhash: str) -> No
     raise LedgerError("signed bytes aren't a Solana transaction")
 
 
+def _statements(text: str) -> list[str]:
+    """The DDL as single statements (sqlite3.complete_statement splits it safely, triggers included)."""
+    out, buf = [], ""
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("--") and not buf.strip():
+            continue
+        buf += line
+        if sqlite3.complete_statement(buf):
+            if buf.strip():
+                out.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        raise LedgerError("schema.sql ends with an incomplete statement")
+    return out
+
+
+def _empty(path: Path) -> bool:
+    """No file, a zero-byte file, or a database with no objects at all (e.g. a creation that rolled back): new."""
+    if not path.exists() or path.stat().st_size == 0:
+        return True
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return con.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
+        finally:
+            con.close()
+    except sqlite3.DatabaseError:
+        return False                                     # not a database: _inspect quarantines it
+
+
+def _shape(con: sqlite3.Connection) -> dict:
+    """A database's structure, normalized: every table, index and trigger's SQL by name (SQLite stores the DDL text)."""
+    return {(t, n): " ".join((q or "").split()) for t, n, q in con.execute(
+        "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")}
+
+
+def _inspect(path: Path, text: str, sha: str) -> None:
+    """An EXISTING file opens only if it carries exactly this version's stamp AND exactly this version's structure.
+    Read-only: an unstamped file (the revision-3 writer created `migrations` and left it empty), another version or
+    hash, or a structure that differs (old tables keep their old columns under CREATE ... IF NOT EXISTS) is QUARANTINED
+    untouched - migrate it explicitly, from a copy (a thirteenth review)."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            names = {r[0] for r in con.execute("SELECT name FROM sqlite_master")}
+            rows = con.execute("SELECT version, sha256 FROM migrations").fetchall() if "migrations" in names else None
+            shape = _shape(con)
+        finally:
+            con.close()
+    except sqlite3.DatabaseError as ex:
+        raise LedgerError(f"quarantined: {path.name} isn't a readable ledger database ({ex})") from None
+    if rows != [(SCHEMA_VERSION, sha)]:
+        raise LedgerError(f"quarantined: {path.name} carries stamp {rows}, not version {SCHEMA_VERSION} ({sha[:12]}); "
+                          f"migrate it explicitly - it isn't read as current")
+    ref = sqlite3.connect(":memory:")
+    try:
+        for stmt in _statements(text):
+            ref.execute(stmt)
+        want = _shape(ref)
+    finally:
+        ref.close()
+    if shape != want:
+        diff = sorted(set(shape) ^ set(want)) or sorted(k for k in want if shape.get(k) != want[k])
+        raise LedgerError(f"quarantined: {path.name}'s structure isn't version {SCHEMA_VERSION}'s ({diff[:3]})")
+
+
 def _obs_digest(signature, event_index, commitment, source, slot, err, content_sha256, block_height, history_searched,
                 outcome) -> str:
     return _sha(json.dumps([signature, event_index, commitment, source, slot, err, content_sha256, block_height,
@@ -89,17 +155,23 @@ def _obs_digest(signature, event_index, commitment, source, slot, err, content_s
 
 class Ledger:
     def __init__(self, path: str | Path = ":memory:", code_revision: str = "reference", fault=None):
+        text = SCHEMA.read_text()
+        sha = hashlib.sha256(text.encode()).hexdigest()
+        new = str(path) == ":memory:" or _empty(Path(path))
+        if not new:
+            _inspect(Path(path), text, sha)              # BEFORE anything is executed on it: refused files stay as they were
         self.db = sqlite3.connect(str(path), isolation_level=None)
         self.db.execute("PRAGMA foreign_keys = ON")
-        text = SCHEMA.read_text()
-        self.db.executescript(text)
-        sha = hashlib.sha256(text.encode()).hexdigest()
-        rows = self.db.execute("SELECT version, sha256 FROM migrations").fetchall()
-        if not rows:
-            self.db.execute("INSERT INTO migrations VALUES (?, ?, ?)", (SCHEMA_VERSION, sha, time.time()))
-        elif rows != [(SCHEMA_VERSION, sha)]:
-            raise LedgerError(f"quarantined: this database was written by schema {rows}, not version {SCHEMA_VERSION} "
-                              f"({sha[:12]}); migrate it explicitly - it isn't read as current")
+        if new:                                          # a new file: its schema and stamp in one transaction
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                for stmt in _statements(text):
+                    self.db.execute(stmt)
+                self.db.execute("INSERT INTO migrations VALUES (?, ?, ?)", (SCHEMA_VERSION, sha, time.time()))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
         self.code = code_revision
         self.fault = fault                # tests: fault(point) may raise at 'open', 'postings', 'sealed', 'committed'
 

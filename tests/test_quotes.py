@@ -218,7 +218,10 @@ def test_the_review_package_carries_coverage_and_every_attempt(tmp_path):
     summary = json.loads((out / "quotes_summary.json").read_text())
     rows = [json.loads(x) for x in (out / "quote_attempts.jsonl").read_text().splitlines()]
     assert summary["coverage"]["entry / signal"]["ok (qualified)"] == 1 and summary["pending"] == 1      # its exit, scheduled
-    assert len(rows) == 1 and rows[0]["reason"] == "ok" and "SECRET" not in json.dumps(rows)
+    assert len(rows) == 1 and rows[0]["record"]["reason"] == "ok" and "SECRET" not in json.dumps(rows)
+    assert rows[0]["job_id"] == "F|entry" and rows[0]["attempt_n"] == 1 and isinstance(rows[0]["record"]["job"], dict)
+    jobs = [json.loads(x) for x in (out / "quote_jobs.jsonl").read_text().splitlines()]
+    assert {j["job_id"] for j in jobs} >= {r["job_id"] for r in rows}             # every attempt joins its job
 
 
 def test_unqualified_state_and_outputs_are_reason_coded_and_permanent_refusals_arent_retried(tmp_path):

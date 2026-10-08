@@ -12,9 +12,17 @@ Two estimands, kept apart (the freeze's one change to the eleventh review's prop
 A record without qualification (from before v2) is neither. Missed jobs (zero attempts) and late responses count as
 failures - every job in the window is in its cell.
 
-Cells: exits by arm x delay x hold (8 - the guards and the verdict); entries by arm x delay (4, reported apart).
-Bounds: a one-sided 95% Wilson lower bound (the simple binomial), and the 5th percentile of a bootstrap over pool-days
-(the clustered bound, which the verdict uses). Targets: eventual >= 95%, first try >= 90%, per exit cell.
+Cells: exits by arm x delay x hold (8, the guards); entries by arm x delay (4, reported apart).
+
+Amendment 2 (a thirteenth review, before the window opened): NO FORMAL PASS/FAIL. Provider outages hit every pool at
+once, so pools and pool-days aren't independent evidence, and the pool-day bootstrap reads 1.0 whenever everything
+succeeded. research/q1_calibration.py ran whole windows under common outage processes through this code: no bound in
+the family both kept false passes <= 5% under outages of an hour or more and had power in 14-28 days (a whole-day
+shock can't be certified at 95% in under ~2 months). So the report is DESCRIPTIVE: per cell, the estimates (simple
+Wilson bound beside them), the time-block bounds (exact one-sided Clopper-Pearson on clean UTC blocks of 1/3/6/24 h,
+each valid only if provider states are independent across blocks of that length), the pool-day bootstrap (a
+diagnostic only), and the outage episodes seen - the measured outage process T9-E1's power may add as a profile.
+Targets kept for reference: eventual >= 95%, first try >= 90%.
 """
 from __future__ import annotations
 
@@ -34,6 +42,7 @@ DAYS, MAX_DAYS = 14, 28             # the window; extended a whole day at a time
 TARGETS = {"eventual": 0.95, "first_try": 0.90}
 MIN_EXITS_PER_CELL, MIN_POOLS, MIN_POOL_DAYS = 200, 30, 100
 BOOT, SEED, Z = 2000, 20261008, 1.6449
+BLOCKS_REPORTED = (1, 3, 6, 24)    # hours: each exit cell's block bound at every one of these is reported
 HOLDS = ("hold 1 h", "hold 2 h")
 DELAYS = (5, 60)
 
@@ -72,6 +81,45 @@ def wilson_lower(k: int, n: int, z: float = Z) -> float | None:
     return round(max(0.0, (c - h) / (1 + z * z / n)), 4)
 
 
+def cp_lower(k: int, n: int, alpha: float = 0.05) -> float | None:
+    """The exact one-sided (1 - alpha) Clopper-Pearson lower bound for k successes in n: the p at which
+    P(X >= k | n, p) = alpha. All n successes give alpha ** (1/n) - never 1.0."""
+    if n == 0:
+        return None
+    if k == 0:
+        return 0.0
+
+    def tail(p):                                         # P(X >= k), in logs (n is a few hundred blocks at most)
+        if p <= 0:
+            return 0.0
+        if p >= 1:
+            return 1.0
+        lp, lq = math.log(p), math.log1p(-p)
+        return sum(math.exp(math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * lp + (n - i) * lq)
+                   for i in range(k, n + 1))
+    lo, hi = 0.0, 1.0
+    for _ in range(80):
+        mid = (lo + hi) / 2
+        if tail(mid) < alpha:
+            lo = mid
+        else:
+            hi = mid
+    return round(lo, 4)
+
+
+def block_bound(rows: list[dict], hit: list[bool], hours: float) -> dict:
+    """Time blocks as the unit (amendment 2, a thirteenth review: provider outages hit every pool at once, so pools and
+    pool-days aren't independent evidence). A UTC block of `hours` with at least one matured job is CLEAN when every
+    job due in it succeeded; the share of clean blocks lower-bounds the block-average availability, and its exact
+    Clopper-Pearson bound holds IF provider states are independent across such blocks (the stated assumption)."""
+    blocks: dict = {}
+    for r, h in zip(rows, hit):
+        b = int(r["due"] // (hours * 3600))
+        blocks[b] = blocks.get(b, True) and bool(h)
+    n, k = len(blocks), sum(blocks.values())
+    return {"hours": hours, "blocks": n, "clean": k, "lower": cp_lower(k, n)}
+
+
 def cluster_lower(groups: list[tuple[int, int]], boots: int = BOOT, seed: int = SEED) -> float | None:
     """The 5th percentile of the success share over bootstrap resamples of whole clusters (pool-days)."""
     if not groups:
@@ -105,22 +153,38 @@ def _cell_stats(rows: list[dict]) -> dict:
                     g[r["cluster"]][0] += h
                     g[r["cluster"]][1] += 1
                 out[f"{est}_{when}"]["clustered_lower"] = cluster_lower([tuple(v) for v in g.values()])
+                out[f"{est}_{when}"]["block_lower"] = {f"{h}h": block_bound(rows, hit, h) for h in BLOCKS_REPORTED}
     return out
 
 
-def _passes(cells: dict, est: str) -> bool:
-    return all((c[f"{est}_eventual"]["clustered_lower"] or 0) >= TARGETS["eventual"] and
-               (c[f"{est}_first_try"]["clustered_lower"] or 0) >= TARGETS["first_try"] for c in cells.values())
+EPISODE_GAP_S = 900                # unavailable jobs this close (no available job between) are one outage episode
+
+
+def _split(runs: list[list[dict]]) -> list[list[dict]]:
+    """Runs of consecutive unavailable jobs, split where two of them are more than EPISODE_GAP_S apart."""
+    out = []
+    for r in runs:
+        cur = [r[0]]
+        for j in r[1:]:
+            if j["due"] - cur[-1]["due"] > EPISODE_GAP_S:
+                out.append(cur)
+                cur = []
+            cur.append(j)
+        out.append(cur)
+    return out
 
 
 def load(db: Path) -> list[dict]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    rows = con.execute("SELECT id, kind, pool, due, deadline, state, tries, result, meta FROM jobs").fetchall()
+    have = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+    known = "due_known" if "due_known" in have else "1"
+    rows = con.execute(f"SELECT id, kind, pool, due, deadline, state, tries, result, meta, {known} FROM jobs").fetchall()
     con.close()
     out = []
-    for key, kind, pool, due, deadline, state, tries, result, meta in rows:
+    for key, kind, pool, due, deadline, state, tries, result, meta, due_known in rows:
         m, r = json.loads(meta or "{}"), json.loads(result or "{}")
-        out.append({"id": key, "kind": kind, "pool": pool, "due": due, "deadline": deadline, "state": state,
+        out.append({"id": key, "kind": kind, "pool": pool, "due": due, "due_known": bool(due_known),
+                    "deadline": deadline, "state": state,
                     "tries": tries, "r": r, "m": m, "arm": "control" if m.get("control") else "signal",
                     "delay": m.get("delay"), "hold": m.get("exit") if kind == "exit" else None, "rule": m.get("rule")})
     return out
@@ -140,7 +204,11 @@ def _guards(jobs: list[dict]) -> dict:
 def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> dict:
     now = time.time() if now is None else now
     start = _day0(start_day)
-    every = load(db)
+    loaded = load(db)
+    # `due` is each job's SCHEDULED time (immutable since book version 2): window, pool-day and recovery use it. A
+    # job whose scheduled time was lost to an old retry (`due_known` false) can't be placed: kept out, and counted
+    every = [j for j in loaded if j["due_known"]]
+    unplaced = sum(1 for j in loaded if not j["due_known"] and start <= j["due"] < start + MAX_DAYS * 86400)
     days, status = DAYS, "running"
     while True:
         end = start + days * 86400
@@ -162,19 +230,16 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
             done = [j for j in rows if j["state"] != "pending"]          # matured jobs only; pending shown apart
             cells[f"{kind} / {a} / {d} s" + (f" / {h}" if h else "")] = {**_cell_stats(done),
                                                                           "pending": len(rows) - len(done)}
-    exit_cells = {k: v for k, v in cells.items() if k.startswith("exit")}
     if complete and pending == 0:
         if not g["met"]:
             status = "insufficient: a guard is short at the longest window"
         else:
             status = "complete"
+    # Amendment 2: no formal PASS/FAIL. The calibration (research/q1_calibration.py) showed no bound in this family
+    # both controls false passes under common outages of an hour or more and has power in 14-28 days; a whole-day
+    # common shock can't be certified at 95% in under ~2 months. The report is DESCRIPTIVE: estimates, the outage
+    # episodes seen, and every block bound beside the independence assumption it needs.
     verdict = None
-    if status == "complete":
-        av, qu = _passes(exit_cells, "available"), _passes(exit_cells, "qualified")
-        layout = sum(1 for j in win if j["c"]["why"] == "ok, unqualified: undocumented_pool_bytes")
-        verdict = {"availability": "PASS" if av else "FAIL",
-                   "execution_qualification": "PASS" if qu else
-                   ("FAIL (undocumented pool layout)" if av and layout else "FAIL")}
     ordered = sorted(win, key=lambda j: j["due"])          # outages: consecutive unavailable jobs, any cell
     runs, cur = [], []
     for j in ordered:
@@ -189,6 +254,10 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
     if cur:
         runs.append(cur)
     longest = max(runs, key=len, default=[])
+    # episodes on the provider's clock: unavailable jobs (any cell) less than EPISODE_GAP_S apart with no available
+    # job between them - the measured outage process that may become an availability profile in T9-E1's power
+    episodes = [{"start": r[0]["due"], "end": r[-1]["due"], "jobs": len(r),
+                 "minutes": round((r[-1]["due"] - r[0]["due"]) / 60, 1)} for r in _split(runs)]
     rec = [((j["r"].get("job") or {}).get("usable_at") or 0) - j["due"] for j in win
            if j["c"]["available"] and j["tries"] > 1]
     clock = defaultdict(list)
@@ -221,8 +290,14 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
     return {"window": {"start_utc": start_day, "days": days, "end_ts": end, "complete": complete,
                        "pending_jobs": pending, "jobs": len(win)},
             "status": status, "verdict": verdict, "guards": g, "targets": TARGETS, "cells": cells,
+            "jobs_with_unknown_scheduled_time": unplaced,
             "outages": {"unavailable_runs": len(runs), "longest_run_jobs": len(longest),
-                        "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0},
+                        "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0,
+                        "episodes": len(episodes), "episodes_per_day": round(len(episodes) / max(days, 1), 3),
+                        "episode_minutes": sorted(e["minutes"] for e in episodes), "episode_list": episodes},
+            "assessment": "descriptive (amendment 2): no formal verdict - a block bound holds only if provider states "
+                          "are independent across blocks of its length; see block_lower per cell and "
+                          "data/research/q1_calibration.json",
             "recovery_s": q(rec), "clock": {k: q(v) for k, v in clock.items()}, "by_rule": by_rule,
             "pools_with_undocumented_bytes": len(tails),
             "note": "engineering qualification only: not a landing-rate, failed-fee or edge estimate"}

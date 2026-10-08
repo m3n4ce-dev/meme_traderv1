@@ -52,7 +52,10 @@ TX_COST_SOL = 0.001005               # one transaction's priority + base fee (th
 # 3 = the official 287-byte Pool layout (fee buckets decoded; bytes past 287 are what's undocumented), sells checked
 # against real reserves (the vault less the fee buckets), the raw pool account kept (public), SDK/IDL pinned (a
 # twelfth review). Version 2's "undocumented bytes" were judged by the 271-byte layout.
-RECORD_VERSION = 3
+# 4 = version 3 plus every account's raw public bytes (base64) beside its hash, so an auditor can re-derive every
+# qualification input, not only the pool's (a thirteenth review). The qualification rules are version 3's.
+RECORD_VERSION = 4
+EXPORT_VERSION = 2                   # the package's quote rows: job_id / attempt_n / meta / record, never merged
 FRESHNESS_REF = "the feed's newest slot at confirmed"
 
 
@@ -200,7 +203,8 @@ class Quoter:
                 raise Reject("missing_account", ",".join(missing))
             # what was priced, reproducibly: each account's hash
             rec["accounts"] = {n: {"address": k, "owner": a[0], "bytes": len(a[1]),
-                                   "sha256": hashlib.sha256(a[1]).hexdigest()} for n, k, a in zip(names, keys, accs)}
+                                   "sha256": hashlib.sha256(a[1]).hexdigest(),
+                                   "b64": base64.b64encode(a[1]).decode()} for n, k, a in zip(names, keys, accs)}
             (po, pd), (bo, bd), (qo, qd), (mo, md), (go, gd), (fo, fd) = accs
             if po != AMM or go != AMM or fo != FEE_PROGRAM:
                 raise Reject("wrong_owner", "pool or config")
@@ -351,16 +355,43 @@ class QuoteBook:
         self.db = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        # `due` is the job's SCHEDULED time - the hold clock, Q1's window and pool-day, the recovery baseline - and
+        # never changes; `next_at` is only the retry queue (a thirteenth review: retries had overwritten `due`)
         self.db.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, pool TEXT NOT NULL, "
                         "side TEXT NOT NULL, amount TEXT NOT NULL, due REAL NOT NULL, deadline REAL NOT NULL, "
                         "state TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0, result TEXT, meta TEXT, "
-                        "created REAL NOT NULL)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs (state, due)")
+                        "created REAL NOT NULL, next_at REAL, due_known INTEGER NOT NULL DEFAULT 1)")
+        self._migrate()
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_next ON jobs (state, next_at)")
         self.db.execute("CREATE TABLE IF NOT EXISTS attempts (job TEXT NOT NULL, n INTEGER NOT NULL, rec TEXT NOT NULL, "
                         "PRIMARY KEY (job, n))")
         self.quoter, self.clock = quoter, clock
         self.lock = threading.Lock()                     # the event loop requests while a worker thread runs jobs
         self._view, self._view_at = None, 0.0
+
+    BOOK_VERSION = 2
+
+    def _migrate(self) -> None:
+        """Book version 1 -> 2, once, in one transaction: add `next_at` and `due_known`. A version-1 job that had a
+        retry scheduled (tries >= 2, or still pending after a try) had its `due` overwritten by that retry: its
+        original scheduled time is NOT reconstructed - `due_known` = 0 marks it unknown, and `next_at` takes over the
+        queue."""
+        if self.db.execute("PRAGMA user_version").fetchone()[0] >= self.BOOK_VERSION:
+            return
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(jobs)")}
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if "next_at" not in cols:
+                self.db.execute("ALTER TABLE jobs ADD COLUMN next_at REAL")
+            if "due_known" not in cols:
+                self.db.execute("ALTER TABLE jobs ADD COLUMN due_known INTEGER NOT NULL DEFAULT 1")
+                self.db.execute("UPDATE jobs SET due_known = 0, next_at = due WHERE tries >= 2 OR "
+                                "(state = 'pending' AND tries >= 1)")
+            self.db.execute(f"PRAGMA user_version = {self.BOOK_VERSION}")
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
 
     @classmethod
     def read_only(cls, path: Path) -> "QuoteBook":
@@ -383,7 +414,8 @@ class QuoteBook:
     def due(self, now: float, limit: int = 20) -> list[tuple]:
         with self.lock:
             return self.db.execute("SELECT id, kind, pool, side, amount, due, deadline, tries, meta FROM jobs WHERE "
-                                   "state = 'pending' AND due <= ? ORDER BY due LIMIT ?", (now, limit)).fetchall()
+                                   "state = 'pending' AND COALESCE(next_at, due) <= ? ORDER BY COALESCE(next_at, due) "
+                                   "LIMIT ?", (now, limit)).fetchall()
 
     def run(self, now: float | None = None, limit: int = 20) -> int:
         """Run the due jobs (blocking: call it off the event loop). Returns how many were attempted.
@@ -407,6 +439,11 @@ class QuoteBook:
                           "overrun_s": round(max(0.0, usable - deadline), 3)}
             on_time = usable <= deadline
             final = "unmeasured" if kind == "exit" else "skipped"
+            retry_at = None
+            if rec["reason"] != "ok" and rec["reason"] not in PERMANENT:
+                nxt = usable + (RETRY_EVERY_S if kind == "exit" else 10)
+                retry_at = nxt if nxt <= deadline else None
+            rec["job"]["next_attempt_at"] = retry_at and round(retry_at, 3)
             with self.lock:                              # released on every path, a failed BEGIN's included
                 began = False
                 try:
@@ -432,9 +469,9 @@ class QuoteBook:
                         self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
                                         (final, tries + 1, json.dumps(late), key))
                     else:
-                        nxt = usable + (RETRY_EVERY_S if kind == "exit" else 10)
-                        if nxt <= deadline and rec["reason"] not in PERMANENT:
-                            self.db.execute("UPDATE jobs SET due = ?, tries = ? WHERE id = ?", (nxt, tries + 1, key))
+                        if retry_at is not None:
+                            self.db.execute("UPDATE jobs SET next_at = ?, tries = ? WHERE id = ?",   # (never `due`)
+                                            (retry_at, tries + 1, key))
                         else:
                             self.db.execute("UPDATE jobs SET state = ?, tries = ?, result = ? WHERE id = ?",
                                             (final, tries + 1, json.dumps(rec), key))
@@ -505,24 +542,33 @@ class QuoteBook:
         self._view_at = self.clock()
         return self._view
 
+    def _cols(self) -> str:
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(jobs)")}
+        return ", ".join(c if c in have else f"NULL AS {c}" for c in ("next_at", "due_known"))
+
     def jobs(self) -> list[dict]:
-        """Every job and its outcome - including those that finished with no attempt (missed) - for the package."""
+        """Every job and its outcome - including those that finished with no attempt (missed) and those pending - for
+        the package (export version 2: identity, schedule, outcome and the job's full metadata, holds included, are
+        separate fields; nothing is merged over anything)."""
         with self.lock:
-            rows = self.db.execute("SELECT id, kind, pool, side, amount, due, deadline, state, tries, result, meta, "
-                                   "created FROM jobs ORDER BY created, id").fetchall()
+            rows = self.db.execute(f"SELECT id, kind, pool, side, amount, due, deadline, state, tries, result, meta, "
+                                   f"created, {self._cols()} FROM jobs ORDER BY created, id").fetchall()
         out = []
-        for key, kind, pool, side, amount, due, deadline, state, tries, result, meta, created in rows:
-            r, m = json.loads(result or "{}"), json.loads(meta or "{}")
-            out.append({"job": key, "kind": kind, "pool": pool, "side": side, "amount": amount, "due": due,
-                        "deadline": deadline, "created": created, "state": state, "tries": tries,
-                        "reason": r.get("reason"), "qualification": qualification(r) if state == "ok" else None,
-                        **{x: y for x, y in m.items() if x != "holds"}})
+        for key, kind, pool, side, amount, due, deadline, state, tries, result, meta, created, nxt, known in rows:
+            r = json.loads(result or "{}")
+            out.append({"export_version": EXPORT_VERSION, "job_id": key, "kind": kind, "pool": pool, "side": side,
+                        "amount": amount, "scheduled_due": due, "due_known": bool(known if known is not None else 1),
+                        "deadline": deadline, "next_attempt_at": nxt, "created": created, "state": state,
+                        "tries": tries, "reason": r.get("reason"),
+                        "qualification": qualification(r) if state == "ok" else None, "meta": json.loads(meta or "{}")})
         return out
 
     def attempts(self) -> list[dict]:
-        """Every attempt, for the review package (pool addresses and amounts are public chain data)."""
+        """Every attempt, for the review package (pool addresses, amounts and account bytes are public chain data).
+        Export version 2: `job_id` and `attempt_n` identify it, `record` is the stored attempt as written (its own
+        `job` clock inside it) - never expanded over the identity fields (a thirteenth review)."""
         with self.lock:
-            rows = self.db.execute("SELECT a.job, a.n, a.rec, j.kind, j.meta FROM attempts a JOIN jobs j ON j.id = a.job "
+            rows = self.db.execute("SELECT a.job, a.n, a.rec, j.kind FROM attempts a JOIN jobs j ON j.id = a.job "
                                    "ORDER BY a.rowid").fetchall()
-        return [{"job": j, "try": n, "kind": k, **{x: y for x, y in json.loads(m or "{}").items() if x != "holds"},
-                 **json.loads(rec)} for j, n, rec, k, m in rows]
+        return [{"export_version": EXPORT_VERSION, "job_id": j, "attempt_n": n, "kind": k, "record": json.loads(rec)}
+                for j, n, rec, k in rows]
