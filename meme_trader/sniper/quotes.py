@@ -19,7 +19,10 @@ P&L next to the forward test's print-priced one.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import math
 import sqlite3
 import statistics
 import struct
@@ -46,7 +49,10 @@ ENTRY_GRACE_S = 60                   # an entry quote is tried for this long aft
 TX_COST_SOL = 0.001005               # one transaction's priority + base fee (the paper bot's), for net P&L
 # an attempt record's schema: 2 = qualification reasons, account hashes, the job clock (an eleventh review). A record
 # without a version (1) predates the qualification rules: its qualification is UNKNOWN, never assumed
-RECORD_VERSION = 2
+# 3 = the official 287-byte Pool layout (fee buckets decoded; bytes past 287 are what's undocumented), sells checked
+# against real reserves (the vault less the fee buckets), the raw pool account kept (public), SDK/IDL pinned (a
+# twelfth review). Version 2's "undocumented bytes" were judged by the 271-byte layout.
+RECORD_VERSION = 3
 FRESHNESS_REF = "the feed's newest slot at confirmed"
 
 
@@ -192,7 +198,7 @@ class Quoter:
             missing = [n for n, a in zip(names, accs) if a is None]
             if missing:
                 raise Reject("missing_account", ",".join(missing))
-            import hashlib                               # what was priced, reproducibly: each account's hash
+            # what was priced, reproducibly: each account's hash
             rec["accounts"] = {n: {"address": k, "owner": a[0], "bytes": len(a[1]),
                                    "sha256": hashlib.sha256(a[1]).hexdigest()} for n, k, a in zip(names, keys, accs)}
             (po, pd), (bo, bd), (qo, qd), (mo, md), (go, gd), (fo, fd) = accs
@@ -220,10 +226,18 @@ class Quoter:
             if g["disable_flags"] & (0b1000 if side == "buy" else 0b10000):
                 raise Reject("trading_disabled", side)
             eff = quote["amount"] + p["virtual_quote_reserves"]
+            buckets = p["protocol_fees"] + p["creator_fees"]           # fees kept in the vault: not liquidity
+            if buckets > quote["amount"]:
+                raise Reject("invalid_state", f"fee buckets {buckets} exceed the quote vault {quote['amount']}")
             rec.update(base_reserve=str(base["amount"]), quote_vault=str(quote["amount"]),
                        virtual_quote=str(p["virtual_quote_reserves"]), effective_quote=str(eff),
+                       protocol_fees=str(p["protocol_fees"]), creator_fees=str(p["creator_fees"]),
+                       real_quote=str(quote["amount"] - buckets),
                        mayhem=p["is_mayhem_mode"], undocumented_tail=p["undocumented_tail"],
-                       mint_extensions=mint["extensions"], pool_bytes=p["bytes"])
+                       mint_extensions=mint["extensions"], pool_bytes=p["bytes"], serialized_end=p["serialized_end"],
+                       padding_bytes=p["padding_bytes"], padding_sha256=p["padding_sha256"],
+                       pool_b64=base64.b64encode(pd).decode(), sdk=ps.SDK, idl=ps.POOL_LAYOUT,
+                       instruction="buy" if side == "buy" else "sell")     # the per-trade-fee instructions
             fees = ps.fees_bps({**g, "creator_fee_configurable": g["creator_fee_configurable"]}, fc, p["creator"],
                                p["base_mint"], mint["supply"], base["amount"], eff, p["quote_mint"],
                                p["is_mayhem_mode"], p["creator_fee_bps"])
@@ -231,14 +245,14 @@ class Quoter:
             fn = ps.buy_quote_input if side == "buy" else ps.sell_base_input
             try:
                 out = fn(int(amount), 0, base["amount"], quote["amount"], fees, p["virtual_quote_reserves"],
-                         p["coin_creator"])
+                         p["coin_creator"], **({"fee_buckets": buckets} if side == "sell" else {}))
             except ps.QuoteError as ex:
                 code = "insufficient_liquidity" if "Insufficient real quote" in str(ex) else \
                     {"state": "invalid_state", "output": "unexecutable_output"}.get(ex.code, "quote_error")
                 raise Reject(code, str(ex)) from None
             rec["output"] = str(out["base"] if side == "buy" else out["uiQuote"])
             if side == "buy":
-                rec["round_trip"] = _round_trip(int(amount), out, base["amount"], quote["amount"], fees, p)
+                rec["round_trip"] = _round_trip(int(amount), out, base["amount"], quote["amount"], fees, p, buckets)
             # qualified: the whole account is documented (a pool with undocumented bytes past the known prefix is
             # quoted from that prefix and labelled - its layout risk stays explicit, a tenth review), AND its
             # freshness was checked against a reference (no reference is no evidence of freshness, an eleventh)
@@ -261,20 +275,21 @@ class Quoter:
         return rec
 
 
-def _round_trip(lamports: int, bought: dict, base_reserve: int, quote_vault: int, fees: dict, p: dict) -> dict:
+def _round_trip(lamports: int, bought: dict, base_reserve: int, quote_vault: int, fees: dict, p: dict,
+                buckets: int = 0) -> dict:
     """The tokens just bought, sold back at once into the pool as our own buy would leave it (our SOL less the
     protocol and creator fees enters the quote vault - the LP fee stays in the pool - and the tokens leave the base
-    vault; the same fee tier; no other trader, no network fee): the round-trip cost of this size at this state.
-    MODELLED from the quote's own state, not a second read."""
+    vault; the same fee tier; no other trader, no network fee): the round-trip cost of this size at this state. The
+    sell back draws only on real reserves (the vault less the fee buckets). MODELLED from the quote's own state."""
     eff = bought["internalQuoteWithoutFees"]
     try:
         back = ps.sell_base_input(bought["base"], 0, base_reserve - bought["base"],
                                   quote_vault + eff + ps.fee(eff, fees["lp"]), fees, p["virtual_quote_reserves"],
-                                  p["coin_creator"])["uiQuote"]
+                                  p["coin_creator"], fee_buckets=buckets)["uiQuote"]
     except ps.QuoteError as ex:
         return {"lamports_back": None, "why": ex.code}
     return {"lamports_back": str(back), "pct": round(100 * (back / lamports - 1), 3),
-            "model": "post-buy state, same fee tier, no network fee"}
+            "model": "post-buy state (per-trade-fee buy), same fee tier, real reserves for the sell, no network fee"}
 
 
 # --------------------------------------------------------------------------- the schedule and its record
@@ -295,18 +310,30 @@ def qualification(r: dict) -> str:
     return "prefix-only" if r.get("unqualified") == ["undocumented_pool_bytes"] else "unqualified"
 
 
+def _finite_pos(x) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) and v > 0 else None
+
+
 def _pair(m: dict, amount, due, qual: str, entries: dict) -> str:
-    """A round trip's population: qualified only if its entry is found, both ends are qualified, and they match -
-    the exit sells what the entry bought, the stake is the entry's, the exit fell due its hold after the entry was
-    in hand. Otherwise the worse end's label (unknown < unqualified < prefix-only), or unknown with no entry."""
+    """A round trip's population. QUALIFIED only with complete, matching evidence (fail closed - a twelfth review):
+    the follow's entry is found; both ends are qualified; the exit sells what the entry bought, for the entry's stake;
+    its exit name is one of the follow's declared holds, a finite positive duration; the entry's record carries its
+    in-hand time (`job.usable_at`, never the bare response time); and the exit fell due exactly that hold after it.
+    Missing or malformed evidence is `unknown`. Otherwise the worse end's label (unknown < unqualified < prefix-only)."""
     e = entries.get(m.get("follow"))
     if e is None:
         return "unknown"
     er, eamount, equal = e
-    hold = (m.get("holds") or {}).get(m.get("exit"))
-    entry_at = (er.get("job") or {}).get("usable_at") or er.get("responded_at")
-    matched = str(amount) == str(er.get("output")) and str(m.get("entry_lamports")) == str(eamount) and \
-        (hold is None or entry_at is None or abs(float(due) - (float(entry_at) + float(hold))) < 0.01)
+    hold = _finite_pos((m.get("holds") or {}).get(m.get("exit"))) if isinstance(m.get("holds"), dict) else None
+    entry_at = _finite_pos((er.get("job") or {}).get("usable_at"))
+    due_t = _finite_pos(due)
+    matched = (hold is not None and entry_at is not None and due_t is not None
+               and str(amount) == str(er.get("output")) and str(m.get("entry_lamports")) == str(eamount)
+               and abs(due_t - (entry_at + hold)) < 0.01)
     if not matched:
         return "unknown"
     for label in ("unknown", "unqualified", "prefix-only"):

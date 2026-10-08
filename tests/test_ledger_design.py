@@ -63,8 +63,8 @@ def test_an_unbalanced_event_leaves_nothing_behind(ledger):
 @pytest.mark.parametrize("bad", ["+5", "05", "-0", "1.5", "1e3", "", "--5", "5-"])
 def test_only_canonical_signed_integers_are_stored(ledger, bad):
     seq = ledger.db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
-                            "observed_at, recorded_at, payload, payload_sha256) VALUES ('x', 'A1', 'k', 'open', 1, 'r', "
-                            "0, 0, '{}', '')").lastrowid
+                            "observed_at, recorded_at, payload, payload_sha256, effect_key, content_sha256) VALUES ('x', "
+                            "'A1', 'k', 'open', 1, 'r', 0, 0, '{}', '', 'fixture-key', 'fixture-content')").lastrowid
     with pytest.raises(sqlite3.IntegrityError):
         ledger.db.execute("INSERT INTO postings VALUES (?, 0, 'A1:cash', 'SOL', ?)", (seq, bad))
 
@@ -94,7 +94,8 @@ def test_one_unresolved_attempt_per_order_and_a_new_one_only_after_resolution(le
     ledger.settle("T1", "unknown")                                               # e.g. restored after a restart
     with pytest.raises(sqlite3.IntegrityError):
         ledger.sign("T2", "O1", "S2", "bh", 100, b"signed-2")                    # never a fresh signature while unknown
-    proof = ledger.observe("S1", None, "finalized", "getSignatureStatuses@rpc", None, "absent", None, block_height=101)
+    proof = ledger.observe("S1", None, "finalized", "getSignatureStatuses@rpc", None, "absent", None, block_height=101,
+                           history_searched=True)
     ledger.settle("T1", "expired_absent", proof)                                 # proved expired and absent
     ledger.sign("T2", "O1", "S2", "bh", 100, b"signed-2")
 
@@ -111,8 +112,8 @@ def test_contradictory_observations_are_kept_and_identical_ones_dedupe(ledger):
 
 def test_an_open_event_at_startup_fails_closed(ledger):
     ledger.db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
-                      "observed_at, recorded_at, payload, payload_sha256) VALUES ('x', 'A1', 'k', 'open', 1, 'r', 0, 0, "
-                      "'{}', '')")
+                      "observed_at, recorded_at, payload, payload_sha256, effect_key, content_sha256) VALUES ('x', 'A1', "
+                      "'k', 'open', 1, 'r', 0, 0, '{}', '', 'fixture-key', 'fixture-content')")
     with pytest.raises(ref.LedgerError, match="fail closed"):
         ledger.startup_check()
 
@@ -220,8 +221,8 @@ def test_balanced_postings_cant_create_negative_holdings_but_counterparties_can_
 
 def raw_event(db, eid="raw", status="open"):
     return db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
-                      "observed_at, recorded_at, payload, payload_sha256) VALUES (?, 'A1', 'test', ?, 1, 'r', 0, 0, "
-                      "'{}', 'h')", (eid, status)).lastrowid
+                      "observed_at, recorded_at, payload, payload_sha256, effect_key, content_sha256) VALUES (?, 'A1', "
+                      "'test', ?, 1, 'r', 0, 0, '{}', 'h', ?, 'fixture-content')", (eid, status, eid)).lastrowid
 
 
 @pytest.mark.parametrize("change", ["event_id = 'changed'", "schema_version = 99", "code_revision = 'x'",
@@ -246,7 +247,7 @@ def test_startup_recomputes_every_seal_and_fails_closed_on_forgery_or_corruption
                       "WHERE seq = ?", (seq,))
     with pytest.raises(ref.LedgerError, match="fail closed") as e:
         ledger.startup_check()
-    assert "don't balance" in str(e.value) and "not written by the writer" in str(e.value)
+    assert "don't balance" in str(e.value) and "postings hash mismatch" in str(e.value)
 
 
 def test_startup_catches_history_edited_around_the_triggers(ledger):
@@ -272,18 +273,21 @@ def test_attempts_keep_their_signed_bytes_and_move_only_with_proof(ledger):
     ledger.settle("T1", "submitted")
     with pytest.raises(sqlite3.IntegrityError):
         ledger.settle("T1", "landed_ok")                                          # no observation
-    early = ledger.observe("S1", None, "finalized", "getSignatureStatuses@rpc", None, "absent", None, block_height=100)
-    unsure = ledger.observe("S1", None, "confirmed", "getSignatureStatuses@rpc", None, "absent", None, block_height=150)
-    other = ledger.observe("S9", None, "finalized", "getSignatureStatuses@rpc", None, "absent", None, block_height=150)
-    for obs in (early, unsure, other):                                            # not proof of expiry
+    def absent(sig, commitment, height, searched=True):
+        return ledger.observe(sig, None, commitment, "getSignatureStatuses@rpc", None, "absent", None,
+                              block_height=height, history_searched=searched)
+    early, unsure, other = absent("S1", "finalized", 100), absent("S1", "confirmed", 150), absent("S9", "finalized", 150)
+    shallow = absent("S1", "finalized", 150, searched=False)                      # no full-history search
+    for obs in (early, unsure, other, shallow):                                   # not proof of expiry
         with pytest.raises(sqlite3.IntegrityError):
             ledger.settle("T1", "expired_absent", obs)
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("UPDATE attempts SET signed_tx = x'00' WHERE attempt_id = 'T1'")  # the transaction is immutable
-    proof = ledger.observe("S1", None, "finalized", "getSignatureStatuses@rpc", None, "absent", None, block_height=101)
+    proof = absent("S1", "finalized", 101)
     ledger.settle("T1", "expired_absent", proof)
     ledger.startup_check()
-    db.execute("DROP TRIGGER attempts_frozen")                                     # corruption around the guard
+    db.execute("DROP TRIGGER attempts_frozen")                                     # corruption around the guards
+    db.execute("DROP TRIGGER attempts_settled_final")
     db.execute("UPDATE attempts SET signed_tx = x'02' WHERE attempt_id = 'T1'")
     with pytest.raises(ref.LedgerError, match="signed transaction"):
         ledger.startup_check()
@@ -295,3 +299,135 @@ def test_one_live_sell_per_position(ledger):
         ledger.add_order("X2", "A1", "sell", "MINT", 10)
     ledger.db.execute("UPDATE orders SET state = 'done' WHERE order_id = 'X1'")
     ledger.add_order("X2", "A1", "sell", "MINT", 10)
+
+
+# --------------------------------------------------------------------------- revision 4 (a twelfth review)
+def submitted(ledger, sig="S1", order="O1"):
+    ledger.add_order(order, "A1", "sell", "MINT", 100)
+    ledger.sign(f"T-{sig}", order, sig, "bh", 100, b"signed-" + sig.encode())
+    ledger.settle(f"T-{sig}", "submitted")
+    return f"T-{sig}"
+
+
+@pytest.mark.parametrize("state,slot,err,ok", [
+    ("landed_ok", 200, None, True), ("landed_failed", 200, "InstructionError", True),
+    ("landed_ok", 200, "InstructionError", False), ("landed_failed", 200, None, False),   # outcome must match
+    ("landed_ok", None, "absent", False), ("landed_failed", None, "absent", False)])
+def test_a_terminal_state_needs_the_outcome_it_claims_at_finality(ledger, state, slot, err, ok):
+    t = submitted(ledger)
+    obs = ledger.observe("S1", 0, "finalized", "getTransaction@rpc", slot, err, "h", block_height=200)
+    if ok:
+        ledger.settle(t, state, obs)
+        ledger.startup_check()
+    else:
+        with pytest.raises(sqlite3.IntegrityError):
+            ledger.settle(t, state, obs)
+
+
+def test_a_provisional_failure_is_kept_but_frees_nothing(ledger):
+    t = submitted(ledger)
+    for c in ("processed", "confirmed"):
+        obs = ledger.observe("S1", 0, c, "getTransaction@rpc", 200, "InstructionError", "h", block_height=200)
+        with pytest.raises(sqlite3.IntegrityError):
+            ledger.settle(t, "landed_failed", obs)
+    ledger.settle(t, "unknown")
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.sign("T2", "O1", "S2", "bh2", 300, b"other")                    # still one unresolved attempt
+    assert [r[0] for r in ledger.db.execute("SELECT outcome FROM observations")] == ["executed_failure"] * 2
+
+
+def test_a_settled_attempt_and_its_proof_are_final_and_startup_rechecks_them(ledger):
+    t = submitted(ledger)
+    ledger.settle(t, "landed_failed", ledger.observe("S1", 0, "finalized", "rpc", 200, "InstructionError", "h"))
+    for sql in ("UPDATE attempts SET resolved_by = NULL", "UPDATE attempts SET state = 'unknown'",
+                "UPDATE attempts SET resolved_by = 999"):
+        with pytest.raises(sqlite3.IntegrityError):
+            ledger.db.execute(sql)
+    hist = list(ledger.db.execute("SELECT from_state, to_state FROM attempt_transitions"))
+    assert hist == [("signed", "submitted"), ("submitted", "landed_failed")]
+    ledger.db.execute("DROP TRIGGER attempts_settled_final")                     # corruption around the guards
+    ledger.db.execute("UPDATE attempts SET resolved_by = NULL")
+    with pytest.raises(ref.LedgerError, match="without the finalized observation"):
+        ledger.startup_check()
+
+
+def test_startup_recomputes_every_observations_digest(ledger):
+    ledger.observe("S1", 0, "finalized", "rpc", 200, None, "h")
+    ledger.startup_check()
+    ledger.db.execute("DROP TRIGGER observations_no_update")
+    ledger.db.execute("UPDATE observations SET slot = 201")
+    with pytest.raises(ref.LedgerError, match="digest"):
+        ledger.startup_check()
+
+
+def test_an_events_identity_includes_its_effects_and_its_correction_target(ledger):
+    legs = [("A1:cash", "SOL", 10), ("external:owner", "SOL", -10)]
+    eff = (("transfer", "SIG1"), ("network_fee", "SIG1"))
+    seq = ledger.append("A1", "deposit", legs, {}, key="k", effects=eff)
+    assert ledger.append("A1", "deposit", legs, {}, key="k", effects=eff[::-1]) == seq       # a set: order free
+    for other in ((("transfer", "SIG2"), ("network_fee", "SIG1")), (("transfer", "SIG1"),), eff + (("rent", "X"),)):
+        with pytest.raises(ref.LedgerError, match="conflict"):                             # changed, removed, added
+            ledger.append("A1", "deposit", legs, {}, key="k", effects=other)
+    rev = ledger.reverse(seq, {"why": "fixture"})
+    assert ledger.reverse(seq, {"why": "fixture"}) == rev                                   # a replayed correction
+    ledger.startup_check()
+
+
+def test_a_database_from_another_schema_is_quarantined(tmp_path):
+    ref.Ledger(tmp_path / "l.db").db.close()
+    import sqlite3 as sq
+    con = sq.connect(tmp_path / "l.db")
+    con.execute("UPDATE migrations SET version = 3")
+    con.commit()
+    con.close()
+    with pytest.raises(ref.LedgerError, match="quarantined"):
+        ref.Ledger(tmp_path / "l.db")
+
+
+def test_signed_bytes_must_be_the_recorded_transaction():
+    from solders.hash import Hash
+    from solders.keypair import Keypair
+    from solders.message import Message
+    from solders.system_program import TransferParams, transfer
+    from solders.transaction import Transaction
+    kp = Keypair()                                                    # a throwaway key: nothing is sent
+    bh = Hash.default()
+    ix = transfer(TransferParams(from_pubkey=kp.pubkey(), to_pubkey=Keypair().pubkey(), lamports=1))
+    tx = Transaction([kp], Message([ix], kp.pubkey()), bh)
+    raw, sig = bytes(tx), str(tx.signatures[0])
+    ref.check_tx_association(raw, sig, str(bh))
+    with pytest.raises(ref.LedgerError, match="not the attempt's"):
+        ref.check_tx_association(raw, "1" * 64, str(bh))                          # another signature
+    with pytest.raises(ref.LedgerError, match="aren't a Solana transaction"):
+        ref.check_tx_association(b"not a transaction", sig, str(bh))
+
+
+# The eleventh review's two direct-SQL contracts, with their fixtures updated to the strict schema (a twelfth review:
+# "update those fixtures to supply current required identity fields" - the invariant isn't weakened for them).
+def strict_raw(db, eid):
+    return db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
+                      "observed_at, recorded_at, payload, payload_sha256, effect_key, content_sha256) VALUES "
+                      "(?, 'A1', 'test', 'open', 1, 'r', 0, 0, '{}', 'h', ?, 'c')", (eid, eid)).lastrowid
+
+
+def test_r11_sealing_cannot_rewrite_event_identity_or_version_strict_fixture(ledger):
+    strict_raw(ledger.db, "original")
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.db.execute("UPDATE events SET status = 'sealed', seal_sums = '{}', seal_sha256 = 'h', "
+                          "event_id = 'changed', schema_version = 99, code_revision = 'changed' WHERE event_id = 'original'")
+
+
+def test_r11_startup_rejects_an_unbalanced_forged_seal_strict_fixture(ledger):
+    seq = strict_raw(ledger.db, "bad")
+    ledger.db.execute("INSERT INTO postings VALUES (?, 0, 'A1:cash', 'SOL', '5')", (seq,))
+    ledger.db.execute("UPDATE events SET status = 'sealed', seal_sums = '{\"SOL\":\"0\"}', seal_sha256 = 'false' "
+                      "WHERE seq = ?", (seq,))
+    with pytest.raises(ref.LedgerError, match="don't balance"):
+        ledger.startup_check()
+
+
+def test_a_bare_sql_event_without_identity_is_refused_before_anything_can_read_it(ledger):
+    with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+        ledger.db.execute("INSERT INTO events (event_id, account_id, kind, status, schema_version, code_revision, "
+                          "observed_at, recorded_at, payload, payload_sha256) VALUES ('x', 'A1', 'k', 'open', 1, 'r', "
+                          "0, 0, '{}', '')")

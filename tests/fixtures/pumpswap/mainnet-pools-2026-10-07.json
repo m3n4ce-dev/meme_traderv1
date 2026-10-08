@@ -13,8 +13,11 @@
     "virtual_quote_reserves": "0",
     "base_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "quote_mint": "So11111111111111111111111111111111111111112",
-    "undocumented_tail": false,
-    "is_holder_reward": false
+    "is_holder_reward": false,
+    "undocumented_tail_271": false,
+    "protocol_fees": 0,
+    "creator_fees": 0,
+    "undocumented_tail": false
    }
   },
   {
@@ -28,8 +31,11 @@
     "virtual_quote_reserves": "17582810156",
     "base_mint": "F8shSPpvEtZtAp5avEKBvGZRYf8eiKodutFBoUCmonqH",
     "quote_mint": "So11111111111111111111111111111111111111112",
-    "undocumented_tail": true,
-    "is_holder_reward": false
+    "is_holder_reward": false,
+    "undocumented_tail_271": true,
+    "protocol_fees": 0,
+    "creator_fees": 1695560,
+    "undocumented_tail": false
    }
   },
   {
@@ -43,8 +49,11 @@
     "virtual_quote_reserves": "1100134406",
     "base_mint": "Dnbnj5R7Z3NWq8rH4QuuoHfBGVtgZtVy9XFTWtxiRZUt",
     "quote_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
-    "undocumented_tail": false,
-    "is_holder_reward": false
+    "is_holder_reward": false,
+    "undocumented_tail_271": false,
+    "protocol_fees": 0,
+    "creator_fees": 0,
+    "undocumented_tail": false
    }
   },
   {
@@ -58,8 +67,11 @@
     "virtual_quote_reserves": "0",
     "base_mint": "So11111111111111111111111111111111111111112",
     "quote_mint": "F3xUVHKuokmbqShTSUame1DpuRPHCP14qa73Kxe9pump",
-    "undocumented_tail": false,
-    "is_holder_reward": false
+    "is_holder_reward": false,
+    "undocumented_tail_271": false,
+    "protocol_fees": 0,
+    "creator_fees": 0,
+    "undocumented_tail": false
    }
   },
   {
@@ -73,9 +85,15 @@
     "virtual_quote_reserves": "-474995",
     "base_mint": "2wzVMXhLypmP92mXNCq4fuFcd9TCC972AbMfuiH3pump",
     "quote_mint": "So11111111111111111111111111111111111111112",
-    "undocumented_tail": true,
-    "is_holder_reward": false
+    "is_holder_reward": false,
+    "undocumented_tail_271": true,
+    "protocol_fees": 0,
+    "creator_fees": 474995,
+    "undocumented_tail": false
    }
   }
+ ],
+ "notes": [
+  "2026-10-07 (twelfth review): expectations under the official 287-byte layout (IDL 8cda1fa): the two accounts whose bytes past 271 were undocumented hold creator_fees; nothing past 287 is non-zero. undocumented_tail_271 keeps the old layout's flag."
  ]
 }

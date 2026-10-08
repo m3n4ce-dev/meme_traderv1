@@ -346,6 +346,8 @@ class ExitLab:
           `seq` changed), timed when we received it - re-reading the same carried price on a later tick is neither a
           new observation nor fresher. A coin without price provenance is an unknown price. Ages are kept apart:
           receipt (the freshness rule: <= END_FRESH_S at the horizon), chain clock, and when it was last polled;
+        - an AMBIGUOUS mark (same-slot transactions that disagree, order unknown) is no complete end however fresh: the
+          end is unmeasured, its raw value kept as a diagnostic (a twelfth review);
         - the first price seen AFTER the horizon is reported apart, with its delay (horizon slippage, not upside
           inside the window).
         Marks, not executable sizes: a missed-upside diagnostic only."""
@@ -358,6 +360,9 @@ class ExitLab:
             px = s.curve.price if known else None
             if now <= g["horizon"]:
                 if known:
+                    # order certainty is the mark's CURRENT state: a same-slot rival found later makes the very same
+                    # mark ambiguous; a later slot's accepted price settles it (a twelfth review)
+                    g["ambiguous"] = bool(getattr(s, "price_ambiguous", False))
                     if mark.get("seq") != g.get("mark_seq"):            # a newly accepted price: one observation
                         g["mark_seq"] = mark.get("seq")
                         g["peak"], g["low"] = max(g["peak"], px), min(g["low"], px)
@@ -384,6 +389,8 @@ class ExitLab:
             missing = "price unknown at the last observation before the horizon (or without provenance)"
         elif age > END_FRESH_S:
             missing = f"last price {age:.0f} s before the horizon (stale)"
+        elif g.get("ambiguous"):
+            missing = "price ambiguous at the horizon (same-slot transactions disagree, order unknown)"
         else:
             missing = ""
         end = None if missing else round((g["last"] / x - 1) * 100, 2)
@@ -393,6 +400,7 @@ class ExitLab:
                 "followed_to_end": not missing, "missing_reason": missing,
                 "peak_after_pct": round((g["peak"] / x - 1) * 100, 2), "low_after_pct": round((g["low"] / x - 1) * 100, 2),
                 "end_after_pct": end, "end_price_age_s": round(age, 3),
+                "end_mark_raw_pct": round((g["last"] / x - 1) * 100, 2) if missing.startswith("price ambiguous") else None,
                 "end_price_chain_age_s": round(g["horizon"] - g["last_chain_t"], 3) if g.get("last_chain_t") else None,
                 "end_price_polled_at": g.get("polled_t"), "end_price_ambiguous": bool(getattr(s, "price_ambiguous", False)),
                 "freshness_rule": f"receipt age <= {END_FRESH_S} s at the horizon",

@@ -20,12 +20,19 @@ could lose cash while reporting zero, and the daily stop didn't see the loss):
 
 The risk POLICY (an eleventh review: the registered stop is an entry-halt trigger, not a maximum daily loss - four
 fresh positions can all be admitted before any loss is realized, then lose 1.0 SOL past a 0.5 threshold). `risk`:
-- "gross" (the original registration's, and `Portfolio()`'s default): entries halt once the day's gross losses and
-  impairments, plus a reservation for each overdue exit, reach DAY_STOP;
-- "hard": a strict worst-case budget - a position is admitted only if the day's net economic loss so far, plus the
-  total loss (stake + fees) of EVERY open position, plus this one's, stays within DAY_STOP: the day can't lose more;
-- "net+cap": entries halt once the day's NET economic loss (plus overdue reservations) reaches DAY_STOP, or its gross
-  losses reach an outer cap of OUTER_CAP x DAY_STOP (frozen here) - T9-E1's policy since 2026-10-07 (REGISTERED_RISK).
+- "gross" (the original registration's, and `Portfolio()`'s default) - an ENTRY-HALT TRIGGER, not a loss limit:
+  entries halt once the day's gross losses and impairments, plus a reservation for each overdue exit, reach DAY_STOP;
+- "hard" - a worst-case budget UNDER THE MODELLED COSTS: a position is admitted only if the day's net economic loss
+  so far, plus the total loss (stake + its cost bound) of EVERY open position, plus this one's, stays within
+  DAY_STOP. It bounds the day only as far as the cost bound holds (no allowance for repeated failed-transaction fees);
+- "net+cap" - an ENTRY-HALT TRIGGER: entries halt once the day's NET economic loss (plus overdue reservations)
+  reaches DAY_STOP, or its gross losses reach an outer cap of OUTER_CAP x DAY_STOP (frozen here) - T9-E1's policy
+  since 2026-10-07 (REGISTERED_RISK).
+
+Costs (a twelfth review): ONE cost bound per position (`fee`, the round trip's total cost as a fraction of the stake,
+the Portfolio's default unless the caller gives one) is used for its measured outcome's floor, its reservation, its
+impairment and the hard budget alike - a scenario that charges measured trades 4% must pass fee=0.04, or a reserve
+and a write-off would assume 1.2% while the trade paid 4%. A return must be finite and no worse than -(1 + fee).
 
 Time is continuous (seconds from the window's start); UTC days are `int(t // 86400)`. A position:
 - enters at its signal time + DELAY_S, debiting SIZE from cash, if: it can close inside the window (no entry later
@@ -53,11 +60,11 @@ FEE = 0.012                          # round trip, when a scenario doesn't model
 
 class Portfolio:
     def __init__(self, end_t: float, bank: float = BANK, size: float = SIZE, max_open: int = MAX_OPEN,
-                 day_stop: float = DAY_STOP, trace: bool = False, risk: str = "gross"):
+                 day_stop: float = DAY_STOP, trace: bool = False, risk: str = "gross", fee: float = FEE):
         if risk not in RISK_POLICIES:
             raise ValueError(f"risk policy {risk!r}: one of {RISK_POLICIES}")
         self.end_t, self.bank, self.cash = end_t, bank, bank
-        self.size, self.max_open, self.day_stop, self.risk = size, max_open, day_stop, risk
+        self.size, self.max_open, self.day_stop, self.risk, self.fee = size, max_open, day_stop, risk, fee
         self.open: list[dict] = []
         self.quarantined: set = set()                            # coins whose tokens were impaired, not disposed of
         self.economic: dict[int, float] = defaultdict(float)     # UTC day -> economic P&L (the primary series)
@@ -132,10 +139,16 @@ class Portfolio:
         return net_loss + overdue >= self.day_stop - 1e-12 or \
             self.lost[day] + overdue >= OUTER_CAP * self.day_stop - 1e-12
 
-    def try_enter(self, signal_t: float, coin, ret: float | None, fee: float = FEE, exit_at: float | None = None) -> str:
+    def try_enter(self, signal_t: float, coin, ret: float | None, fee: float | None = None,
+                  exit_at: float | None = None) -> str:
         """A signal at signal_t on `coin` whose trade would return `ret` (net) when its exit fills at `exit_at` (None:
         on time, HOLD_S after entering; later: a retry within RETRY_S filled it), or ret None if no exit can be
-        measured. Returns "" if entered, else why not."""
+        measured. `fee`: this position's cost bound (default: the Portfolio's). Returns "" if entered, else why not."""
+        fee = self.fee if fee is None else fee
+        if not (math.isfinite(fee) and 0 <= fee < 1):
+            raise ValueError(f"cost bound {fee} must be a finite fraction in [0, 1)")
+        if ret is not None and not (math.isfinite(ret) and ret >= -(1.0 + fee) - 1e-12):
+            raise ValueError(f"return {ret} is not finite or loses more than the stake and its cost bound ({fee})")
         t = signal_t + DELAY_S
         self.settle(t)
         why = ("window" if t + HOLD_S + RETRY_S > self.end_t else
