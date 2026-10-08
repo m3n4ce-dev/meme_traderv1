@@ -1,4 +1,4 @@
-"""A reference writer for the ledger design (schema.sql, docs/LEDGER_DESIGN.md revision 4): it exists to prove the
+"""A reference writer for the ledger design (schema.sql, docs/LEDGER_DESIGN.md revision 3): it exists to prove the
 design's rules on real SQLite, not to run the bot. The protocol, in ONE transaction per economic event:
 1. look the event up by its caller-supplied stable key (account, kind, key): the same content again is a replay - the
    original is returned and nothing is written (a crash after commit and before the acknowledgement, a replayed
@@ -10,10 +10,8 @@ design's rules on real SQLite, not to run the bot. The protocol, in ONE transact
    - and refuse unless every asset nets to exactly 0, and unless every holding it touches (cash, reserved, inventory,
    rent) stays >= 0 after it;
 5. seal the event with those sums and the postings' sha256; commit.
-Any failure rolls the whole event back. Startup recomputes every sealed event's sums and hashes, every observation's
-digest, every settled attempt's proof (and the stored signed transactions' hashes) and refuses to run on any
-inconsistency - fail closed. A database written by another schema version is QUARANTINED on open: it must be migrated
-explicitly, never read as if it were current (rev 4, a twelfth review).
+Any failure rolls the whole event back. Startup recomputes every sealed event's sums and hashes (and the stored signed
+transactions' hashes) and refuses to run on any inconsistency - fail closed.
 """
 from __future__ import annotations
 
@@ -24,7 +22,7 @@ import time
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 3
 ON_CHAIN_MAX = (1 << 64) - 1          # one instruction's amount (u64); books themselves may hold wider aggregates
 BOOK_MAX = (1 << 127) - 1
 NONNEGATIVE = ("cash", "reserved", "inventory", "rent")    # an account's holdings; external and unresolved books may
@@ -46,132 +44,16 @@ def _sha(x) -> str:
     return hashlib.sha256((x if isinstance(x, str) else json.dumps(x, sort_keys=True)).encode()).hexdigest()
 
 
-def content_hash(account_id: str, kind: str, legs: list, payload, effects=(), corrects=None) -> str:
-    """What makes two appends the same economic event: account, kind, the event it corrects, ordered legs, payload,
-    and its effect locators (rev 4: a retry naming another fill or fee is a conflict, not a replay). Independent
-    effects are a set: their order isn't meaningful."""
-    return _sha([account_id, kind, corrects, [[b, a, str(x)] for b, a, x in legs], payload,
-                 sorted([str(e), str(loc)] for e, loc in effects)])
-
-
-def outcome_of(slot, err, history_searched: bool, block_height) -> str:
-    """An observation's typed outcome - what it can prove (schema.sql's CHECK holds the same rule)."""
-    if slot is not None and err is None:
-        return "success"
-    if slot is not None and err not in (None, "absent"):
-        return "executed_failure"
-    if slot is None and err == "absent" and history_searched and block_height is not None:
-        return "absent"
-    return "inconclusive"
-
-
-def check_tx_association(signed_tx: bytes, signature: str, blockhash: str) -> None:
-    """The stored bytes ARE the recorded transaction: their first signature and recent blockhash are the attempt's
-    (a byte hash alone proves storage integrity, not this). Raises LedgerError otherwise."""
-    from solders.transaction import Transaction, VersionedTransaction
-    for cls in (VersionedTransaction, Transaction):
-        try:
-            tx = cls.from_bytes(bytes(signed_tx))
-        except Exception:                                # noqa: BLE001 - not this encoding
-            continue
-        sig, bh = str(tx.signatures[0]), str(tx.message.recent_blockhash)
-        if sig != signature or bh != blockhash:
-            raise LedgerError(f"signed bytes carry signature {sig[:8]}... / blockhash {bh[:8]}..., not the attempt's")
-        return
-    raise LedgerError("signed bytes aren't a Solana transaction")
-
-
-def _statements(text: str) -> list[str]:
-    """The DDL as single statements (sqlite3.complete_statement splits it safely, triggers included)."""
-    out, buf = [], ""
-    for line in text.splitlines(keepends=True):
-        if line.lstrip().startswith("--") and not buf.strip():
-            continue
-        buf += line
-        if sqlite3.complete_statement(buf):
-            if buf.strip():
-                out.append(buf.strip())
-            buf = ""
-    if buf.strip():
-        raise LedgerError("schema.sql ends with an incomplete statement")
-    return out
-
-
-def _empty(path: Path) -> bool:
-    """No file, a zero-byte file, or a database with no objects at all (e.g. a creation that rolled back): new."""
-    if not path.exists() or path.stat().st_size == 0:
-        return True
-    try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
-            return con.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
-        finally:
-            con.close()
-    except sqlite3.DatabaseError:
-        return False                                     # not a database: _inspect quarantines it
-
-
-def _shape(con: sqlite3.Connection) -> dict:
-    """A database's structure, normalized: every table, index and trigger's SQL by name (SQLite stores the DDL text)."""
-    return {(t, n): " ".join((q or "").split()) for t, n, q in con.execute(
-        "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")}
-
-
-def _inspect(path: Path, text: str, sha: str) -> None:
-    """An EXISTING file opens only if it carries exactly this version's stamp AND exactly this version's structure.
-    Read-only: an unstamped file (the revision-3 writer created `migrations` and left it empty), another version or
-    hash, or a structure that differs (old tables keep their old columns under CREATE ... IF NOT EXISTS) is QUARANTINED
-    untouched - migrate it explicitly, from a copy (a thirteenth review)."""
-    try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
-            names = {r[0] for r in con.execute("SELECT name FROM sqlite_master")}
-            rows = con.execute("SELECT version, sha256 FROM migrations").fetchall() if "migrations" in names else None
-            shape = _shape(con)
-        finally:
-            con.close()
-    except sqlite3.DatabaseError as ex:
-        raise LedgerError(f"quarantined: {path.name} isn't a readable ledger database ({ex})") from None
-    if rows != [(SCHEMA_VERSION, sha)]:
-        raise LedgerError(f"quarantined: {path.name} carries stamp {rows}, not version {SCHEMA_VERSION} ({sha[:12]}); "
-                          f"migrate it explicitly - it isn't read as current")
-    ref = sqlite3.connect(":memory:")
-    try:
-        for stmt in _statements(text):
-            ref.execute(stmt)
-        want = _shape(ref)
-    finally:
-        ref.close()
-    if shape != want:
-        diff = sorted(set(shape) ^ set(want)) or sorted(k for k in want if shape.get(k) != want[k])
-        raise LedgerError(f"quarantined: {path.name}'s structure isn't version {SCHEMA_VERSION}'s ({diff[:3]})")
-
-
-def _obs_digest(signature, event_index, commitment, source, slot, err, content_sha256, block_height, history_searched,
-                outcome) -> str:
-    return _sha(json.dumps([signature, event_index, commitment, source, slot, err, content_sha256, block_height,
-                            int(history_searched), outcome]))
+def content_hash(account_id: str, kind: str, legs: list, payload) -> str:
+    """What makes two appends the same economic event: account, kind, ordered legs and payload."""
+    return _sha([account_id, kind, [[b, a, str(x)] for b, a, x in legs], payload])
 
 
 class Ledger:
     def __init__(self, path: str | Path = ":memory:", code_revision: str = "reference", fault=None):
-        text = SCHEMA.read_text()
-        sha = hashlib.sha256(text.encode()).hexdigest()
-        new = str(path) == ":memory:" or _empty(Path(path))
-        if not new:
-            _inspect(Path(path), text, sha)              # BEFORE anything is executed on it: refused files stay as they were
         self.db = sqlite3.connect(str(path), isolation_level=None)
         self.db.execute("PRAGMA foreign_keys = ON")
-        if new:                                          # a new file: its schema and stamp in one transaction
-            self.db.execute("BEGIN IMMEDIATE")
-            try:
-                for stmt in _statements(text):
-                    self.db.execute(stmt)
-                self.db.execute("INSERT INTO migrations VALUES (?, ?, ?)", (SCHEMA_VERSION, sha, time.time()))
-                self.db.execute("COMMIT")
-            except BaseException:
-                self.db.execute("ROLLBACK")
-                raise
+        self.db.executescript(SCHEMA.read_text())
         self.code = code_revision
         self.fault = fault                # tests: fault(point) may raise at 'open', 'postings', 'sealed', 'committed'
 
@@ -192,12 +74,9 @@ class Ledger:
         for seq, book, asset, amount in self.db.execute("SELECT seq, book_id, asset, amount FROM postings ORDER BY seq, leg"):
             posts.setdefault(seq, []).append([book, asset, amount])
         checked = 0
-        effs: dict[int, list] = {}
-        for seq, effect, locator in self.db.execute("SELECT seq, effect, locator FROM effects"):
-            effs.setdefault(seq, []).append((effect, locator))
-        for seq, acct, kind, payload, psha, key, csha, sums, ssha, corrects in self.db.execute(
+        for seq, acct, kind, payload, psha, key, csha, sums, ssha in self.db.execute(
                 "SELECT seq, account_id, kind, payload, payload_sha256, effect_key, content_sha256, seal_sums, "
-                "seal_sha256, corrects FROM events WHERE status = 'sealed' ORDER BY seq"):
+                "seal_sha256 FROM events WHERE status = 'sealed' ORDER BY seq"):
             legs = posts.get(seq, [])
             total: dict[str, int] = {}
             for _, a, x in legs:
@@ -206,7 +85,7 @@ class Ledger:
                 problems.append(f"event {seq}: no effect key or content hash (not written by the writer)")
             if _sha(payload) != psha:
                 problems.append(f"event {seq}: payload hash mismatch")
-            elif csha and content_hash(acct, kind, legs, json.loads(payload), effs.get(seq, ()), corrects) != csha:
+            elif csha and content_hash(acct, kind, legs, json.loads(payload)) != csha:
                 problems.append(f"event {seq}: content hash mismatch")
             if not legs or any(v != 0 for v in total.values()):
                 problems.append(f"event {seq}: postings don't balance {total}")
@@ -221,27 +100,9 @@ class Ledger:
             kind = self.db.execute("SELECT kind FROM books WHERE book_id = ?", (book,)).fetchone()
             if kind and kind[0] in NONNEGATIVE and v < 0:
                 problems.append(f"{book} holds {v} {asset}")
-        obs = {}
-        for row in self.db.execute("SELECT obs_id, signature, event_index, commitment, source, slot, err, content_sha256, "
-                                   "block_height, history_searched, outcome, digest FROM observations"):
-            oid, *fields, digest = row
-            obs[oid] = fields
-            if _obs_digest(*fields) != digest or outcome_of(fields[4], fields[5], bool(fields[8]), fields[7]) != fields[9]:
-                problems.append(f"observation {oid}: its digest or outcome doesn't match what it says")
-        need = {"landed_ok": "success", "landed_failed": "executed_failure", "expired_absent": "absent"}
-        last = dict(self.db.execute("SELECT attempt_id, to_state FROM attempt_transitions t WHERE n = "
-                                    "(SELECT MAX(n) FROM attempt_transitions WHERE attempt_id = t.attempt_id)"))
-        for aid, tx, sha, state, sig, lvh, by in self.db.execute(
-                "SELECT attempt_id, signed_tx, tx_sha256, state, signature, last_valid_height, resolved_by FROM attempts"):
+        for aid, tx, sha in self.db.execute("SELECT attempt_id, signed_tx, tx_sha256 FROM attempts"):
             if hashlib.sha256(tx).hexdigest() != sha:
                 problems.append(f"attempt {aid}: signed transaction doesn't match its hash")
-            if state in need:
-                o = obs.get(by)
-                if o is None or o[0] != sig or o[2] != "finalized" or o[9] != need[state] or \
-                        (state == "expired_absent" and not (o[7] or 0) > lvh):
-                    problems.append(f"attempt {aid}: {state} without the finalized observation that proves it")
-            if aid in last and last[aid] != state:
-                problems.append(f"attempt {aid}: its state isn't the last one its history recorded")
         if problems:
             raise LedgerError("refusing to run (fail closed): " + "; ".join(problems[:20]))
         return {"events": checked, "postings": sum(len(v) for v in posts.values())}
@@ -270,8 +131,7 @@ class Ledger:
         legs = [(b, a, x, (rest[0] if rest else False)) for b, a, x, *rest in legs]
         body = json.dumps(payload, sort_keys=True)
         texts = [(b, a, canonical(x)) for b, a, x, _ in legs]
-        effects = tuple((str(e), str(loc)) for e, loc in effects)
-        chash = content_hash(account_id, kind, texts, json.loads(body), effects, corrects)
+        chash = content_hash(account_id, kind, texts, json.loads(body))
         began = committed = False
         try:
             self.db.execute("BEGIN IMMEDIATE")
@@ -361,21 +221,15 @@ class Ledger:
 
     # ---- chain observations
     def observe(self, signature: str, event_index, commitment: str, source: str, slot, err, content_sha256,
-                observed_at: float | None = None, block_height: int | None = None,
-                history_searched: bool = False) -> int:
-        """Append an observation; its obs_id (an identical one already kept: that one's). Its OUTCOME is typed from
-        what it says (`outcome_of`): only a landed slot with no error is a success, a landed slot with an error an
-        executed failure, and only a full-history search that found nothing an absence. Identical observations dedupe
-        by digest; a contradictory one is kept beside the first - never refused, never edited (append-only)."""
-        hs = 1 if history_searched else 0
-        outcome = outcome_of(slot, err, bool(hs), block_height)
-        digest = _obs_digest(signature, event_index, commitment, source, slot, err, content_sha256, block_height, hs,
-                             outcome)
+                observed_at: float | None = None, block_height: int | None = None) -> int:
+        """Append an observation; its obs_id (an identical one already kept: that one's). Identical observations dedupe
+        by digest; a contradictory one (same source and commitment, other slot/error/content) is kept beside the
+        first, for ranking - never refused, never edited (the table is append-only)."""
+        digest = _sha(json.dumps([signature, event_index, commitment, source, slot, err, content_sha256, block_height]))
         cur = self.db.execute("INSERT OR IGNORE INTO observations (signature, event_index, commitment, source, slot, err, "
-                              "content_sha256, block_height, history_searched, outcome, observed_at, digest) "
-                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                              (signature, event_index, commitment, source, slot, err, content_sha256, block_height, hs,
-                               outcome, observed_at or time.time(), digest))
+                              "content_sha256, block_height, observed_at, digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (signature, event_index, commitment, source, slot, err, content_sha256, block_height,
+                               observed_at or time.time(), digest))
         if cur.rowcount:
             return cur.lastrowid
         return self.db.execute("SELECT obs_id FROM observations WHERE digest = ?", (digest,)).fetchone()[0]
@@ -387,11 +241,8 @@ class Ledger:
                                                                 time.time()))
 
     def sign(self, attempt_id: str, order_id: str, signature: str, blockhash: str, last_valid_height: int,
-             signed_tx: bytes, verify: bool = False) -> None:
-        """Record a signed transaction BEFORE it's sent: its exact bytes, signature and expiry, in one row. `verify`
-        (required once real orders flow through it): the bytes must BE that signature and blockhash."""
-        if verify:
-            check_tx_association(signed_tx, signature, blockhash)
+             signed_tx: bytes) -> None:
+        """Record a signed transaction BEFORE it's sent: its exact bytes, signature and expiry, in one row."""
         self.db.execute("INSERT INTO attempts (attempt_id, order_id, signature, blockhash, last_valid_height, signed_tx, "
                         "tx_sha256, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'signed', ?)",
                         (attempt_id, order_id, signature, blockhash, last_valid_height, bytes(signed_tx),

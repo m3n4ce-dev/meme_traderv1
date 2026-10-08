@@ -34,6 +34,8 @@ DAYS, MAX_DAYS = 14, 28             # the window; extended a whole day at a time
 TARGETS = {"eventual": 0.95, "first_try": 0.90}
 MIN_EXITS_PER_CELL, MIN_POOLS, MIN_POOL_DAYS = 200, 30, 100
 BOOT, SEED, Z = 2000, 20261008, 1.6449
+BLOCKS_REPORTED = (1, 3, 6, 24)    # hours: each exit cell's block bound at every one of these is reported
+BLOCK_H = 6                         # the verdict's block (amendment 2) - provisional until the calibration fixes it
 HOLDS = ("hold 1 h", "hold 2 h")
 DELAYS = (5, 60)
 
@@ -72,6 +74,45 @@ def wilson_lower(k: int, n: int, z: float = Z) -> float | None:
     return round(max(0.0, (c - h) / (1 + z * z / n)), 4)
 
 
+def cp_lower(k: int, n: int, alpha: float = 0.05) -> float | None:
+    """The exact one-sided (1 - alpha) Clopper-Pearson lower bound for k successes in n: the p at which
+    P(X >= k | n, p) = alpha. All n successes give alpha ** (1/n) - never 1.0."""
+    if n == 0:
+        return None
+    if k == 0:
+        return 0.0
+
+    def tail(p):                                         # P(X >= k), in logs (n is a few hundred blocks at most)
+        if p <= 0:
+            return 0.0
+        if p >= 1:
+            return 1.0
+        lp, lq = math.log(p), math.log1p(-p)
+        return sum(math.exp(math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * lp + (n - i) * lq)
+                   for i in range(k, n + 1))
+    lo, hi = 0.0, 1.0
+    for _ in range(80):
+        mid = (lo + hi) / 2
+        if tail(mid) < alpha:
+            lo = mid
+        else:
+            hi = mid
+    return round(lo, 4)
+
+
+def block_bound(rows: list[dict], hit: list[bool], hours: float) -> dict:
+    """Time blocks as the unit (amendment 2, a thirteenth review: provider outages hit every pool at once, so pools and
+    pool-days aren't independent evidence). A UTC block of `hours` with at least one matured job is CLEAN when every
+    job due in it succeeded; the share of clean blocks lower-bounds the block-average availability, and its exact
+    Clopper-Pearson bound holds IF provider states are independent across such blocks (the stated assumption)."""
+    blocks: dict = {}
+    for r, h in zip(rows, hit):
+        b = int(r["due"] // (hours * 3600))
+        blocks[b] = blocks.get(b, True) and bool(h)
+    n, k = len(blocks), sum(blocks.values())
+    return {"hours": hours, "blocks": n, "clean": k, "lower": cp_lower(k, n)}
+
+
 def cluster_lower(groups: list[tuple[int, int]], boots: int = BOOT, seed: int = SEED) -> float | None:
     """The 5th percentile of the success share over bootstrap resamples of whole clusters (pool-days)."""
     if not groups:
@@ -105,22 +146,29 @@ def _cell_stats(rows: list[dict]) -> dict:
                     g[r["cluster"]][0] += h
                     g[r["cluster"]][1] += 1
                 out[f"{est}_{when}"]["clustered_lower"] = cluster_lower([tuple(v) for v in g.values()])
+                out[f"{est}_{when}"]["block_lower"] = {f"{h}h": block_bound(rows, hit, h) for h in BLOCKS_REPORTED}
     return out
 
 
 def _passes(cells: dict, est: str) -> bool:
-    return all((c[f"{est}_eventual"]["clustered_lower"] or 0) >= TARGETS["eventual"] and
-               (c[f"{est}_first_try"]["clustered_lower"] or 0) >= TARGETS["first_try"] for c in cells.values())
+    """Every exit cell's block bound (BLOCK_H hours) meets both targets (amendment 2; the pool-day bootstrap is kept
+    as a diagnostic only - it reads 1.0 whenever everything succeeded, whatever the dependence)."""
+    key = f"{BLOCK_H}h"
+    return all((c[f"{est}_eventual"]["block_lower"][key]["lower"] or 0) >= TARGETS["eventual"] and
+               (c[f"{est}_first_try"]["block_lower"][key]["lower"] or 0) >= TARGETS["first_try"] for c in cells.values())
 
 
 def load(db: Path) -> list[dict]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    rows = con.execute("SELECT id, kind, pool, due, deadline, state, tries, result, meta FROM jobs").fetchall()
+    have = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+    known = "due_known" if "due_known" in have else "1"
+    rows = con.execute(f"SELECT id, kind, pool, due, deadline, state, tries, result, meta, {known} FROM jobs").fetchall()
     con.close()
     out = []
-    for key, kind, pool, due, deadline, state, tries, result, meta in rows:
+    for key, kind, pool, due, deadline, state, tries, result, meta, due_known in rows:
         m, r = json.loads(meta or "{}"), json.loads(result or "{}")
-        out.append({"id": key, "kind": kind, "pool": pool, "due": due, "deadline": deadline, "state": state,
+        out.append({"id": key, "kind": kind, "pool": pool, "due": due, "due_known": bool(due_known),
+                    "deadline": deadline, "state": state,
                     "tries": tries, "r": r, "m": m, "arm": "control" if m.get("control") else "signal",
                     "delay": m.get("delay"), "hold": m.get("exit") if kind == "exit" else None, "rule": m.get("rule")})
     return out
@@ -140,7 +188,11 @@ def _guards(jobs: list[dict]) -> dict:
 def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> dict:
     now = time.time() if now is None else now
     start = _day0(start_day)
-    every = load(db)
+    loaded = load(db)
+    # `due` is each job's SCHEDULED time (immutable since book version 2): window, pool-day and recovery use it. A
+    # job whose scheduled time was lost to an old retry (`due_known` false) can't be placed: kept out, and counted
+    every = [j for j in loaded if j["due_known"]]
+    unplaced = sum(1 for j in loaded if not j["due_known"] and start <= j["due"] < start + MAX_DAYS * 86400)
     days, status = DAYS, "running"
     while True:
         end = start + days * 86400
@@ -221,6 +273,7 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
     return {"window": {"start_utc": start_day, "days": days, "end_ts": end, "complete": complete,
                        "pending_jobs": pending, "jobs": len(win)},
             "status": status, "verdict": verdict, "guards": g, "targets": TARGETS, "cells": cells,
+            "jobs_with_unknown_scheduled_time": unplaced,
             "outages": {"unavailable_runs": len(runs), "longest_run_jobs": len(longest),
                         "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0},
             "recovery_s": q(rec), "clock": {k: q(v) for k, v in clock.items()}, "by_rule": by_rule,

@@ -480,6 +480,18 @@ class Export:
             for r in jobs:
                 f.write(json.dumps(r) + "\n")
         self._note("quote_jobs.jsonl", rows=len(jobs))
+        ids = {j["job_id"] for j in jobs}                # the export's own joins, checked end to end (13th review)
+        keys = [(r["job_id"], r["attempt_n"]) for r in rows]
+        tried = {r["job_id"] for r in rows}
+        check = {"export_version": jobs[0]["export_version"] if jobs else None, "jobs": len(jobs), "attempts": len(rows),
+                 "duplicate_attempt_keys": len(keys) - len(set(keys)),
+                 "attempts_without_a_job": sum(1 for r in rows if r["job_id"] not in ids),
+                 "jobs_with_zero_attempts": sum(1 for j in jobs if j["job_id"] not in tried),
+                 "jobs_with_unknown_scheduled_time": sum(1 for j in jobs if not j["due_known"]),
+                 "attempts_by_record_version": dict(Counter(str(r["record"].get("v", 1)) for r in rows))}
+        (self.out / "quote_export_check.json").write_text(json.dumps(check, indent=1))
+        if check["duplicate_attempt_keys"] or check["attempts_without_a_job"]:
+            self.findings.append(f"Quote export joins aren't clean: {check}")
 
     def fork_conflicts(self) -> None:
         """data/fork_conflicts.jsonl (from the ninth review's code on): every fork conflict by a stable id, matched
