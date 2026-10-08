@@ -45,6 +45,7 @@ RETRY_EVERY_S, RETRY_S = 30, 900     # an exit with no valid quote: retried this
 # final at once, not retried every 30 s for 15 minutes
 PERMANENT = {"non_sol_quote", "mint_extensions", "unsupported_layout", "wrong_owner", "vault_mismatch",
              "vault_program_mismatch"}
+HEARTBEAT_S, HEARTBEAT_GAP_S = 60, 180   # the watcher's liveness: extended this often; a longer silence is a new one
 ENTRY_GRACE_S = 60                   # an entry quote is tried for this long after its decision, then skipped
 TX_COST_SOL = 0.001005               # one transaction's priority + base fee (the paper bot's), for net P&L
 # an attempt record's schema: 2 = qualification reasons, account hashes, the job clock (an eleventh review). A record
@@ -54,7 +55,11 @@ TX_COST_SOL = 0.001005               # one transaction's priority + base fee (th
 # twelfth review). Version 2's "undocumented bytes" were judged by the 271-byte layout.
 # 4 = version 3 plus every account's raw public bytes (base64) beside its hash, so an auditor can re-derive every
 # qualification input, not only the pool's (a thirteenth review). The qualification rules are version 3's.
-RECORD_VERSION = 4
+# 5 = version 4 plus READ-STAGE evidence (a fifteenth review): `reads` lists every network read the attempt made -
+# its stage (discover / accounts), start and end, and whether it responded or failed - so an observer can tell an
+# answer from the provider from a cached or local refusal that made no read at all (an empty list). An exception
+# outside any read is `local_error`, no longer `rpc_error`. The qualification rules are version 3's.
+RECORD_VERSION = 5
 EXPORT_VERSION = 2                   # the package's quote rows: job_id / attempt_n / meta / record, never merged
 FRESHNESS_REF = "the feed's newest slot at confirmed"
 
@@ -151,6 +156,10 @@ def rpc_accounts(url: str, keys: list[str], timeout: float = 8.0) -> tuple[int, 
                                          for a in res["value"]]
 
 
+class ReadFailed(Exception):
+    """A network read failed (its cause is the original exception)."""
+
+
 class Quoter:
     """Quotes `pool` for a buy of `amount` lamports or a sell of `amount` base atoms. `url()` gives the RPC URL (never
     recorded: only its host), `ref_slot()` the feed's newest slot at the same commitment (0 = unknown)."""
@@ -160,8 +169,24 @@ class Quoter:
         self.static: dict[str, dict] = {}                # pool -> the accounts it pointed at when discovered
         self.global_config, self.fee_config = global_config_address(), fee_config_address()
 
-    def _discover(self, pool: str) -> dict:
-        _, (acc,) = self.fetch(self.url(), [pool])
+    def _read(self, rec: dict, stage: str, url: str, keys: list[str]):
+        """One network read, recorded as evidence whatever happens: its stage, when it started and ended, and whether
+        the provider responded (any decodable answer) or the read failed (timeout, HTTP or RPC error, a malformed
+        answer). A failure is re-raised as ReadFailed, so the attempt's reason says the READ failed."""
+        r = {"stage": stage, "started_at": round(self.clock(), 3)}
+        rec["reads"].append(r)
+        try:
+            out = self.fetch(url, keys)
+        except Exception as ex:                          # noqa: BLE001 - classified below, never swallowed
+            r.update(ended_at=round(self.clock(), 3), outcome="failed", error=safe_error(ex)["error"])
+            raise ReadFailed(ex) from ex
+        r.update(ended_at=round(self.clock(), 3), outcome="responded")
+        if isinstance(out, tuple) and out and isinstance(out[0], int):
+            r["context_slot"] = out[0]
+        return out
+
+    def _discover(self, pool: str, rec: dict) -> dict:
+        _, (acc,) = self._read(rec, "discover", rec["_url"], [pool])
         if acc is None:
             raise Reject("missing_account", "pool")
         owner, data = acc
@@ -181,18 +206,19 @@ class Quoter:
             from .research import code_revision
             self.code = code_revision()
         rec = {"v": RECORD_VERSION, "code": self.code, "pool": pool, "side": side, "amount": str(amount),
-               "requested_at": round(self.clock(), 3), "commitment": COMMITMENT}
+               "requested_at": round(self.clock(), 3), "commitment": COMMITMENT, "reads": []}
         try:
             url = self.url()
             register(url)                                # its key is redacted wherever an error text carries it
             rec["host"] = urlparse(url).hostname or ""
-            st = self.static.get(pool) or self._discover(pool)
+            rec["_url"] = url
+            st = self.static.get(pool) or self._discover(pool, rec)
             if st["quote_mint"] != ps.WSOL:
                 raise Reject("non_sol_quote", st["quote_mint"])
             keys = [pool, st["pool_base_token_account"], st["pool_quote_token_account"], st["base_mint"],
                     self.global_config, self.fee_config]
             t0 = self.clock()
-            slot, accs = self.fetch(url, keys)
+            slot, accs = self._read(rec, "accounts", url, keys)
             rec["responded_at"] = round(self.clock(), 3)
             rec["response_s"] = round(rec["responded_at"] - t0, 3)
             rec["context_slot"], rec["ref_slot"] = slot, int(self.ref_slot() or 0)
@@ -270,11 +296,16 @@ class Quoter:
             rec["reason"] = "ok"
         except Reject as ex:
             rec["reason"], rec["detail"] = ex.reason, ex.detail[:200]
-        except Exception as ex:                          # the RPC itself: timeouts, HTTP errors, malformed answers
+        except ReadFailed as rf:                         # the read itself: timeouts, HTTP errors, malformed answers
+            ex = rf.__cause__ or rf
             # never the exception's own text: an HTTP error's message is its whole request URL, key included
             rec["error"] = safe_error(ex)
             rec["reason"] = "timeout" if "imeout" in rec["error"]["error"] else "rpc_error"
             rec["detail"] = describe(ex)
+        except Exception as ex:                          # outside any read: this code (or its configuration), not the RPC
+            rec["error"] = safe_error(ex)
+            rec["reason"], rec["detail"] = "local_error", describe(ex)
+        rec.pop("_url", None)
         rec["finished_at"] = round(self.clock(), 3)      # when this quote (or its refusal) was in hand
         return rec
 
@@ -365,6 +396,10 @@ class QuoteBook:
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_next ON jobs (state, next_at)")
         self.db.execute("CREATE TABLE IF NOT EXISTS attempts (job TEXT NOT NULL, n INTEGER NOT NULL, rec TEXT NOT NULL, "
                         "PRIMARY KEY (job, n))")
+        # the PROCESS heartbeat (a fifteenth review): intervals in which the watcher's loop was running, so time with
+        # no observing read can be told apart - the process up and reading nothing, or the process down
+        self.db.execute("CREATE TABLE IF NOT EXISTS liveness (start REAL PRIMARY KEY, last REAL NOT NULL, code TEXT)")
+        self._alive = None                               # [start, last] of the interval this process is extending
         self.quoter, self.clock = quoter, clock
         self.lock = threading.Lock()                     # the event loop requests while a worker thread runs jobs
         self._view, self._view_at = None, 0.0
@@ -413,6 +448,7 @@ class QuoteBook:
         b = cls.__new__(cls)
         b.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None, check_same_thread=False)
         b.quoter, b.clock, b.lock, b._view, b._view_at = None, time.time, threading.Lock(), None, 0.0
+        b._alive = None
         b.migrated = b.db.execute("PRAGMA user_version").fetchone()[0] >= cls.BOOK_VERSION
         return b
 
@@ -446,6 +482,7 @@ class QuoteBook:
         was IN HAND by the deadline - `usable_at` (when the read was validated and priced) <= deadline, inclusive.
         A quote that arrives later is kept as an attempt but never accepted, and never re-timed into the window: a
         late entry is skipped, a late exit unmeasured (`late_response`). Every attempt is persisted, ok or not."""
+        self._beat(self.clock() if now is None else now)
         jobs = self.due(self.clock() if now is None else now, limit)
         for key, kind, pool, side, amount, due, deadline, tries, meta in jobs:
             meta = json.loads(meta or "{}")
@@ -506,6 +543,26 @@ class QuoteBook:
                             pass
                     raise
         return len(jobs)
+
+    def _beat(self, now: float) -> None:
+        """Extend this process's liveness interval at most once every HEARTBEAT_S; a new interval after a gap of more
+        than HEARTBEAT_GAP_S (or in a new process)."""
+        if self._alive is not None and now - self._alive[1] < HEARTBEAT_S:
+            return
+        code = getattr(self.quoter, "code", None) if self.quoter is not None else None
+        with self.lock:
+            if self._alive is None or now - self._alive[1] > HEARTBEAT_GAP_S:
+                self._alive = [now, now]
+                self.db.execute("INSERT OR REPLACE INTO liveness (start, last, code) VALUES (?, ?, ?)", (now, now, code))
+            else:
+                self._alive[1] = now
+                self.db.execute("UPDATE liveness SET last = ? WHERE start = ?", (now, self._alive[0]))
+
+    def liveness(self) -> list[tuple[float, float]]:
+        try:
+            return [tuple(r) for r in self.db.execute("SELECT start, last FROM liveness ORDER BY start")]
+        except sqlite3.OperationalError:                 # a book from before the heartbeat: none recorded
+            return []
 
     def _finish(self, key: str, state: str, rec: dict) -> None:
         self.db.execute("UPDATE jobs SET state = ?, result = ? WHERE id = ?", (state, json.dumps(rec), key))
