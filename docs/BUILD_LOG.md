@@ -4,6 +4,47 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-08 — Entry #79: The thirteenth review: the retry clock, export identity, the ledger file gate, executed SDK goldens, and why Q1 can't certify 95% in 14 days
+
+**Source:** a thirteenth external review (GPT 6.1 Sol, revision 63dc235).
+- **The previous round's six findings held** under the reviewer's tests.
+- **The reviewer executed the official SDK 2.1.0:** all 294 raw results and errors match ours exactly.
+- **Its 9 new properties:** 6 failed before, and **all 9 pass now.**
+- **Its 80 earlier contracts pass;** the 2 old direct-SQL fixtures fail by design (strict versions pass).
+- **Suite:** 1,123 passed (it includes the 294 SDK cases).
+
+1. **The retry clock** (R13-A, `quotes.py`). Retries had written their next attempt into `due`, the job's scheduled time. That time is also:
+   - the hold clock a qualified round trip checks;
+   - Q1's window and pool-day;
+   - the recovery baseline.
+
+   **The fix:** `due` is now immutable, and retries use `next_at`.
+   - **Effects of the old behaviour:** a recovered exit lost its qualification, a 32 s recovery read as 1 s, and a retry could push an exit out of the window.
+   - **The migration** runs once (book version 2). Old jobs whose time a retry overwrote are marked `due_known = 0`, never reconstructed: 3 jobs in the live book. Q1 places jobs only by known scheduled times.
+   - **Tested:** retries across midnight and restarts, a missed job, and the migration.
+2. **Export identity** (R13-B): an attempt's own `job` clock had overwritten its job id when the record was flattened (156 of 256 exported rows).
+   - **Export version 2** keeps `job_id`, `attempt_n`, `meta` (holds kept) and `record` apart.
+   - **The exporter** checks its own joins (duplicates, orphans, zero-attempt jobs, record versions).
+   - **Records v4** carry every account's raw public bytes.
+3. **The ledger's file gate** (R13-C): the constructor ran the DDL before reading the stamp, and the revision-3 writer had left `migrations` empty, so a real rev-3 file was stamped as rev 4.
+   - **Now an existing file is inspected read-only first,** and must have the exact stamp and the exact structure.
+   - **Otherwise it's quarantined untouched:** a real rev-3 file, wrong stamps, drifted structure, a non-database, read-only files. Byte-identity is checked after each refusal.
+   - **A new file** is created and stamped in one transaction, and a failed creation leaves nothing behind.
+4. **The executed SDK 2.1.0 goldens** (`tests/test_pumpswap_sdk21.py`):
+   - 294 raw cases exact, including the forward checks and 8 sweep pairs;
+   - the checked layer accepts 197, refuses 93 SDK returns, and refuses all 4 throws.
+5. **Q1's bound** (R13-D) → **amendment 2: descriptive, no formal verdict.** `research/q1_calibration.py` ran 21,600 simulated 14-day windows under common provider outages, through Q1's own code:
+   - **the pool-day bootstrap** passed up to ~40% of windows truly below 95%;
+   - **exact time-block bounds** either never pass (6 h, 24 h) or pass falsely under multi-hour outages (1 h);
+   - **a whole-day common shock** can't be certified at 95% in under about two months.
+
+   **The window still runs** 2026-10-09 to 22, on the fixed observer, and reports the estimates, block bounds with their assumptions, and the outage episodes seen. The measured outage process may become an extra availability profile in T9-E1's power. Pending the owner's confirmation.
+6. **Two reporting corrections to #78, from the reviewer:**
+   - v7's largest pass-rate change was 3.33 points (not "0 to 3");
+   - one null cell did change (A1, +1.5, hard: 3 → 2 of 1,000).
+
+---
+
 ## 2026-10-07 — Entry #78: The twelfth review: the official 287-byte Pool and real-reserve sells, Q1 moved before it opened, one cost bound, typed ledger proofs
 
 **Source:** a twelfth external review (GPT 6.1 Sol, revision 012f9dd).
