@@ -323,6 +323,7 @@ class Engine:
         # writes only its own database, every 30 s off the event loop; a divergence is a status, never an action
         self.shadow = None
         self._shadow_busy, self._shadow_at = False, 0.0
+        self._shadow_pool = None                         # ONE thread for every pass: its SQLite connection lives there
         if self.persist and not str(self.mode).startswith("live") and (self.p.get("ledger") or {}).get("shadow"):
             from .shadow_ledger import ShadowLedger
             self.shadow = ShadowLedger(DATA / f"account-{self.mode}.jsonl", DATA / f"shadow-ledger-{self.mode}.db")
@@ -2341,7 +2342,10 @@ class Engine:
         self._shadow_busy = True
         try:
             cut = self._shadow_cut()
-            await asyncio.to_thread(self.shadow.sync, None, cut)  # (sync never raises: its failures are its status)
+            if self._shadow_pool is None:                # (asyncio.to_thread would move passes between pool threads,
+                from concurrent.futures import ThreadPoolExecutor     # and SQLite refuses a connection from another)
+                self._shadow_pool = ThreadPoolExecutor(1, thread_name_prefix="shadow-ledger")
+            await asyncio.get_running_loop().run_in_executor(self._shadow_pool, self.shadow.sync, None, cut)
         finally:
             self._shadow_busy = False
 

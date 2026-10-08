@@ -42,6 +42,7 @@ A running record of decisions, research, parameters and status. Newest entries a
    - it replaces amendment 3's fitting recipe with a **nonparametric stress profile**: detected-run rate per observed hour, and duration survival at frozen horizons (30 s, 60 s, 15 min, 1 h, 2 h). Durations are partially identified, never filled in, with Bonferroni-adjusted exact upper bounds and a declared 24-hour horizon stress;
    - the profile is labelled **stress, not confidence**, until a calibration of the whole observe → bound → power pipeline, using the window's actual read times, shows coverage;
    - the profile itself awaits the owner's confirmation.
+5. **Found by turning the shadow on** (06:23 UTC, the paper bot). The offline tests ran every pass in one thread, so they missed this. The engine ran each 30-second pass through `asyncio.to_thread`, which moves between pool threads, and SQLite refuses a connection opened on another thread. Every other pass errored, then reopened. v0 had the same flaw, never hit because it was off. **The fix:** one dedicated thread for every pass, with a regression test that runs passes from separate event-loop runs.
 
 ## 2026-10-08 — Entry #80: The fourteenth review: legacy schedule provenance, an export check that sees the raw tables, transport observations, the outage-profile recipe, and the paper shadow ledger
 
