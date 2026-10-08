@@ -12,9 +12,17 @@ Two estimands, kept apart (the freeze's one change to the eleventh review's prop
 A record without qualification (from before v2) is neither. Missed jobs (zero attempts) and late responses count as
 failures - every job in the window is in its cell.
 
-Cells: exits by arm x delay x hold (8 - the guards and the verdict); entries by arm x delay (4, reported apart).
-Bounds: a one-sided 95% Wilson lower bound (the simple binomial), and the 5th percentile of a bootstrap over pool-days
-(the clustered bound, which the verdict uses). Targets: eventual >= 95%, first try >= 90%, per exit cell.
+Cells: exits by arm x delay x hold (8, the guards); entries by arm x delay (4, reported apart).
+
+Amendment 2 (a thirteenth review, before the window opened): NO FORMAL PASS/FAIL. Provider outages hit every pool at
+once, so pools and pool-days aren't independent evidence, and the pool-day bootstrap reads 1.0 whenever everything
+succeeded. research/q1_calibration.py ran whole windows under common outage processes through this code: no bound in
+the family both kept false passes <= 5% under outages of an hour or more and had power in 14-28 days (a whole-day
+shock can't be certified at 95% in under ~2 months). So the report is DESCRIPTIVE: per cell, the estimates (simple
+Wilson bound beside them), the time-block bounds (exact one-sided Clopper-Pearson on clean UTC blocks of 1/3/6/24 h,
+each valid only if provider states are independent across blocks of that length), the pool-day bootstrap (a
+diagnostic only), and the outage episodes seen - the measured outage process T9-E1's power may add as a profile.
+Targets kept for reference: eventual >= 95%, first try >= 90%.
 """
 from __future__ import annotations
 
@@ -35,7 +43,6 @@ TARGETS = {"eventual": 0.95, "first_try": 0.90}
 MIN_EXITS_PER_CELL, MIN_POOLS, MIN_POOL_DAYS = 200, 30, 100
 BOOT, SEED, Z = 2000, 20261008, 1.6449
 BLOCKS_REPORTED = (1, 3, 6, 24)    # hours: each exit cell's block bound at every one of these is reported
-BLOCK_H = 6                         # the verdict's block (amendment 2) - provisional until the calibration fixes it
 HOLDS = ("hold 1 h", "hold 2 h")
 DELAYS = (5, 60)
 
@@ -150,12 +157,21 @@ def _cell_stats(rows: list[dict]) -> dict:
     return out
 
 
-def _passes(cells: dict, est: str) -> bool:
-    """Every exit cell's block bound (BLOCK_H hours) meets both targets (amendment 2; the pool-day bootstrap is kept
-    as a diagnostic only - it reads 1.0 whenever everything succeeded, whatever the dependence)."""
-    key = f"{BLOCK_H}h"
-    return all((c[f"{est}_eventual"]["block_lower"][key]["lower"] or 0) >= TARGETS["eventual"] and
-               (c[f"{est}_first_try"]["block_lower"][key]["lower"] or 0) >= TARGETS["first_try"] for c in cells.values())
+EPISODE_GAP_S = 900                # unavailable jobs this close (no available job between) are one outage episode
+
+
+def _split(runs: list[list[dict]]) -> list[list[dict]]:
+    """Runs of consecutive unavailable jobs, split where two of them are more than EPISODE_GAP_S apart."""
+    out = []
+    for r in runs:
+        cur = [r[0]]
+        for j in r[1:]:
+            if j["due"] - cur[-1]["due"] > EPISODE_GAP_S:
+                out.append(cur)
+                cur = []
+            cur.append(j)
+        out.append(cur)
+    return out
 
 
 def load(db: Path) -> list[dict]:
@@ -220,13 +236,11 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
             status = "insufficient: a guard is short at the longest window"
         else:
             status = "complete"
+    # Amendment 2: no formal PASS/FAIL. The calibration (research/q1_calibration.py) showed no bound in this family
+    # both controls false passes under common outages of an hour or more and has power in 14-28 days; a whole-day
+    # common shock can't be certified at 95% in under ~2 months. The report is DESCRIPTIVE: estimates, the outage
+    # episodes seen, and every block bound beside the independence assumption it needs.
     verdict = None
-    if status == "complete":
-        av, qu = _passes(exit_cells, "available"), _passes(exit_cells, "qualified")
-        layout = sum(1 for j in win if j["c"]["why"] == "ok, unqualified: undocumented_pool_bytes")
-        verdict = {"availability": "PASS" if av else "FAIL",
-                   "execution_qualification": "PASS" if qu else
-                   ("FAIL (undocumented pool layout)" if av and layout else "FAIL")}
     ordered = sorted(win, key=lambda j: j["due"])          # outages: consecutive unavailable jobs, any cell
     runs, cur = [], []
     for j in ordered:
@@ -241,6 +255,10 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
     if cur:
         runs.append(cur)
     longest = max(runs, key=len, default=[])
+    # episodes on the provider's clock: unavailable jobs (any cell) less than EPISODE_GAP_S apart with no available
+    # job between them - the measured outage process that may become an availability profile in T9-E1's power
+    episodes = [{"start": r[0]["due"], "end": r[-1]["due"], "jobs": len(r),
+                 "minutes": round((r[-1]["due"] - r[0]["due"]) / 60, 1)} for r in _split(runs)]
     rec = [((j["r"].get("job") or {}).get("usable_at") or 0) - j["due"] for j in win
            if j["c"]["available"] and j["tries"] > 1]
     clock = defaultdict(list)
@@ -275,7 +293,12 @@ def report(db: Path, now: float | None = None, start_day: str = START_DAY) -> di
             "status": status, "verdict": verdict, "guards": g, "targets": TARGETS, "cells": cells,
             "jobs_with_unknown_scheduled_time": unplaced,
             "outages": {"unavailable_runs": len(runs), "longest_run_jobs": len(longest),
-                        "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0},
+                        "longest_run_minutes": round((longest[-1]["due"] - longest[0]["due"]) / 60, 1) if longest else 0,
+                        "episodes": len(episodes), "episodes_per_day": round(len(episodes) / max(days, 1), 3),
+                        "episode_minutes": sorted(e["minutes"] for e in episodes), "episode_list": episodes},
+            "assessment": "descriptive (amendment 2): no formal verdict - a block bound holds only if provider states "
+                          "are independent across blocks of its length; see block_lower per cell and "
+                          "data/research/q1_calibration.json",
             "recovery_s": q(rec), "clock": {k: q(v) for k, v in clock.items()}, "by_rule": by_rule,
             "pools_with_undocumented_bytes": len(tails),
             "note": "engineering qualification only: not a landing-rate, failed-fee or edge estimate"}
