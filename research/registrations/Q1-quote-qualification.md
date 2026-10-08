@@ -62,7 +62,15 @@
 > 5. **What's recorded:** at window close, the fitted parameters are timestamped with the code revision. The profile is added to T9-E1's power as **one more profile beside A1–A5** and the informative-missingness stress, never replacing them, with the same no-strategy-selection rule (parameters are never chosen by any strategy's P&L).
 > 6. **Probes:** fixed-schedule read-only probes would observe the provider independently of signals. They'd need the owner's authorization and a cost budget, and aren't part of this window.
 
-> **Amendment 4 (2026-10-08, ~06:20 UTC, before the window opened; the builder - the observation rules take effect with the deploy that carries them, before the window opens; the fitting specification awaits the owner's confirmation before any profile is used).** A fifteenth review.
+> **Amendment 5 (2026-10-08, ~07:00 UTC, before the window opened; the owner's go-ahead).** At ~06:50 UTC the owner wrote, in chat: *"if the new outage profile has a reason to be changed for the better then go ahead"*. That confirms amendment 4's profile and delegates improvements made before any data. Four things in amendment 4 were left open, and each could have become a choice made after seeing the data. They are now fixed, and amendment 4's profile is **code**, frozen with this document (`q1.stress_profile`, tested in `tests/test_q1_profile.py`), not only text:
+> 1. **Which product goes to power.** The READ PATH (down or degraded), not the transport alone: a stale or slow read isn't a tradeable quote either. The transport profile is reported beside it as a diagnostic.
+> 2. **One joint alpha.** Amendment 4 gave each of the five horizons 0.05/5 and the rate "the same alpha": six quantities at 1% each, 6% jointly. Now every one of the six gets **0.05/6**, so they are jointly 5% under Bonferroni.
+> 3. **From bounds to durations.** Power needs a duration distribution. It's a step distribution from the stress survival, with each bin's mass at its **upper** end (30 s, 60 s, 15 min, 1 h, 2 h) and the mass past 2 hours at the 24-hour horizon stress (the 6-hour sensitivity beside it). No run is placed below a horizon it might exceed.
+> 4. **Pooled across hosts.** The power profile pools every host's runs (runs already end at a host change, so none spans two providers), as the bot experiences them. The per-host counts are reported beside it.
+>
+> The bounds are exact (Clopper-Pearson and Poisson, by bisection) and rounded toward the stress, never away from it. Everything else in amendment 4 stands, including its label: **stress, not confidence**, until the whole pipeline is calibrated.
+
+> **Amendment 4 (2026-10-08, ~06:20 UTC, before the window opened; the builder - the observation rules take effect with the deploy that carries them, before the window opens; its profile confirmed and refined by amendment 5).** A fifteenth review.
 >
 > **The owner's decision, recorded apart from any merge or review.** On 2026-10-08 at ~05:50 UTC the owner wrote, in chat: *"you can do the measurement change if it will help or improve etc. no big deal"* - confirming amendment 2 (descriptive, no formal PASS/FAIL), under the standing delegation of 2026-10-07 (*"approve or change the 14 day measurement where you see fit"*). Merging the pull requests was never taken as confirmation.
 >
@@ -88,7 +96,7 @@
 >    - **the upper count** is the runs with `max_s > h` or no maximum.
 >
 >    No duration is assigned to a censored run.
-> 3. **The stress profile is nonparametric.** At each horizon it takes the exact one-sided Clopper-Pearson upper bound of the upper count out of n runs, at alpha = 0.05/5 per horizon (Bonferroni across the five horizons). Past 2 hours, runs still possibly running are continued to a declared **horizon stress of 24 hours**, with a sensitivity at 6 hours. The rate uses the exact Poisson upper bound on detected runs per observed hour, at the same alpha.
+> 3. **The stress profile is nonparametric.** At each horizon it takes the exact one-sided Clopper-Pearson upper bound of the upper count out of n runs, at ~~alpha = 0.05/5 per horizon (Bonferroni across the five horizons)~~ *alpha = 0.05/6 for each horizon and the rate (amendment 5)*. Past 2 hours, runs still possibly running are continued to a declared **horizon stress of 24 hours**, with a sensitivity at 6 hours. The rate uses the exact Poisson upper bound on detected runs per observed hour, at the same alpha.
 > 4. **The edge cases are declared:**
 >    - with no runs, the profile is the declared horizon stress at the rate bound for zero runs;
 >    - with every run censored, every upper count is n, so the stress is every run lasting to the horizon stress;
