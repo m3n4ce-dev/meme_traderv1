@@ -4,7 +4,6 @@ whose integrity check sees the raw tables (orphans, dropped attempts, tries agai
 import json
 import sqlite3
 
-import pytest
 
 from meme_trader.sniper import q1
 from meme_trader.sniper import quotes as q
