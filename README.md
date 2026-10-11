@@ -13,7 +13,7 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 ![The trading room: the bots at their desks and the AI team voting on a coin](docs/img/desk.png)
 <sub>The Desk tab during a real-market paper run (2026-10-06): the AI team votes out loud, with real reasons from the data.</sub>
 
-> **Status: paper trading.** The bot has only been tested with pretend money so far. Most pump.fun tokens go to zero. Nothing here is financial advice. Never trade money you can't afford to lose.
+> **Status: paused (2026-10-11).** Nine days of paper testing and measurement (2026-10-02 to 10-11) found no trading edge after real costs, so the bot is switched off ([build log #83](docs/BUILD_LOG.md)). It was only ever tested with pretend money. Most pump.fun tokens go to zero. Nothing here is financial advice. Never trade money you can't afford to lose.
 
 ## Results so far
 
@@ -26,7 +26,13 @@ Paper-first memecoin trading bots for **Solana**, in two parts:
 
 <sub>Real market, pretend money, 2026-10-03 to 10-06. Fills are modelled: a 2.5 s delay to land, curve fees, and failed orders. The paper account hit its drawdown kill switch on 10-06; testing goes on without it (below).</sub>
 
-### Where things stand (2026-10-08, [build log #61–#82](docs/BUILD_LOG.md))
+### Paused (2026-10-11, [build log #83](docs/BUILD_LOG.md))
+
+- **No edge after real costs.** The best strategy (graduation plays) was +0.3% per SOL, and negative without its 3 best trades. Everything else lost. A measured round trip costs about 4% (fees, impact, network) against the 1.2% first assumed.
+- **The bot is switched off,** so nothing that costs money is running. The graduation-v1 holdout and the Q1 window stop early and aren't reported as results.
+- **To resume:** `systemctl --user enable --now meme-sniper meme-wallets`.
+
+### Where things stood (2026-10-08, [build log #61–#82](docs/BUILD_LOG.md))
 
 - **The paper account is still halted** by its drawdown kill switch (since 2026-10-06 11:46 UTC). Lifting it is the owner's call. Research and measurement go on without it.
 - **A live price watcher measures what trading would really cost** (measurement only, nothing is sent):
