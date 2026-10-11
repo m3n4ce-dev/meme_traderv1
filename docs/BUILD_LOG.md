@@ -4,6 +4,22 @@ A running record of decisions, research, parameters and status. Newest entries a
 
 ---
 
+## 2026-10-11 — Entry #83: project paused
+
+**The bot is off.** The owner asked to turn off everything that costs money. The `meme-sniper` and `meme-wallets` services were stopped and disabled on 2026-10-11 at about 08:40 UTC. That ends all paid calls: the AI desk's Anthropic API, Helius RPC and PumpPortal. Nothing was traded live at any point. Paper data, journals and the shadow ledger stay on disk, under `data/` (not in git).
+
+**Where the research ended:**
+- **No edge was found.** Graduation plays were +0.3% per SOL, with −4.16 SOL once the best 3 trades are removed. The early sniper lost (−13.4%). The momentum-after-surge revival forward test lost to its matched controls in every cell. The paper account was halted by its drawdown kill switch on 10-06, after 158 trades and −5.52 SOL.
+- **The costs were the binding constraint.** A measured round trip costs a median 3.2% in fees and impact plus about 0.8% in network fees (Entry #61 on), against the 1.2% assumed. And graduation-v1 already lost at a 1-second delay.
+- **Two measurements stop early:**
+  - graduation-v1's holdout (verdict due ~10-17), so it gets no verdict;
+  - Q1's 14-day quote-availability window (to 10-22), which has two days of its window recorded.
+  Neither is reported as a result.
+
+**To resume:** `systemctl --user enable --now meme-sniper meme-wallets`. The paper account stays halted until the owner lifts it.
+
+---
+
 ## 2026-10-08 — Entry #82: Q1 amendment 5 - the stress profile as frozen code
 
 **Source:** the owner confirmed amendment 4's outage profile, and allowed improvements before any data. Four points in it were open and could have become choices made after seeing the data. Amendment 5 closes them, before the window opens on 2026-10-09:
